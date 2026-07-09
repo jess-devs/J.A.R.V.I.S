@@ -9,6 +9,7 @@ mod startup_checks;
 mod stt;
 mod text;
 mod tts;
+mod wake;
 
 use std::path::PathBuf;
 

@@ -15,6 +15,7 @@ use crate::errors::ConfigError;
 pub struct Config {
     pub workers: WorkersConfig,
     pub stt: SttConfig,
+    pub wake: WakeConfig,
     pub llm: LlmConfig,
     pub tts: TtsConfig,
     pub audio: AudioConfig,
@@ -27,6 +28,7 @@ impl Default for Config {
         Self {
             workers: WorkersConfig::default(),
             stt: SttConfig::default(),
+            wake: WakeConfig::default(),
             llm: LlmConfig::default(),
             tts: TtsConfig::default(),
             audio: AudioConfig::default(),
@@ -125,6 +127,37 @@ impl Default for SttConfig {
             silero_sensitivity: 0.4,
             webrtc_sensitivity: 3,
             post_speech_silence_duration: 0.6,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct WakeConfig {
+    /// false = sin gate: Jarvis responde a todo lo que transcribe.
+    pub enabled: bool,
+    /// Palabras que activan una respuesta (se matchean normalizadas y con
+    /// tolerancia a 1 letra de error de transcripción).
+    pub words: Vec<String>,
+    /// Segundos tras la última respuesta durante los que Jarvis sigue atento
+    /// y responde sin necesidad de repetir el nombre.
+    pub attention_window_secs: u64,
+    /// true = las frases ignoradas se anteponen como contexto a la siguiente
+    /// consulta real del usuario.
+    pub ambient_context: bool,
+    pub ambient_context_max: usize,
+    pub ambient_context_ttl_secs: u64,
+}
+
+impl Default for WakeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            words: vec!["jarvis".to_string()],
+            attention_window_secs: 45,
+            ambient_context: true,
+            ambient_context_max: 5,
+            ambient_context_ttl_secs: 120,
         }
     }
 }

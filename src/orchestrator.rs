@@ -10,6 +10,7 @@ use crate::llm::{self, ChatMessage, LlmProvider, Role};
 use crate::pipeline;
 use crate::stt::{SttEvent, SttWorker};
 use crate::tts::{self, TtsProvider};
+use crate::wake::{AttentionGate, GateDecision};
 
 pub struct Orchestrator {
     config: Config,
@@ -18,6 +19,7 @@ pub struct Orchestrator {
     tts: Arc<dyn TtsProvider>,
     player: AudioPlayer,
     history: Vec<ChatMessage>,
+    gate: AttentionGate,
 }
 
 impl Orchestrator {
@@ -31,6 +33,7 @@ impl Orchestrator {
             role: Role::System,
             content: config.llm.system_prompt.clone(),
         }];
+        let gate = AttentionGate::new(config.wake.clone());
 
         Ok(Self {
             config,
@@ -39,6 +42,7 @@ impl Orchestrator {
             tts: tts_provider,
             player,
             history,
+            gate,
         })
     }
 
@@ -50,8 +54,16 @@ impl Orchestrator {
                     if text.trim().is_empty() {
                         continue;
                     }
-                    tracing::info!(text = %text, "usuario dijo");
-                    self.handle_utterance(text).await;
+                    match self.gate.decide(&text) {
+                        GateDecision::Ignore => {
+                            tracing::info!(text = %text, "ignorado: sin wake word y fuera de ventana");
+                            self.gate.push_ambient(text);
+                        }
+                        GateDecision::Respond => {
+                            tracing::info!(text = %text, "usuario dijo");
+                            self.handle_utterance(text).await;
+                        }
+                    }
                 }
                 SttEvent::WorkerDied => {
                     return Err(WorkerError::Crashed(None).into());
@@ -62,9 +74,13 @@ impl Orchestrator {
     }
 
     async fn handle_utterance(&mut self, user_text: String) {
+        let content = match self.gate.take_ambient_context() {
+            Some(ambient) => format!("{ambient}\n{user_text}"),
+            None => user_text,
+        };
         self.history.push(ChatMessage {
             role: Role::User,
-            content: user_text,
+            content,
         });
 
         if let Err(e) = self.stt.mute().await {
@@ -90,6 +106,10 @@ impl Orchestrator {
             }
             Err(e) => tracing::error!(error = %e, "fallo generando la respuesta"),
         }
+
+        // Incluso si el pipeline falló: el usuario querrá reintentar sin
+        // repetir el nombre.
+        self.gate.open_window();
 
         if let Err(e) = self.stt.unmute().await {
             tracing::warn!(error = %e, "no se pudo reactivar el micrófono");

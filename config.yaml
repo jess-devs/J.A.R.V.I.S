@@ -31,6 +31,14 @@ stt:
   webrtc_sensitivity: 3
   post_speech_silence_duration: 0.6 # segundos de silencio antes de cerrar la frase
 
+wake:
+  enabled: true # false = sin gate, Jarvis responde a todo (comportamiento anterior)
+  words: ["jarvis"] # se matchean normalizadas (sin tildes) y con tolerancia a 1 letra de error
+  attention_window_secs: 45 # tras responder, sigue atento este tiempo sin necesidad del nombre
+  ambient_context: true # frases ignoradas se pasan como contexto en la siguiente consulta real
+  ambient_context_max: 5 # cuántas frases ignoradas se conservan como máximo
+  ambient_context_ttl_secs: 120 # las más viejas que esto se descartan
+
 llm:
   provider: deepseek # ollama | anthropic | openai | deepseek
   ollama:
