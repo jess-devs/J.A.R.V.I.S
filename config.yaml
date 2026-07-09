@@ -17,13 +17,17 @@ stt:
   language: "es"
   device: auto # auto | cuda | cpu — override manual de la detección automática de hardware
   whisper_model: auto # auto | tiny | base | small | medium | large-v2 | large-v3-turbo
-  # Con "auto" en CPU, el primer arranque CALIBRA: mide la velocidad real de
-  # transcripción de esta máquina y elige modelo/beam según el resultado. El
-  # perfil queda cacheado en workers/.cache/stt_profile.json (arranques
-  # siguientes instantáneos; se re-mide solo si cambia el hardware).
-  compute_type: auto # auto | float16 | int8
+  # Con "auto" hay GPU CUDA (detectada vía ctranslate2, no vía torch: el venv
+  # trae torch CPU-only) -> se usan los tiers por VRAM sin benchmark, sin pasar
+  # por la calibración/caché de CPU. Con 4GB de VRAM el tier elige "small" en
+  # float16, más preciso y más rápido que "base" int8 en CPU.
+  # En CPU (sin GPU o si se fuerza device: cpu), "auto" SÍ CALIBRA: mide la
+  # velocidad real de transcripción de esta máquina y elige modelo/beam según
+  # el resultado. El perfil queda cacheado en workers/.cache/stt_profile.json
+  # (arranques siguientes instantáneos; se re-mide solo si cambia el hardware).
+  compute_type: auto # auto | float16 | int8_float16 | int8 — "auto" usa int8_float16 en GPU (funciona en cualquier CUDA, float16 puro falla sin tensor cores) e int8 en CPU
   input_device_index: null # null = micrófono por defecto del sistema (índice de PyAudio)
-  beam_size: null # null = elegido por la calibración (5 holgado, 3 si la CPU va justa)
+  beam_size: null # null = elegido automáticamente (5 en GPU / calibración en CPU)
   cpu_threads: null # null = auto (~núcleos físicos); ctranslate2 usa solo 4 por defecto
   initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis." # ayuda a Whisper a transcribir bien el nombre
   recalibrate: false # true = ignora el caché y vuelve a medir en este arranque

@@ -17,11 +17,10 @@ la carga de torch (lenta) no bloquee la respuesta al mensaje "init".
 import json
 import os
 import platform
+import subprocess
 import sys
 import time
 import wave
-
-import torch
 
 CACHE_PATH = os.path.join(os.path.dirname(__file__), ".cache", "stt_profile.json")
 
@@ -37,8 +36,29 @@ def _log(message: str) -> None:
     print(f"[hardware_detect] {message}", file=sys.stderr, flush=True)
 
 
+def _nvidia_smi_gpu() -> tuple[str | None, float]:
+    """Nombre y VRAM (GB) de la GPU 0 vía nvidia-smi. No depende de que torch
+    este compilado con soporte CUDA (el venv trae la build CPU-only, mas
+    liviana; el motor real de inferencia es ctranslate2, no torch)."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        name, mem_mib = (part.strip() for part in out.stdout.strip().splitlines()[0].split(","))
+        return name, round(float(mem_mib) / 1024, 1)
+    except Exception:
+        return None, 0.0
+
+
 def detect() -> dict:
-    """Detecta GPU CUDA (con VRAM) y datos basicos de la CPU."""
+    """Detecta GPU CUDA (con VRAM) y datos basicos de la CPU.
+
+    La disponibilidad de CUDA se comprueba con ctranslate2 (el motor que
+    ejecuta faster-whisper), no con torch: torch.cuda.is_available() daria
+    falso con la build CPU-only del venv aunque la GPU sea perfectamente
+    utilizable para la transcripcion.
+    """
     info = {
         "cpu_name": platform.processor() or platform.machine(),
         "logical_cores": os.cpu_count() or 4,
@@ -46,11 +66,17 @@ def detect() -> dict:
         "vram_gb": 0.0,
         "gpu_name": None,
     }
-    if torch.cuda.is_available():
-        props = torch.cuda.get_device_properties(0)
+    try:
+        import ctranslate2
+
+        cuda_usable = ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        cuda_usable = False
+    if cuda_usable:
+        name, vram_gb = _nvidia_smi_gpu()
         info["device"] = "cuda"
-        info["vram_gb"] = round(props.total_memory / (1024**3), 1)
-        info["gpu_name"] = props.name
+        info["gpu_name"] = name
+        info["vram_gb"] = vram_gb
     return info
 
 
@@ -66,7 +92,12 @@ def resolve_cpu_threads(logical_cores: int, override: int | None) -> int:
 def resolve_compute_type(device: str, override: str | None) -> str:
     if override and override != "auto":
         return override
-    return "float16" if device == "cuda" else "int8"
+    # "float16" puro falla en GPUs sin tensor cores (ej. GTX 16xx / Turing
+    # TU11x: "Requested float16 compute type, but the target device or
+    # backend do not support efficient float16 computation"). int8_float16
+    # cuantiza los pesos a int8 y hace el computo en float16: funciona en
+    # cualquier GPU CUDA y es mas preciso que int8 puro.
+    return "int8_float16" if device == "cuda" else "int8"
 
 
 def _warmup_wav_path() -> str | None:
@@ -165,6 +196,8 @@ def _fingerprint(hw: dict) -> dict:
         "gpu_name": hw["gpu_name"],
         "vram_gb": hw["vram_gb"],
         "realtimestt": stt_version,
+        # Subir cuando cambie la logica de calibracion, para invalidar caches viejos.
+        "calib_version": 2,
     }
 
 

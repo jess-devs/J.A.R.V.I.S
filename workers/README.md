@@ -31,6 +31,20 @@ workers/.venv/Scripts/pip install torch --index-url https://download.pytorch.org
 
 antes de instalar el resto de `requirements.txt`.
 
+Si `requirements.txt` ya se instaló (ej. RealtimeSTT ya trajo la build CPU-only de torch como dependencia transitiva), `pip install torch --index-url ...` no la reemplaza por sí solo: pip ve el mismo número de versión base y no reinstala. Hace falta forzarlo:
+
+```powershell
+workers/.venv/Scripts/pip install torch --index-url https://download.pytorch.org/whl/cu121 --force-reinstall --no-deps
+```
+
+Verificar con `python -c "import torch; print(torch.cuda.is_available())"` — debe imprimir `True`. RealtimeSTT decide internamente si usa la GPU mirando `torch.cuda.is_available()` (no la config de Jarvis): con torch CPU-only, ignora silenciosamente `device: cuda` y cae a CPU sin avisar.
+
+Si al arrancar Jarvis falla el preflight con un error de `torchaudio` (típicamente `OSError: [WinError 127]` al cargar su extensión nativa), es porque `torchaudio` quedó compilado contra la versión de torch anterior. Reinstalarlo a la versión que corresponde a tu torch (misma versión base), con el mismo índice CUDA:
+
+```powershell
+workers/.venv/Scripts/pip install torchaudio==<version-de-torch> --index-url https://download.pytorch.org/whl/cu121 --force-reinstall --no-deps
+```
+
 ## Debug manual de un worker
 
 Cada worker lee mensajes NDJSON por stdin y escribe NDJSON (+ bytes crudos de audio en el caso de TTS) por stdout. Se puede probar a mano:
