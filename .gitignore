@@ -8,6 +8,9 @@ workers/__pycache__/
 **/__pycache__/
 *.pyc
 
+# Caché de calibración de hardware del STT (específico de cada máquina)
+workers/.cache/
+
 # Voces de Piper descargadas (pesan varias decenas de MB, se descargan aparte)
 /voices/*
 !/voices/.gitkeep

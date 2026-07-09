@@ -88,11 +88,22 @@ pub struct SttConfig {
     pub language: String,
     /// "auto" | cuda | cpu — override manual de la detección automática de hardware.
     pub device: String,
-    /// "auto" | tiny | base | small | medium | large-v2
+    /// "auto" | tiny | base | small | medium | large-v2 | large-v3-turbo.
+    /// Con "auto", el worker calibra midiendo la velocidad real de la máquina
+    /// (una sola vez, se cachea en workers/.cache/stt_profile.json).
     pub whisper_model: String,
     /// "auto" | float16 | int8 | ...
     pub compute_type: String,
     pub input_device_index: Option<u32>,
+    /// null = elegido por la calibración (5 con máquina holgada, 3 si va justa).
+    pub beam_size: Option<u8>,
+    /// null = auto (~núcleos físicos). Fija OMP_NUM_THREADS para ctranslate2,
+    /// que por defecto usa solo 4 hilos.
+    pub cpu_threads: Option<u8>,
+    /// Contexto en español para el decoder de Whisper — mejora la precisión.
+    pub initial_prompt: String,
+    /// true = ignora el caché de calibración y vuelve a medir en este arranque.
+    pub recalibrate: bool,
     pub silero_sensitivity: f32,
     pub webrtc_sensitivity: u8,
     pub post_speech_silence_duration: f32,
@@ -106,6 +117,11 @@ impl Default for SttConfig {
             whisper_model: "auto".to_string(),
             compute_type: "auto".to_string(),
             input_device_index: None,
+            beam_size: None,
+            cpu_threads: None,
+            initial_prompt: "Transcripción de una conversación hablada en español."
+                .to_string(),
+            recalibrate: false,
             silero_sensitivity: 0.4,
             webrtc_sensitivity: 3,
             post_speech_silence_duration: 0.6,

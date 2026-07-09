@@ -7,8 +7,13 @@ Protocolo (ver README.md de este directorio):
 Posee el microfono por completo. "mute"/"unmute" apagan y prenden el
 microfono real via recorder.set_microphone(), en vez de descartar eventos,
 para no gastar CPU/GPU mientras Jarvis esta hablando.
+
+El perfil de rendimiento (modelo, beam size, hilos) sale de
+hardware_detect.resolve_profile(): calibracion medida en el primer arranque,
+cacheada por fingerprint de hardware en los siguientes.
 """
 
+import os
 import sys
 import threading
 import time
@@ -28,33 +33,33 @@ def main() -> None:
         )
         sys.exit(1)
 
+    # ctranslate2 lee OMP_NUM_THREADS al cargarse (via faster-whisper) y por
+    # defecto usa solo 4 hilos: hay que fijarla ANTES de importar torch o
+    # RealtimeSTT. Hasta este punto, solo stdlib.
+    cpu_threads = init_msg.get("cpu_threads") or max(2, (os.cpu_count() or 4) // 2)
+    os.environ["OMP_NUM_THREADS"] = str(cpu_threads)
+
     import hardware_detect
 
-    hw = hardware_detect.detect()
-    device = (
-        hw["device"] if init_msg.get("device", "auto") == "auto" else init_msg["device"]
-    )
-    whisper_model = hardware_detect.resolve_whisper_model(
-        hw["vram_gb"], init_msg.get("model")
-    )
-    compute_type = hardware_detect.resolve_compute_type(
-        device, init_msg.get("compute_type")
-    )
+    profile = hardware_detect.resolve_profile(init_msg, cpu_threads)
 
     try:
         from RealtimeSTT import AudioToTextRecorder
 
         recorder = AudioToTextRecorder(
-            model=whisper_model,
+            model=profile["whisper_model"],
             language=init_msg.get("language", "es"),
-            device=device,
-            compute_type=compute_type,
+            device=profile["device"],
+            compute_type=profile["compute_type"],
             input_device_index=init_msg.get("input_device_index"),
             silero_sensitivity=init_msg.get("silero_sensitivity", 0.4),
             webrtc_sensitivity=init_msg.get("webrtc_sensitivity", 3),
             post_speech_silence_duration=init_msg.get(
                 "post_speech_silence_duration", 0.6
             ),
+            beam_size=profile["beam_size"],
+            initial_prompt=init_msg.get("initial_prompt") or None,
+            early_transcription_on_silence=profile["early_transcription"],
             spinner=False,
         )
     except Exception as exc:  # noqa: BLE001 - cualquier fallo de carga debe reportarse, no crashear silencioso
@@ -66,10 +71,14 @@ def main() -> None:
     ipc.send(
         {
             "type": "ready",
-            "device": device,
-            "compute_type": compute_type,
-            "whisper_model": whisper_model,
-            "vram_gb": hw["vram_gb"],
+            "device": profile["device"],
+            "compute_type": profile["compute_type"],
+            "whisper_model": profile["whisper_model"],
+            "vram_gb": profile["vram_gb"],
+            "beam_size": profile["beam_size"],
+            "cpu_threads": profile["cpu_threads"],
+            "rtf": profile["rtf"],
+            "from_cache": profile["from_cache"],
             "sample_rate": 16000,
         }
     )

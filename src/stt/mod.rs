@@ -36,6 +36,10 @@ impl SttWorker {
                 device: stt.device.clone(),
                 compute_type: stt.compute_type.clone(),
                 input_device_index: stt.input_device_index,
+                beam_size: stt.beam_size,
+                cpu_threads: stt.cpu_threads,
+                initial_prompt: stt.initial_prompt.clone(),
+                recalibrate: stt.recalibrate,
                 silero_sensitivity: stt.silero_sensitivity,
                 webrtc_sensitivity: stt.webrtc_sensitivity,
                 post_speech_silence_duration: stt.post_speech_silence_duration,
@@ -53,6 +57,10 @@ impl SttWorker {
                                 compute_type,
                                 whisper_model,
                                 vram_gb,
+                                beam_size,
+                                cpu_threads,
+                                rtf,
+                                from_cache,
                                 ..
                             }) => {
                                 tracing::info!(
@@ -60,6 +68,10 @@ impl SttWorker {
                                     compute_type = %compute_type,
                                     whisper_model = %whisper_model,
                                     vram_gb = %vram_gb,
+                                    beam_size = ?beam_size,
+                                    cpu_threads = ?cpu_threads,
+                                    rtf = ?rtf,
+                                    perfil_cacheado = from_cache,
                                     "STT worker listo"
                                 );
                                 return Ok(());

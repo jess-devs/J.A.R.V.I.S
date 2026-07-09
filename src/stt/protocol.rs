@@ -11,6 +11,10 @@ pub enum SttInMessage {
         device: String,
         compute_type: String,
         input_device_index: Option<u32>,
+        beam_size: Option<u8>,
+        cpu_threads: Option<u8>,
+        initial_prompt: String,
+        recalibrate: bool,
         silero_sensitivity: f32,
         webrtc_sensitivity: u8,
         post_speech_silence_duration: f32,
@@ -28,6 +32,16 @@ pub enum SttOutMessage {
         compute_type: String,
         whisper_model: String,
         vram_gb: f32,
+        #[serde(default)]
+        beam_size: Option<u8>,
+        #[serde(default)]
+        cpu_threads: Option<u8>,
+        /// Real-time factor medido en la calibración (solo camino CPU-auto).
+        #[serde(default)]
+        rtf: Option<f32>,
+        /// true si el perfil salió del caché de calibración, sin re-medir.
+        #[serde(default)]
+        from_cache: bool,
         #[allow(dead_code)]
         sample_rate: u32,
     },
