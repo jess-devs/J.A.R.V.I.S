@@ -1,0 +1,83 @@
+# Configuración de Jarvis. Todas las claves son opcionales: lo que se omita
+# usa el valor por defecto documentado acá al lado. No poner API keys en este
+# archivo — van en variables de entorno (ver .env.example), config.yaml se
+# versiona en git.
+
+workers:
+  python_executable: "workers/.venv/Scripts/python.exe" # Linux/Mac: "workers/.venv/bin/python"
+  stt_script: "workers/stt_worker.py"
+  tts_script: "workers/tts_worker.py"
+  stt_init_timeout_secs: 60
+  tts_init_timeout_secs: 20
+  shutdown_timeout_secs: 3
+  restart_on_crash: true
+  max_restarts: 1
+
+stt:
+  language: "es"
+  device: cuda # auto | cuda | cpu — override manual de la detección automática de hardware
+  whisper_model: auto # auto | tiny | base | small | medium | large-v2
+  compute_type: auto # auto | float16 | int8
+  input_device_index: null # null = micrófono por defecto del sistema (índice de PyAudio)
+  silero_sensitivity: 0.4
+  webrtc_sensitivity: 3
+  post_speech_silence_duration: 0.6 # segundos de silencio antes de cerrar la frase
+
+llm:
+  provider: deepseek # ollama | anthropic | openai | deepseek
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "qwen2.5:7b"
+  anthropic:
+    model: "claude-sonnet-4-5"
+    api_key_env: "ANTHROPIC_API_KEY"
+  openai:
+    model: "gpt-4o-mini"
+    api_key_env: "OPENAI_API_KEY"
+  deepseek:
+    model: "deepseek-v4-flash"
+    api_key_env: "DEEPSEEK_API_KEY"
+  system_prompt: >
+    Eres Jarvis, un asistente de voz en español con la personalidad de un
+    mayordomo británico: cortés, sereno, extremadamente competente y con un
+    humor seco y sutil que aparece solo cuando la ocasión lo permite. Puedes
+    dirigirte al usuario como "señor" de vez en cuando, sin abusar.
+    Tu salida se convierte directamente en audio. Nunca uses markdown ni
+    símbolos: nada de asteriscos, numerales, guiones de lista, bloques de
+    código, enlaces ni emojis. Escribe números, horas, fechas y unidades tal
+    como se pronuncian: "tres y media de la tarde", no "15:30". Evita siglas
+    poco comunes y deletreos; si algo se lee distinto de como se escribe,
+    escríbelo como suena.
+
+    Responde en una o dos oraciones, como en una conversación real. Solo te
+    extiendes si te piden explícitamente más detalle, y aun entonces hablas
+    en frases corridas, nunca en listas enumeradas.
+
+    Si no entiendes algo (el reconocimiento de voz puede fallar), pide con
+    naturalidad que lo repitan en vez de adivinar. Si una tarea excede tus
+    capacidades, admítelo con brevedad y elegancia, y ofrece una alternativa.
+  max_history_messages: 20
+  request_timeout_secs: 60
+
+tts:
+  provider: piper # piper | elevenlabs
+  piper:
+    voice_path: "voices/es_MX-claude-high.onnx"
+    config_path: "voices/es_MX-claude-high.onnx.json"
+    use_cuda: false
+  elevenlabs:
+    voice_id: ""
+    model_id: "eleven_multilingual_v2"
+    output_format: "pcm_22050"
+    api_key_env: "ELEVENLABS_API_KEY"
+  synth_timeout_secs: 10
+
+audio:
+  output_device: null # null = dispositivo de salida por defecto del sistema
+  volume: 1.0
+
+pipeline:
+  max_phrase_chars: 220
+  min_phrase_chars: 15
+
+log_level: info

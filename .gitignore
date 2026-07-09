@@ -1,0 +1,28 @@
+# Rust
+/target
+# Cargo.lock se versiona a propósito (binario, no librería) para builds reproducibles.
+
+# Python (workers)
+workers/.venv/
+workers/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Voces de Piper descargadas (pesan varias decenas de MB, se descargan aparte)
+/voices/*
+!/voices/.gitkeep
+
+# Secretos
+.env
+
+# Log que RealtimeSTT escribe en el directorio de trabajo al correr el worker de STT
+realtimesst.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# IA
+.claude
