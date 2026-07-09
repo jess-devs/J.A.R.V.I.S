@@ -25,7 +25,7 @@ stt:
   input_device_index: null # null = micrófono por defecto del sistema (índice de PyAudio)
   beam_size: null # null = elegido por la calibración (5 holgado, 3 si la CPU va justa)
   cpu_threads: null # null = auto (~núcleos físicos); ctranslate2 usa solo 4 por defecto
-  initial_prompt: "Transcripción de una conversación hablada en español." # contexto que mejora la precisión
+  initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis." # ayuda a Whisper a transcribir bien el nombre
   recalibrate: false # true = ignora el caché y vuelve a medir en este arranque
   silero_sensitivity: 0.4
   webrtc_sensitivity: 3

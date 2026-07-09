@@ -121,7 +121,8 @@ impl Default for SttConfig {
             input_device_index: None,
             beam_size: None,
             cpu_threads: None,
-            initial_prompt: "Transcripción de una conversación hablada en español."
+            initial_prompt: "Conversación en español con un asistente de voz llamado \
+                Jarvis. El usuario a veces lo llama por su nombre: Jarvis."
                 .to_string(),
             recalibrate: false,
             silero_sensitivity: 0.4,
