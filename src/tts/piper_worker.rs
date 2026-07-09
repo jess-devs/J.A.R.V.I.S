@@ -40,6 +40,8 @@ impl PiperWorkerProvider {
                 voice_path: tts.piper.voice_path.to_string_lossy().into_owned(),
                 config_path: tts.piper.config_path.to_string_lossy().into_owned(),
                 use_cuda: tts.piper.use_cuda,
+                length_scale: tts.piper.length_scale,
+                noise_w_scale: tts.piper.noise_w_scale,
             })
             .await
             .map_err(TtsError::Worker)?;

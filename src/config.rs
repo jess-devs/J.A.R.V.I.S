@@ -285,6 +285,13 @@ pub struct PiperConfig {
     pub voice_path: PathBuf,
     pub config_path: PathBuf,
     pub use_cuda: bool,
+    /// null = usa el length_scale propio de la voz (1.0). <1 = más rápido,
+    /// >1 = más lento.
+    pub length_scale: Option<f32>,
+    /// null = usa el noise_w_scale propio de la voz. Controla cuánto varía
+    /// la duración entre fonemas: un poco más que el default de la voz suena
+    /// menos monótono/robótico.
+    pub noise_w_scale: Option<f32>,
 }
 
 impl Default for PiperConfig {
@@ -293,6 +300,8 @@ impl Default for PiperConfig {
             voice_path: PathBuf::from("voices/es_MX-claude-high.onnx"),
             config_path: PathBuf::from("voices/es_MX-claude-high.onnx.json"),
             use_cuda: false,
+            length_scale: None,
+            noise_w_scale: None,
         }
     }
 }

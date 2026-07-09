@@ -9,6 +9,8 @@ pub enum TtsInMessage {
         voice_path: String,
         config_path: String,
         use_cuda: bool,
+        length_scale: Option<f32>,
+        noise_w_scale: Option<f32>,
     },
     Synthesize {
         request_id: String,

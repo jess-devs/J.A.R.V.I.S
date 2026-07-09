@@ -30,6 +30,7 @@ def main() -> None:
 
     try:
         from piper import PiperVoice
+        from piper.config import SynthesisConfig
 
         voice = PiperVoice.load(
             init_msg["voice_path"],
@@ -41,6 +42,12 @@ def main() -> None:
             {"type": "fatal_error", "code": "voice_load_failed", "message": str(exc)}
         )
         sys.exit(1)
+
+    # None = usa el valor propio de la voz (ver PiperVoice.phoneme_ids_to_audio).
+    syn_config = SynthesisConfig(
+        length_scale=init_msg.get("length_scale"),
+        noise_w_scale=init_msg.get("noise_w_scale"),
+    )
 
     sample_rate = voice.config.sample_rate
     ipc.send(
@@ -59,7 +66,7 @@ def main() -> None:
         try:
             buffer = io.BytesIO()
             with wave.open(buffer, "wb") as wav_out:
-                voice.synthesize_wav(text, wav_out)
+                voice.synthesize_wav(text, wav_out, syn_config=syn_config)
             buffer.seek(0)
             with wave.open(buffer, "rb") as wav_in:
                 header = {

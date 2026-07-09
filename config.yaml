@@ -85,6 +85,8 @@ tts:
     voice_path: "voices/es_MX-claude-high.onnx"
     config_path: "voices/es_MX-claude-high.onnx.json"
     use_cuda: false
+    length_scale: 0.9 # <1 = mas rapido, >1 = mas lento (null = ritmo original de la voz, 1.0)
+    noise_w_scale: 0.85 # variacion en la duracion de los fonemas; un poco mas que el default de la voz (0.8) suena menos monotono
   elevenlabs:
     voice_id: ""
     model_id: "eleven_multilingual_v2"
