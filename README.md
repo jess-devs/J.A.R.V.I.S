@@ -52,16 +52,16 @@ ollama pull qwen2.5:7b  # modelo default en config.yaml
 ### 3. Voz de Piper
 
 ```powershell
-workers\.venv\Scripts\python.exe -m piper.download_voices es_MX-claude-high
+workers\.venv\Scripts\python.exe -m piper.download_voices es_ES-davefx-medium
 ```
 
 El comando descarga los archivos a la carpeta actual — moveló a `voices/`:
 
 ```powershell
-Move-Item es_MX-claude-high.onnx*, voices/
+Move-Item es_ES-davefx-medium.onnx*, voices/
 ```
 
-`config.yaml` ya apunta por defecto a `voices/es_MX-claude-high.onnx`. Otras voces en español disponibles: buscá `es_MX` o `es_ES` en el catálogo de [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/es).
+`config.yaml` ya apunta por defecto a `voices/es_ES-davefx-medium.onnx` (voz masculina, acento de España). Si preferís acento mexicano, probá `es_MX-ald-medium` con el mismo procedimiento y cambiá `voice_path`/`config_path` en `config.yaml`. Otras voces en español disponibles: buscá `es_MX` o `es_ES` en el catálogo de [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/es).
 
 ### 4. Compilar y correr
 

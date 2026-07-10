@@ -297,8 +297,8 @@ pub struct PiperConfig {
 impl Default for PiperConfig {
     fn default() -> Self {
         Self {
-            voice_path: PathBuf::from("voices/es_MX-claude-high.onnx"),
-            config_path: PathBuf::from("voices/es_MX-claude-high.onnx.json"),
+            voice_path: PathBuf::from("voices/es_ES-davefx-medium.onnx"),
+            config_path: PathBuf::from("voices/es_ES-davefx-medium.onnx.json"),
             use_cuda: false,
             length_scale: None,
             noise_w_scale: None,

@@ -82,11 +82,25 @@ llm:
 tts:
   provider: piper # piper | elevenlabs
   piper:
-    voice_path: "voices/es_MX-claude-high.onnx"
-    config_path: "voices/es_MX-claude-high.onnx.json"
+    # Voces alternativas descargadas en voices/ — para probar una, comentá
+    # las 2 líneas activas de abajo y descomentá el par que quieras:
+    voice_path: "voices/es_ES-davefx-medium.onnx"       # medium, masculina, acento España (la mejor calidad masculina confirmada)
+    config_path: "voices/es_ES-davefx-medium.onnx.json"
+    # voice_path: "voices/es_ES-carlfm-x_low.onnx"          # x_low, masculina, calidad baja/robótica (activa ahora)
+    # config_path: "voices/es_ES-carlfm-x_low.onnx.json"
+    # voice_path: "voices/es_ES-sharvard-medium.onnx"     # medium, género sin confirmar — ya la probaste
+    # config_path: "voices/es_ES-sharvard-medium.onnx.json"
+    # voice_path: "voices/es_ES-mls_9972-low.onnx"        # low, género sin confirmar
+    # config_path: "voices/es_ES-mls_9972-low.onnx.json"
+    # voice_path: "voices/es_ES-mls_10246-low.onnx"       # low, género sin confirmar
+    # config_path: "voices/es_ES-mls_10246-low.onnx.json"
+    # voice_path: "voices/es_MX-claude-high.onnx"         # high, la voz original (femenina)
+    # config_path: "voices/es_MX-claude-high.onnx.json"
+    # voice_path: "voices/es_MX-ald-medium.onnx"          # medium, acento mexicano — ya la probaste
+    # config_path: "voices/es_MX-ald-medium.onnx.json"
     use_cuda: false
-    length_scale: 0.9 # <1 = mas rapido, >1 = mas lento (null = ritmo original de la voz, 1.0)
-    noise_w_scale: 0.85 # variacion en la duracion de los fonemas; un poco mas que el default de la voz (0.8) suena menos monotono
+    length_scale: null # <1 = mas rapido, >1 = mas lento (null = ritmo original de la voz, 1.0) — retocar tras escuchar esta voz
+    noise_w_scale: null # variacion en la duracion de los fonemas (null = default de la voz) — retocar tras escuchar esta voz
   elevenlabs:
     voice_id: ""
     model_id: "eleven_multilingual_v2"

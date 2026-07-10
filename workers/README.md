@@ -56,7 +56,7 @@ workers/.venv/Scripts/python.exe workers/tts_worker.py
 y luego pegar líneas JSON como:
 
 ```json
-{"type": "init", "voice_path": "voices/es_MX-claude-high.onnx", "config_path": "voices/es_MX-claude-high.onnx.json"}
+{"type": "init", "voice_path": "voices/es_ES-davefx-medium.onnx", "config_path": "voices/es_ES-davefx-medium.onnx.json"}
 {"type": "synthesize", "request_id": "1", "text": "Hola, esto es una prueba."}
 ```
 
