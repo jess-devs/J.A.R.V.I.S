@@ -67,6 +67,7 @@ impl ToolRegistry {
             tools.push(Arc::new(system_info::SystemStatus));
             tools.push(Arc::new(system_info::ListProcesses));
             tools.push(Arc::new(apps::OpenApp::new(&cfg.apps)));
+            tools.push(Arc::new(apps::OpenUrl));
             tools.push(Arc::new(apps::CloseApp));
             tools.push(Arc::new(files::FindFiles::new(&cfg.files)));
             tools.push(Arc::new(files::OpenFile));

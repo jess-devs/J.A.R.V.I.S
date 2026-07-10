@@ -61,8 +61,9 @@ impl Tool for RunPowershell {
 
     fn description(&self) -> &'static str {
         "Ejecuta un comando de PowerShell en la computadora y devuelve su \
-         salida. Para acciones que ninguna otra herramienta cubre. El sistema \
-         pedirá confirmación al usuario por su cuenta."
+         salida. Solo para tareas que ninguna otra herramienta cubre (para \
+         abrir webs usa open_url, para apps open_app). Incluye SIEMPRE el \
+         campo summary: el sistema lo lee al usuario al pedir confirmación."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -72,6 +73,12 @@ impl Tool for RunPowershell {
                 "command": {
                     "type": "string",
                     "description": "Comando de PowerShell a ejecutar"
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Descripción breve y natural de qué hace el comando, \
+                                    en español hablado, para leérsela al usuario. \
+                                    Ej: 'crear una carpeta llamada prueba en el escritorio'."
                 }
             },
             "required": ["command"]
@@ -89,15 +96,27 @@ impl Tool for RunPowershell {
 
     fn describe_action(&self, args: &Value) -> String {
         let command = args.get("command").and_then(Value::as_str).unwrap_or("?");
-        // El comando se lee literal en voz alta: el usuario debe saber
-        // exactamente qué va a ejecutarse antes de aprobarlo.
+        let summary = args
+            .get("summary")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
         if self.is_high_risk(command) {
+            // Alto riesgo: se lee el comando literal para consentimiento
+            // informado, además del resumen si lo hay.
+            let intro = summary
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "ejecutar una acción avanzada en el sistema".to_string());
             format!(
-                "ejecutar el comando {command} — atención: este comando puede ser \
+                "{intro}. El comando exacto es: {command}. Atención: puede ser \
                  destructivo o irreversible"
             )
         } else {
-            format!("ejecutar el comando {command}")
+            // Riesgo normal: descripción natural, nunca el comando crudo.
+            summary
+                .map(str::to_string)
+                .unwrap_or_else(|| "ejecutar un comando en el sistema".to_string())
         }
     }
 

@@ -1,7 +1,8 @@
-//! Abrir y cerrar aplicaciones. `open_app` lanza con `cmd /C start`, que
-//! hereda la resolución de Windows (PATH + App Paths del registro): "chrome",
-//! "notepad" o "spotify" funcionan sin rutas. `close_app` mata procesos por
-//! nombre y por eso requiere confirmación.
+//! Abrir aplicaciones, sitios web y cerrar aplicaciones. `open_app` y
+//! `open_url` lanzan con `cmd /C start`, que hereda la resolución de Windows
+//! (PATH + App Paths del registro para apps; navegador por defecto para
+//! URLs). `close_app` mata procesos por nombre y por eso requiere
+//! confirmación.
 
 use std::collections::HashMap;
 
@@ -80,7 +81,96 @@ impl Tool for OpenApp {
             Ok(format!("Aplicación '{target}' lanzada."))
         } else {
             Err(ToolError::Execution(format!(
-                "Windows no encontró ninguna aplicación llamada '{target}'."
+                "No encontré ninguna aplicación llamada '{target}'. Si querías abrir un \
+                 sitio web, usa open_url; si es un programa, puede que no esté instalado o \
+                 tenga otro nombre. Díselo al usuario en vez de reintentar."
+            )))
+        }
+    }
+}
+
+pub struct OpenUrl;
+
+impl OpenUrl {
+    /// Normaliza a una URL http(s) segura. Antepone https:// a dominios sin
+    /// esquema y rechaza esquemas peligrosos (file:, javascript:, etc.).
+    fn normalize_url(raw: &str) -> Result<String, ToolError> {
+        let raw = raw.trim();
+        let lower = raw.to_lowercase();
+        if lower.starts_with("http://") || lower.starts_with("https://") {
+            return Ok(raw.to_string());
+        }
+        if raw.contains("://") {
+            return Err(ToolError::InvalidArgs(format!(
+                "solo se permiten URLs http o https, no '{raw}'"
+            )));
+        }
+        // Sin esquema: asumir https si parece un dominio (tiene un punto).
+        if raw.contains('.') && !raw.contains(' ') {
+            Ok(format!("https://{raw}"))
+        } else {
+            Err(ToolError::InvalidArgs(format!(
+                "'{raw}' no parece una URL válida"
+            )))
+        }
+    }
+}
+
+#[async_trait]
+impl Tool for OpenUrl {
+    fn name(&self) -> &'static str {
+        "open_url"
+    }
+
+    fn description(&self) -> &'static str {
+        "Abre un sitio web en el navegador por defecto del usuario. Úsala para \
+         mostrar cualquier página (YouTube, Google, etc.). NO uses run_powershell \
+         ni open_app para abrir webs."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "URL o dominio a abrir, p.ej. 'youtube.com' o 'https://google.com'"
+                }
+            },
+            "required": ["url"]
+        })
+    }
+
+    fn assess_risk(&self, _args: &Value) -> RiskLevel {
+        RiskLevel::Safe
+    }
+
+    fn describe_action(&self, args: &Value) -> String {
+        let url = args.get("url").and_then(Value::as_str).unwrap_or("?");
+        // Solo el dominio, para que suene natural si alguna vez se hablara.
+        let host = url
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .split('/')
+            .next()
+            .unwrap_or(url);
+        format!("abrir {host}")
+    }
+
+    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+        let raw = required_str(&args, "url")?;
+        let url = Self::normalize_url(raw)?;
+        let status = tokio::process::Command::new("cmd")
+            .args(["/C", "start", ""])
+            .arg(&url)
+            .status()
+            .await
+            .map_err(|e| ToolError::Execution(format!("no se pudo abrir '{url}': {e}")))?;
+        if status.success() {
+            Ok(format!("Abriendo {url} en el navegador."))
+        } else {
+            Err(ToolError::Execution(format!(
+                "Windows no pudo abrir la URL '{url}'."
             )))
         }
     }
