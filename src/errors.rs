@@ -22,6 +22,9 @@ pub enum JarvisError {
     #[error("proveedor LLM: {0}")]
     Llm(#[from] LlmError),
 
+    #[error("herramienta: {0}")]
+    Tool(#[from] ToolError),
+
     #[error("audio: {0}")]
     Audio(#[from] AudioError),
 
@@ -101,6 +104,18 @@ pub enum TtsError {
 
     #[error("respuesta inesperada del proveedor TTS: {0}")]
     UnexpectedResponse(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ToolError {
+    #[error("argumentos inválidos: {0}")]
+    InvalidArgs(String),
+
+    #[error("la herramienta tardó más de {0} segundos y se canceló")]
+    Timeout(u64),
+
+    #[error("{0}")]
+    Execution(String),
 }
 
 #[derive(Debug, thiserror::Error)]
