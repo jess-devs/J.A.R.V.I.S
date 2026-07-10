@@ -8,7 +8,7 @@ use crate::config::OpenAiConfig;
 use crate::errors::LlmError;
 
 use super::openai_compatible::OpenAiCompatibleProvider;
-use super::{ChatMessage, LlmProvider};
+use super::{ChatMessage, LlmEvent, LlmProvider, ToolSpec};
 
 const BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -30,8 +30,9 @@ impl LlmProvider for OpenAiProvider {
     async fn stream_chat(
         &self,
         history: &[ChatMessage],
-        tx: mpsc::Sender<Result<String, LlmError>>,
+        tools: &[ToolSpec],
+        tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
     ) -> Result<(), LlmError> {
-        self.0.stream_chat(history, tx).await
+        self.0.stream_chat(history, tools, tx).await
     }
 }

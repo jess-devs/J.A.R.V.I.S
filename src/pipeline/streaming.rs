@@ -9,6 +9,11 @@
 //! estrictamente una por vez (el worker Piper es un único proceso
 //! secuencial), así que el orden de llegada a `audio_tx` es siempre el orden
 //! del texto original.
+//!
+//! Con herramientas: todo el texto que emite el modelo se habla siempre
+//! (incluido un eventual preámbulo antes de un tool call), y los tool calls
+//! se acumulan y devuelven en `TurnOutput` para que el loop agéntico los
+//! ejecute — este módulo no ejecuta nada.
 
 use std::sync::Arc;
 
@@ -17,25 +22,34 @@ use tokio::sync::mpsc;
 use crate::audio::AudioPlayer;
 use crate::config::PipelineConfig;
 use crate::errors::{JarvisError, LlmError};
-use crate::llm::{ChatMessage, LlmProvider};
+use crate::llm::{ChatMessage, LlmEvent, LlmProvider, ToolCallRequest, ToolSpec};
 use crate::text::SentenceChunker;
 use crate::tts::{AudioChunk, TtsProvider};
 
-pub async fn run_streaming_response(
+/// Resultado de una pasada por el LLM: lo que se habló y lo que pidió ejecutar.
+#[derive(Debug)]
+pub struct TurnOutput {
+    pub spoken_text: String,
+    pub tool_calls: Vec<ToolCallRequest>,
+}
+
+pub async fn run_speaking_turn(
     llm: Arc<dyn LlmProvider>,
     tts: Arc<dyn TtsProvider>,
     player: &mut AudioPlayer,
     history: &[ChatMessage],
+    tools: &[ToolSpec],
     cfg: &PipelineConfig,
-) -> Result<String, JarvisError> {
-    let (token_tx, mut token_rx) = mpsc::channel::<Result<String, LlmError>>(32);
+) -> Result<TurnOutput, JarvisError> {
+    let (event_tx, mut event_rx) = mpsc::channel::<Result<LlmEvent, LlmError>>(32);
     let (phrase_tx, mut phrase_rx) = mpsc::channel::<String>(8);
     let (audio_tx, mut audio_rx) = mpsc::channel::<AudioChunk>(4);
 
     let llm_task = tokio::spawn({
         let llm = llm.clone();
         let history = history.to_vec();
-        async move { llm.stream_chat(&history, token_tx).await }
+        let tools = tools.to_vec();
+        async move { llm.stream_chat(&history, &tools, event_tx).await }
     });
 
     let max_phrase_chars = cfg.max_phrase_chars;
@@ -43,19 +57,25 @@ pub async fn run_streaming_response(
     let chunker_task = tokio::spawn(async move {
         let mut chunker = SentenceChunker::new(max_phrase_chars, min_phrase_chars);
         let mut full = String::new();
-        'outer: while let Some(token) = token_rx.recv().await {
-            let token = token?;
-            full.push_str(&token);
-            for phrase in chunker.push(&token) {
-                if phrase_tx.send(phrase).await.is_err() {
-                    break 'outer;
+        let mut tool_calls: Vec<ToolCallRequest> = Vec::new();
+        'outer: while let Some(event) = event_rx.recv().await {
+            match event? {
+                LlmEvent::TextDelta(token) => {
+                    full.push_str(&token);
+                    for phrase in chunker.push(&token) {
+                        if phrase_tx.send(phrase).await.is_err() {
+                            break 'outer;
+                        }
+                    }
                 }
+                LlmEvent::ToolCall(call) => tool_calls.push(call),
+                LlmEvent::Done => break,
             }
         }
         if let Some(last) = chunker.finish() {
             let _ = phrase_tx.send(last).await;
         }
-        Ok::<String, LlmError>(full)
+        Ok::<(String, Vec<ToolCallRequest>), LlmError>((full, tool_calls))
     });
 
     let synth_task = tokio::spawn(async move {
@@ -83,7 +103,7 @@ pub async fn run_streaming_response(
     }
     player.wait_until_drained().await;
 
-    let full_reply = chunker_task
+    let (spoken_text, tool_calls) = chunker_task
         .await
         .map_err(|e| JarvisError::Pipeline(format!("tarea de troceo de frases falló: {e}")))??;
     llm_task
@@ -93,5 +113,8 @@ pub async fn run_streaming_response(
         .await
         .map_err(|e| JarvisError::Pipeline(format!("tarea de síntesis falló: {e}")))?;
 
-    Ok(full_reply)
+    Ok(TurnOutput {
+        spoken_text,
+        tool_calls,
+    })
 }

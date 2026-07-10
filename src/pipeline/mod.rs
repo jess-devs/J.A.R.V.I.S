@@ -1,3 +1,3 @@
 pub mod streaming;
 
-pub use streaming::run_streaming_response;
+pub use streaming::run_speaking_turn;

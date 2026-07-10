@@ -1,18 +1,25 @@
 //! Proveedor LLM en la nube vía Anthropic (Claude). `POST /v1/messages` con
 //! streaming SSE. Anthropic no acepta mensajes `role: system` dentro del
 //! array `messages` — van aparte, en el campo `system` de nivel superior.
+//!
+//! Tool calling: los tool calls van como bloques `tool_use` dentro del
+//! content del assistant, y los resultados como bloques `tool_result`
+//! dentro de un mensaje `user`. Todos los resultados de un mismo turno
+//! deben ir juntos en el user message inmediatamente siguiente, por eso
+//! los mensajes `Role::Tool` consecutivos se fusionan en uno solo.
 
 use std::time::Duration;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 use crate::config::AnthropicConfig;
 use crate::errors::LlmError;
 
-use super::{ChatMessage, LlmProvider, Role};
+use super::{ChatMessage, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -41,26 +48,75 @@ impl AnthropicProvider {
     }
 }
 
-#[derive(Serialize)]
-struct AnthropicMessage<'a> {
-    role: &'a str,
-    content: &'a str,
-}
+/// Convierte el historial neutro al array `messages` de Anthropic,
+/// fusionando mensajes `Tool` consecutivos en un solo `user` con múltiples
+/// bloques `tool_result`.
+fn build_messages(history: &[ChatMessage]) -> Vec<Value> {
+    let mut messages: Vec<Value> = Vec::new();
+    let mut pending_results: Vec<Value> = Vec::new();
 
-#[derive(Serialize)]
-struct AnthropicRequest<'a> {
-    model: &'a str,
-    max_tokens: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    system: Option<&'a str>,
-    messages: Vec<AnthropicMessage<'a>>,
-    stream: bool,
+    fn flush_results(messages: &mut Vec<Value>, pending: &mut Vec<Value>) {
+        if !pending.is_empty() {
+            messages.push(json!({ "role": "user", "content": std::mem::take(pending) }));
+        }
+    }
+
+    for m in history {
+        match m.role {
+            Role::System => continue, // va en el campo `system` de nivel superior
+            Role::Tool => {
+                pending_results.push(json!({
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id.as_deref().unwrap_or_default(),
+                    "content": m.content,
+                }));
+            }
+            Role::User => {
+                flush_results(&mut messages, &mut pending_results);
+                messages.push(json!({ "role": "user", "content": m.content }));
+            }
+            Role::Assistant => {
+                flush_results(&mut messages, &mut pending_results);
+                if m.tool_calls.is_empty() {
+                    messages.push(json!({ "role": "assistant", "content": m.content }));
+                } else {
+                    let mut blocks: Vec<Value> = Vec::new();
+                    if !m.content.trim().is_empty() {
+                        blocks.push(json!({ "type": "text", "text": m.content }));
+                    }
+                    for call in &m.tool_calls {
+                        blocks.push(json!({
+                            "type": "tool_use",
+                            "id": call.id,
+                            "name": call.name,
+                            "input": call.arguments,
+                        }));
+                    }
+                    messages.push(json!({ "role": "assistant", "content": blocks }));
+                }
+            }
+        }
+    }
+    flush_results(&mut messages, &mut pending_results);
+    messages
 }
 
 #[derive(Deserialize)]
 struct AnthropicDelta {
     #[serde(default)]
     text: Option<String>,
+    #[serde(default)]
+    partial_json: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AnthropicContentBlock {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -71,19 +127,27 @@ struct AnthropicApiError {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum AnthropicEvent {
-    ContentBlockDelta { delta: AnthropicDelta },
+    ContentBlockStart {
+        content_block: AnthropicContentBlock,
+    },
+    ContentBlockDelta {
+        delta: AnthropicDelta,
+    },
+    ContentBlockStop,
     MessageStop,
-    Error { error: AnthropicApiError },
+    Error {
+        error: AnthropicApiError,
+    },
     #[serde(other)]
     Other,
 }
 
-fn role_str(role: Role) -> &'static str {
-    match role {
-        Role::User => "user",
-        Role::Assistant => "assistant",
-        Role::System => "user", // no debería llegar acá: se filtra antes
-    }
+/// Tool call en construcción durante el streaming (entre
+/// `content_block_start` y `content_block_stop`).
+struct PartialToolUse {
+    id: String,
+    name: String,
+    input_json: String,
 }
 
 #[async_trait]
@@ -91,7 +155,8 @@ impl LlmProvider for AnthropicProvider {
     async fn stream_chat(
         &self,
         history: &[ChatMessage],
-        tx: mpsc::Sender<Result<String, LlmError>>,
+        tools: &[ToolSpec],
+        tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
     ) -> Result<(), LlmError> {
         let api_key = std::env::var(&self.api_key_env)
             .map_err(|_| LlmError::MissingApiKey(self.api_key_env.clone()))?;
@@ -100,22 +165,29 @@ impl LlmProvider for AnthropicProvider {
             .iter()
             .find(|m| m.role == Role::System)
             .map(|m| m.content.as_str());
-        let messages: Vec<AnthropicMessage> = history
-            .iter()
-            .filter(|m| m.role != Role::System)
-            .map(|m| AnthropicMessage {
-                role: role_str(m.role),
-                content: &m.content,
-            })
-            .collect();
 
-        let body = AnthropicRequest {
-            model: &self.model,
-            max_tokens: MAX_TOKENS,
-            system,
-            messages,
-            stream: true,
-        };
+        let mut body = json!({
+            "model": self.model,
+            "max_tokens": MAX_TOKENS,
+            "messages": build_messages(history),
+            "stream": true,
+        });
+        if let Some(system) = system {
+            body["system"] = json!(system);
+        }
+        if !tools.is_empty() {
+            let specs: Vec<Value> = tools
+                .iter()
+                .map(|t| {
+                    json!({
+                        "name": t.name,
+                        "description": t.description,
+                        "input_schema": t.parameters,
+                    })
+                })
+                .collect();
+            body["tools"] = json!(specs);
+        }
 
         let response = self
             .client
@@ -139,6 +211,7 @@ impl LlmProvider for AnthropicProvider {
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut current_tool: Option<PartialToolUse> = None;
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(LlmError::Network)?;
@@ -162,14 +235,64 @@ impl LlmProvider for AnthropicProvider {
                 };
 
                 match event {
+                    AnthropicEvent::ContentBlockStart { content_block } => {
+                        if content_block.kind == "tool_use" {
+                            current_tool = Some(PartialToolUse {
+                                id: content_block.id.unwrap_or_default(),
+                                name: content_block.name.unwrap_or_default(),
+                                input_json: String::new(),
+                            });
+                        }
+                    }
                     AnthropicEvent::ContentBlockDelta { delta } => {
                         if let Some(text) = delta.text {
-                            if !text.is_empty() && tx.send(Ok(text)).await.is_err() {
+                            if !text.is_empty()
+                                && tx.send(Ok(LlmEvent::TextDelta(text))).await.is_err()
+                            {
+                                return Ok(());
+                            }
+                        }
+                        if let Some(partial) = delta.partial_json {
+                            if let Some(tool) = current_tool.as_mut() {
+                                tool.input_json.push_str(&partial);
+                            }
+                        }
+                    }
+                    AnthropicEvent::ContentBlockStop => {
+                        if let Some(tool) = current_tool.take() {
+                            let arguments: Value = if tool.input_json.trim().is_empty() {
+                                json!({})
+                            } else {
+                                match serde_json::from_str(&tool.input_json) {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        let message = format!(
+                                            "input de tool_use no parseable ({}): {e}",
+                                            tool.name
+                                        );
+                                        let _ = tx
+                                            .send(Err(LlmError::UnexpectedResponse(
+                                                message.clone(),
+                                            )))
+                                            .await;
+                                        return Err(LlmError::UnexpectedResponse(message));
+                                    }
+                                }
+                            };
+                            let request = ToolCallRequest {
+                                id: tool.id,
+                                name: tool.name,
+                                arguments,
+                            };
+                            if tx.send(Ok(LlmEvent::ToolCall(request))).await.is_err() {
                                 return Ok(());
                             }
                         }
                     }
-                    AnthropicEvent::MessageStop => return Ok(()),
+                    AnthropicEvent::MessageStop => {
+                        let _ = tx.send(Ok(LlmEvent::Done)).await;
+                        return Ok(());
+                    }
                     AnthropicEvent::Error { error } => {
                         let message = format!("Anthropic devolvió un error: {}", error.message);
                         let _ = tx
@@ -182,6 +305,7 @@ impl LlmProvider for AnthropicProvider {
             }
         }
 
+        let _ = tx.send(Ok(LlmEvent::Done)).await;
         Ok(())
     }
 }

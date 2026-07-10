@@ -9,7 +9,7 @@ use crate::config::DeepSeekConfig;
 use crate::errors::LlmError;
 
 use super::openai_compatible::OpenAiCompatibleProvider;
-use super::{ChatMessage, LlmProvider};
+use super::{ChatMessage, LlmEvent, LlmProvider, ToolSpec};
 
 const BASE_URL: &str = "https://api.deepseek.com";
 
@@ -31,8 +31,9 @@ impl LlmProvider for DeepSeekProvider {
     async fn stream_chat(
         &self,
         history: &[ChatMessage],
-        tx: mpsc::Sender<Result<String, LlmError>>,
+        tools: &[ToolSpec],
+        tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
     ) -> Result<(), LlmError> {
-        self.0.stream_chat(history, tx).await
+        self.0.stream_chat(history, tools, tx).await
     }
 }

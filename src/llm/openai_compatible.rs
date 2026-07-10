@@ -3,7 +3,13 @@
 //! terminador `data: [DONE]`). Lo usan tanto `OpenAiProvider` como
 //! `DeepSeekProvider` (la API de DeepSeek es explícitamente compatible con
 //! el formato de OpenAI, solo cambia `base_url`/modelo/API key).
+//!
+//! Tool calling: en este protocolo los tool calls llegan fragmentados en
+//! deltas (`choices[].delta.tool_calls[]` con `index`), con los `arguments`
+//! como string JSON parcial. Se acumulan por `index` y se emiten como
+//! `LlmEvent::ToolCall` completos recién al cierre del stream.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -13,7 +19,7 @@ use tokio_stream::StreamExt;
 
 use crate::errors::LlmError;
 
-use super::{ChatMessage, LlmProvider, Role};
+use super::{ChatMessage, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
 
 pub struct OpenAiCompatibleProvider {
     client: reqwest::Client,
@@ -47,9 +53,42 @@ impl OpenAiCompatibleProvider {
 }
 
 #[derive(Serialize)]
+struct RequestFunctionCall {
+    name: String,
+    /// OpenAI espera los arguments como string JSON, no como objeto.
+    arguments: String,
+}
+
+#[derive(Serialize)]
+struct RequestToolCall {
+    id: String,
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: RequestFunctionCall,
+}
+
+#[derive(Serialize)]
 struct ChatCompletionMessage<'a> {
     role: &'a str,
     content: &'a str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<RequestToolCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_call_id: Option<&'a str>,
+}
+
+#[derive(Serialize)]
+struct RequestToolFunction<'a> {
+    name: &'a str,
+    description: &'a str,
+    parameters: &'a serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct RequestTool<'a> {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: RequestToolFunction<'a>,
 }
 
 #[derive(Serialize)]
@@ -57,12 +96,34 @@ struct ChatCompletionRequest<'a> {
     model: &'a str,
     messages: Vec<ChatCompletionMessage<'a>>,
     stream: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<RequestTool<'a>>,
+}
+
+#[derive(Deserialize)]
+struct DeltaFunctionCall {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeltaToolCall {
+    #[serde(default)]
+    index: u32,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<DeltaFunctionCall>,
 }
 
 #[derive(Deserialize)]
 struct ChatCompletionDelta {
     #[serde(default)]
     content: Option<String>,
+    #[serde(default)]
+    tool_calls: Vec<DeltaToolCall>,
 }
 
 #[derive(Deserialize)]
@@ -81,7 +142,41 @@ fn role_str(role: Role) -> &'static str {
         Role::System => "system",
         Role::User => "user",
         Role::Assistant => "assistant",
+        Role::Tool => "tool",
     }
+}
+
+/// Acumula los fragmentos de un tool call streameado por `index`.
+#[derive(Default)]
+struct PartialCall {
+    id: Option<String>,
+    name: String,
+    arguments: String,
+}
+
+fn flush_partial_calls(
+    partials: BTreeMap<u32, PartialCall>,
+) -> Vec<Result<ToolCallRequest, LlmError>> {
+    partials
+        .into_values()
+        .map(|p| {
+            let arguments: serde_json::Value = if p.arguments.trim().is_empty() {
+                serde_json::json!({})
+            } else {
+                serde_json::from_str(&p.arguments).map_err(|e| {
+                    LlmError::UnexpectedResponse(format!(
+                        "arguments de tool call no parseables ({}): {e}",
+                        p.name
+                    ))
+                })?
+            };
+            Ok(ToolCallRequest {
+                id: p.id.unwrap_or_else(|| format!("call_{}", p.name)),
+                name: p.name,
+                arguments,
+            })
+        })
+        .collect()
 }
 
 #[async_trait]
@@ -89,7 +184,8 @@ impl LlmProvider for OpenAiCompatibleProvider {
     async fn stream_chat(
         &self,
         history: &[ChatMessage],
-        tx: mpsc::Sender<Result<String, LlmError>>,
+        tools: &[ToolSpec],
+        tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
     ) -> Result<(), LlmError> {
         let api_key = std::env::var(&self.api_key_env)
             .map_err(|_| LlmError::MissingApiKey(self.api_key_env.clone()))?;
@@ -99,6 +195,19 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .map(|m| ChatCompletionMessage {
                 role: role_str(m.role),
                 content: &m.content,
+                tool_calls: m
+                    .tool_calls
+                    .iter()
+                    .map(|c| RequestToolCall {
+                        id: c.id.clone(),
+                        kind: "function",
+                        function: RequestFunctionCall {
+                            name: c.name.clone(),
+                            arguments: c.arguments.to_string(),
+                        },
+                    })
+                    .collect(),
+                tool_call_id: m.tool_call_id.as_deref(),
             })
             .collect();
 
@@ -107,6 +216,17 @@ impl LlmProvider for OpenAiCompatibleProvider {
             model: &self.model,
             messages,
             stream: true,
+            tools: tools
+                .iter()
+                .map(|t| RequestTool {
+                    kind: "function",
+                    function: RequestToolFunction {
+                        name: &t.name,
+                        description: &t.description,
+                        parameters: &t.parameters,
+                    },
+                })
+                .collect(),
         };
 
         let response = self
@@ -130,6 +250,22 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut partial_calls: BTreeMap<u32, PartialCall> = BTreeMap::new();
+
+        // Emite los tool calls acumulados y el Done final. Se llama al ver
+        // `[DONE]` (o al agotarse el stream, por robustez).
+        async fn finish(
+            partials: BTreeMap<u32, PartialCall>,
+            tx: &mpsc::Sender<Result<LlmEvent, LlmError>>,
+        ) {
+            for call in flush_partial_calls(partials) {
+                let event = call.map(LlmEvent::ToolCall);
+                if tx.send(event).await.is_err() {
+                    return;
+                }
+            }
+            let _ = tx.send(Ok(LlmEvent::Done)).await;
+        }
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(LlmError::Network)?;
@@ -147,6 +283,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
                     continue;
                 }
                 if data == "[DONE]" {
+                    finish(partial_calls, &tx).await;
                     return Ok(());
                 }
 
@@ -156,14 +293,31 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 };
                 for choice in parsed.choices {
                     if let Some(content) = choice.delta.content {
-                        if !content.is_empty() && tx.send(Ok(content)).await.is_err() {
+                        if !content.is_empty()
+                            && tx.send(Ok(LlmEvent::TextDelta(content))).await.is_err()
+                        {
                             return Ok(());
+                        }
+                    }
+                    for delta in choice.delta.tool_calls {
+                        let partial = partial_calls.entry(delta.index).or_default();
+                        if let Some(id) = delta.id {
+                            partial.id = Some(id);
+                        }
+                        if let Some(function) = delta.function {
+                            if let Some(name) = function.name {
+                                partial.name.push_str(&name);
+                            }
+                            if let Some(arguments) = function.arguments {
+                                partial.arguments.push_str(&arguments);
+                            }
                         }
                     }
                 }
             }
         }
 
+        finish(partial_calls, &tx).await;
         Ok(())
     }
 }
