@@ -41,6 +41,8 @@ pub async fn run(config: &Config) -> Result<()> {
         LlmProviderKind::Ollama => {
             if let Err(e) = check_ollama(config).await {
                 problems.push(e);
+            } else if config.agent.enabled {
+                warn_ollama_tool_support(&config.llm.ollama.model);
             }
         }
         LlmProviderKind::Anthropic => {
@@ -172,6 +174,26 @@ struct TagsResponse {
 #[derive(Deserialize)]
 struct TagsModel {
     name: String,
+}
+
+/// El modo agéntico depende de tool calling. Casi todos los modelos
+/// instruidos recientes de Ollama lo soportan, pero algunos populares (las
+/// familias `llama2`, `gemma` base, `phi`, `mistral` clásico) no. No se puede
+/// saber con certeza sin una petición de prueba, así que solo avisamos: si el
+/// modelo pertenece a una familia conocida sin tools, sugerimos un cambio.
+fn warn_ollama_tool_support(model: &str) {
+    const SIN_TOOLS: [&str; 5] = ["llama2", "gemma:", "gemma2", "phi", "orca"];
+    let lower = model.to_lowercase();
+    if SIN_TOOLS.iter().any(|fam| lower.starts_with(fam)) {
+        tracing::warn!(
+            model,
+            "el modo agéntico está activo pero '{model}' podría no soportar tool calling. \
+             Si Jarvis no usa las herramientas, prueba con 'qwen3:8b' o 'qwen2.5:7b' \
+             (ollama pull qwen3:8b).",
+        );
+    } else {
+        tracing::info!(model, "modo agéntico activo con Ollama");
+    }
 }
 
 async fn check_ollama(config: &Config) -> std::result::Result<(), String> {

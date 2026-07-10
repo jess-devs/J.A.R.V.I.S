@@ -1,13 +1,16 @@
+mod agent;
 mod audio;
 mod config;
 mod errors;
 mod ipc;
 mod llm;
+mod memory;
 mod orchestrator;
 mod pipeline;
 mod startup_checks;
 mod stt;
 mod text;
+mod tools;
 mod tts;
 mod wake;
 

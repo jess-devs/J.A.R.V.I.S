@@ -20,6 +20,7 @@ pub struct Config {
     pub tts: TtsConfig,
     pub audio: AudioConfig,
     pub pipeline: PipelineConfig,
+    pub agent: AgentConfig,
     pub log_level: String,
 }
 
@@ -33,6 +34,7 @@ impl Default for Config {
             tts: TtsConfig::default(),
             audio: AudioConfig::default(),
             pipeline: PipelineConfig::default(),
+            agent: AgentConfig::default(),
             log_level: "info".to_string(),
         }
     }
@@ -178,6 +180,11 @@ pub enum LlmProviderKind {
 pub struct OllamaConfig {
     pub base_url: String,
     pub model: String,
+    /// Solo para modelos con razonamiento (qwen3, deepseek-r1): `false`
+    /// desactiva los tokens de "pensamiento", que de otro modo el TTS
+    /// hablaría en voz alta. null = no enviar el campo (obligatorio para
+    /// modelos que no lo soportan, como qwen2.5 — Ollama rechaza la request).
+    pub think: Option<bool>,
 }
 
 impl Default for OllamaConfig {
@@ -185,6 +192,7 @@ impl Default for OllamaConfig {
         Self {
             base_url: "http://localhost:11434".to_string(),
             model: "qwen2.5:7b".to_string(),
+            think: None,
         }
     }
 }
@@ -263,7 +271,15 @@ impl Default for LlmConfig {
                 Estás hablando en voz alta, no escribiendo texto: nunca uses markdown \
                 (nada de **, #, guiones de lista, bloques de código ni links). Respondé \
                 de forma breve y natural, como en una charla — una o dos oraciones como \
-                máximo, salvo que te pidan explícitamente más detalle o una explicación larga."
+                máximo, salvo que te pidan explícitamente más detalle o una explicación larga. \
+                Dispones de herramientas para consultar el sistema y controlar la computadora: \
+                úsalas cuando la petición lo requiera y nunca inventes datos del sistema ni \
+                resultados que no obtuviste. Antes de usar herramientas puedes decir UNA frase \
+                muy corta tipo 'Déjame comprobarlo, señor', pero jamás describas la herramienta \
+                ni sus parámetros en voz alta. Tras recibir resultados, responde con lo esencial \
+                en una o dos frases; nunca leas listas largas, datos crudos ni JSON. Si una \
+                acción es riesgosa, el sistema pedirá la confirmación por su cuenta: no la \
+                pidas tú ni la menciones."
                 .to_string(),
             max_history_messages: 20,
             request_timeout_secs: 60,
@@ -361,6 +377,156 @@ impl Default for AudioConfig {
         Self {
             output_device: None,
             volume: 1.0,
+        }
+    }
+}
+
+/// Capa agéntica: herramientas que Jarvis puede ejecutar (consultar el
+/// sistema, controlar la PC, etc.) con confirmación por voz para acciones
+/// riesgosas.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AgentConfig {
+    /// false = comportamiento clásico: chat puro sin herramientas.
+    pub enabled: bool,
+    /// Máximo de pasadas LLM→tools por turno antes de forzar una respuesta.
+    pub max_iterations: usize,
+    pub tool_timeout_secs: u64,
+    /// Segundos que Jarvis espera un "sí"/"no" (o el código) tras pedir
+    /// confirmación antes de cancelar la acción.
+    pub confirm_timeout_secs: u64,
+    /// Truncado de cada resultado de herramienta antes de dárselo al LLM.
+    pub max_tool_result_chars: usize,
+    /// Frases enlatadas que Jarvis dice mientras ejecuta herramientas si el
+    /// modelo no emitió su propio preámbulo.
+    pub filler_phrases: Vec<String>,
+    /// Nombres de herramientas a excluir del registro.
+    pub disabled_tools: Vec<String>,
+    /// Palabras/frases cortas que cuentan como confirmación afirmativa.
+    pub confirm_yes: Vec<String>,
+    pub confirm_no: Vec<String>,
+    /// Código de aceptación de riesgos para acciones de nivel extremo. Se
+    /// verifica en Rust contra la transcripción; NUNCA se pasa al LLM.
+    pub risk_code: String,
+    /// Regex adicionales (se suman a los defaults) que elevan un comando de
+    /// PowerShell a nivel de riesgo extremo (requiere el código).
+    pub high_risk_patterns: Vec<String>,
+    pub files: FilesToolConfig,
+    pub apps: AppsConfig,
+    pub web: WebToolConfig,
+    pub memory: MemoryConfig,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_iterations: 6,
+            tool_timeout_secs: 20,
+            confirm_timeout_secs: 30,
+            max_tool_result_chars: 3000,
+            filler_phrases: vec![
+                "Déjame revisar, señor.".to_string(),
+                "Un momento, señor.".to_string(),
+                "Enseguida lo compruebo, señor.".to_string(),
+            ],
+            disabled_tools: Vec::new(),
+            confirm_yes: [
+                "sí", "si", "claro", "adelante", "hazlo", "confirmo", "dale", "por supuesto",
+                "sí señor", "procede", "afirmativo", "correcto",
+            ]
+            .map(String::from)
+            .to_vec(),
+            confirm_no: [
+                "no", "cancela", "cancelar", "espera", "mejor no", "detente", "para", "negativo",
+            ]
+            .map(String::from)
+            .to_vec(),
+            risk_code: "0201".to_string(),
+            high_risk_patterns: Vec::new(),
+            files: FilesToolConfig::default(),
+            apps: AppsConfig::default(),
+            web: WebToolConfig::default(),
+            memory: MemoryConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct MemoryConfig {
+    /// Ruta del archivo SQLite de memoria persistente.
+    pub db_path: PathBuf,
+    /// Cuántas memorias recientes inyectar en el system prompt de cada turno.
+    pub max_injected: usize,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            db_path: PathBuf::from("data/memory.db"),
+            max_injected: 12,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct WebToolConfig {
+    /// Truncado del texto extraído de una página antes de dárselo al LLM
+    /// (un 7B con historial digiere bien ~4000 chars).
+    pub max_page_chars: usize,
+    pub max_results: usize,
+    pub user_agent: String,
+}
+
+impl Default for WebToolConfig {
+    fn default() -> Self {
+        Self {
+            max_page_chars: 4000,
+            max_results: 5,
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+                .to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct FilesToolConfig {
+    /// Carpetas donde busca `find_files` cuando no hay Everything CLI.
+    pub search_roots: Vec<PathBuf>,
+    pub max_results: usize,
+    /// Ruta a es.exe (Everything CLI) para búsqueda instantánea; null = walkdir.
+    pub everything_cli: Option<PathBuf>,
+}
+
+impl Default for FilesToolConfig {
+    fn default() -> Self {
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."));
+        Self {
+            search_roots: vec![home],
+            max_results: 20,
+            everything_cli: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct AppsConfig {
+    /// Alias hablado → comando/ejecutable real ("navegador" → "chrome").
+    pub aliases: std::collections::HashMap<String, String>,
+}
+
+impl Default for AppsConfig {
+    fn default() -> Self {
+        Self {
+            aliases: std::collections::HashMap::new(),
         }
     }
 }
