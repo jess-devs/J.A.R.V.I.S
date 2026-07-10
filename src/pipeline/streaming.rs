@@ -101,7 +101,7 @@ pub async fn run_speaking_turn(
     while let Some(chunk) = audio_rx.recv().await {
         player.play_chunk(&chunk).await?;
     }
-    player.wait_until_drained().await;
+    player.wait_until_drained().await?;
 
     let (spoken_text, tool_calls) = chunker_task
         .await

@@ -24,7 +24,9 @@ pub async fn speak(tts: &Arc<dyn TtsProvider>, player: &mut AudioPlayer, text: &
                 tracing::warn!(error = %e, "no se pudo reproducir la frase");
                 return;
             }
-            player.wait_until_drained().await;
+            if let Err(e) = player.wait_until_drained().await {
+                tracing::warn!(error = %e, "la reproducción no terminó a tiempo");
+            }
         }
         Err(e) => tracing::warn!(error = %e, text, "no se pudo sintetizar la frase"),
     }

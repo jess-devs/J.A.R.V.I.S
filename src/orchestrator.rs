@@ -50,7 +50,11 @@ impl Orchestrator {
         let stt = SttWorker::spawn(&config.workers, &config.stt).await?;
         let llm_provider = llm::build_provider(&config)?;
         let tts_provider = tts::build_provider(&config).await?;
-        let player = AudioPlayer::new(config.audio.output_device.as_deref(), config.audio.volume)?;
+        let player = AudioPlayer::new(
+            config.audio.output_device.as_deref(),
+            config.audio.volume,
+            config.audio.drain_timeout_secs,
+        )?;
 
         let history = vec![ChatMessage::system(config.llm.system_prompt.clone())];
         let gate = AttentionGate::new(config.wake.clone());

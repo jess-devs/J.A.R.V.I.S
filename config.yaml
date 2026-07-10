@@ -141,6 +141,7 @@ tts:
 audio:
   output_device: null # null = dispositivo de salida por defecto del sistema
   volume: 1.0
+  drain_timeout_secs: 60 # límite de seguridad esperando a que termine de sonar una respuesta (dispositivo caído/suspendido)
 
 pipeline:
   max_phrase_chars: 220

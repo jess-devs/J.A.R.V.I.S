@@ -125,4 +125,7 @@ pub enum AudioError {
 
     #[error("error del backend de audio: {0}")]
     Backend(String),
+
+    #[error("la reproducción de audio no avanzó en {0} segundos (¿el dispositivo de salida dejó de responder?)")]
+    PlaybackStalled(u64),
 }

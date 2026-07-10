@@ -33,11 +33,16 @@ pub struct AudioPlayer {
     output_sample_rate: u32,
     output_channels: u16,
     producer: HeapProd<f32>,
+    drain_timeout: Duration,
     _stream: cpal::Stream,
 }
 
 impl AudioPlayer {
-    pub fn new(output_device: Option<&str>, volume: f32) -> Result<Self, AudioError> {
+    pub fn new(
+        output_device: Option<&str>,
+        volume: f32,
+        drain_timeout_secs: u64,
+    ) -> Result<Self, AudioError> {
         let host = cpal::default_host();
         let device = match output_device {
             Some(name) => host
@@ -101,6 +106,7 @@ impl AudioPlayer {
             output_sample_rate,
             output_channels,
             producer,
+            drain_timeout: Duration::from_secs(drain_timeout_secs),
             _stream: stream,
         })
     }
@@ -108,6 +114,12 @@ impl AudioPlayer {
     /// Resamplea/remezcla el chunk al formato nativo del dispositivo y lo
     /// empuja al ring buffer. No bloquea esperando a que termine de sonar —
     /// solo espera si el buffer está lleno (backpressure).
+    ///
+    /// Lleva un `timeout`: sin él, un dispositivo de salida colgado (stream
+    /// suspendido por el SO, driver caído) dejaría este loop esperando para
+    /// siempre justo antes de reactivar el micrófono — el callback de error
+    /// de `cpal` (línea de `build_output_stream` arriba) solo loguea, no
+    /// desbloquea nada.
     pub async fn play_chunk(&mut self, chunk: &AudioChunk) -> Result<(), AudioError> {
         if chunk.sample_width != 2 {
             return Err(AudioError::Backend(format!(
@@ -120,24 +132,33 @@ impl AudioPlayer {
         let resampled = resample_linear(&mono, chunk.sample_rate, self.output_sample_rate);
         let samples = upmix_mono_to_channels(&resampled, self.output_channels);
 
-        let mut remaining: &[f32] = &samples;
-        while !remaining.is_empty() {
-            let pushed = self.producer.push_slice(remaining);
-            remaining = &remaining[pushed..];
-            if !remaining.is_empty() {
-                tokio::time::sleep(Duration::from_millis(5)).await;
+        let push = async {
+            let mut remaining: &[f32] = &samples;
+            while !remaining.is_empty() {
+                let pushed = self.producer.push_slice(remaining);
+                remaining = &remaining[pushed..];
+                if !remaining.is_empty() {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
             }
-        }
-        Ok(())
+        };
+        tokio::time::timeout(self.drain_timeout, push)
+            .await
+            .map_err(|_| AudioError::PlaybackStalled(self.drain_timeout.as_secs()))
     }
 
     /// Espera hasta que el ring buffer se vacíe (toda la respuesta terminó
     /// de reproducirse, con un margen residual de la latencia física de la
-    /// tarjeta de sonido).
-    pub async fn wait_until_drained(&self) {
-        while !self.producer.is_empty() {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+    /// tarjeta de sonido). Ver nota de timeout en `play_chunk`.
+    pub async fn wait_until_drained(&self) -> Result<(), AudioError> {
+        let drain = async {
+            while !self.producer.is_empty() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        };
+        tokio::time::timeout(self.drain_timeout, drain)
+            .await
+            .map_err(|_| AudioError::PlaybackStalled(self.drain_timeout.as_secs()))
     }
 }
 
