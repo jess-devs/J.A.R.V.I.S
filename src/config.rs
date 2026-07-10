@@ -121,6 +121,11 @@ pub struct SttConfig {
     /// que solo el silencio; reduce cortes espurios que Whisper rellenaría con
     /// alucinaciones).
     pub silero_deactivity_detection: bool,
+    /// Segundos que el worker de STT tolera al recorder trabado en un estado
+    /// ocupado ("recording"/"transcribing", nunca deberían tardar más de
+    /// unos pocos segundos) antes de asumir que quedó irrecuperablemente
+    /// colgado y forzar su propia salida (para que Rust lo reinicie).
+    pub stuck_state_timeout_secs: u64,
 }
 
 impl Default for SttConfig {
@@ -143,6 +148,7 @@ impl Default for SttConfig {
             min_length_of_recording: 1.0,
             min_gap_between_recordings: 1.0,
             silero_deactivity_detection: true,
+            stuck_state_timeout_secs: 30,
         }
     }
 }

@@ -21,6 +21,59 @@ import time
 import ipc  # primer import: aplica la redireccion de stdout a nivel de fd
 
 
+def watchdog_loop(recorder, shutdown: threading.Event, stuck_state_timeout: float) -> None:
+    """Vigila el estado interno del recorder para recuperarse de dos fallas
+    conocidas de RealtimeSTT que, sin esto, cuelgan el worker para siempre:
+
+    1. Bug confirmado: una deteccion de voz demasiado cerca (en el tiempo) de
+       la grabacion anterior cae dentro de `min_gap_between_recordings` y
+       RealtimeSTT la descarta silenciosamente (log "Attempted to start
+       recording too soon after stopping"), pero de todos modos desarma
+       `start_recording_on_voice_activity` sin volver a armarlo. El recorder
+       queda "escuchando" para siempre sin reaccionar a nada. Se corrige
+       rearmando el flag apenas se detecta el patron.
+    2. Red de seguridad generica: si el recorder queda mas de
+       `stuck_state_timeout` segundos en un estado ocupado ("recording" o
+       "transcribing", nunca deberian tardar mas de unos pocos segundos) sin
+       cambiar, se asume trabado por una causa distinta (ej. el proceso de
+       transcripcion o el lector de audio dejan de responder) y se fuerza la
+       salida del proceso para que Rust lo detecte como worker caido y lo
+       reinicie.
+    """
+    last_state = None
+    last_state_change = time.monotonic()
+    while not shutdown.is_set():
+        time.sleep(0.25)
+        state = getattr(recorder, "state", None)
+        if state != last_state:
+            last_state = state
+            last_state_change = time.monotonic()
+            continue
+
+        if (
+            state == "listening"
+            and not recorder.is_recording
+            and not recorder.start_recording_on_voice_activity
+            and not getattr(recorder, "wakeword_detected", False)
+        ):
+            recorder.start_recording_on_voice_activity = True
+            continue
+
+        if state != "listening" and time.monotonic() - last_state_change > stuck_state_timeout:
+            ipc.send(
+                {
+                    "type": "fatal_error",
+                    "code": "recorder_stuck",
+                    "message": (
+                        f"el recorder quedo trabado en el estado '{state}' "
+                        f"por mas de {stuck_state_timeout}s"
+                    ),
+                }
+            )
+            shutdown.set()
+            os._exit(1)
+
+
 def main() -> None:
     init_msg = ipc.read_line()
     if init_msg is None or init_msg.get("type") != "init":
@@ -104,6 +157,12 @@ def main() -> None:
                 recorder.set_microphone(True)
 
     threading.Thread(target=control_loop, daemon=True, name="stt-control").start()
+    threading.Thread(
+        target=watchdog_loop,
+        args=(recorder, shutdown, init_msg.get("stuck_state_timeout_secs", 30)),
+        daemon=True,
+        name="stt-watchdog",
+    ).start()
 
     while not shutdown.is_set():
         try:

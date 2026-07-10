@@ -37,6 +37,7 @@ stt:
   min_length_of_recording: 1.0 # segundos mínimos de grabación para considerarla habla (filtra blips que Whisper alucinaría)
   min_gap_between_recordings: 1.0 # segundos mínimos entre grabaciones (evita grabaciones fantasma consecutivas)
   silero_deactivity_detection: true # usa Silero para detectar el fin del habla (más robusto, menos cortes espurios)
+  stuck_state_timeout_secs: 30 # si el worker queda trabado grabando/transcribiendo por más de esto, se reinicia solo
 
 wake:
   enabled: true # false = sin gate, Jarvis responde a todo (comportamiento anterior)

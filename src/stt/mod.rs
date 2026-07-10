@@ -46,6 +46,7 @@ impl SttWorker {
                 min_length_of_recording: stt.min_length_of_recording,
                 min_gap_between_recordings: stt.min_gap_between_recordings,
                 silero_deactivity_detection: stt.silero_deactivity_detection,
+                stuck_state_timeout_secs: stt.stuck_state_timeout_secs,
             })
             .await?;
 

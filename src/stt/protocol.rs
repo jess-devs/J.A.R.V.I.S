@@ -21,6 +21,7 @@ pub enum SttInMessage {
         min_length_of_recording: f32,
         min_gap_between_recordings: f32,
         silero_deactivity_detection: bool,
+        stuck_state_timeout_secs: u64,
     },
     Mute,
     Unmute,
