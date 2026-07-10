@@ -34,11 +34,22 @@ stt:
   silero_sensitivity: 0.4
   webrtc_sensitivity: 3
   post_speech_silence_duration: 0.6 # segundos de silencio antes de cerrar la frase
+  min_length_of_recording: 1.0 # segundos mínimos de grabación para considerarla habla (filtra blips que Whisper alucinaría)
+  min_gap_between_recordings: 1.0 # segundos mínimos entre grabaciones (evita grabaciones fantasma consecutivas)
+  silero_deactivity_detection: true # usa Silero para detectar el fin del habla (más robusto, menos cortes espurios)
 
 wake:
   enabled: true # false = sin gate, Jarvis responde a todo (comportamiento anterior)
   words: ["jarvis"] # se matchean normalizadas (sin tildes) y con tolerancia a 1 letra de error
-  attention_window_secs: 45 # tras responder, sigue atento este tiempo sin necesidad del nombre
+  attention_window_secs: 25 # tras responder, sigue atento este tiempo sin necesidad del nombre
+  window_min_words: 2 # dentro de la ventana, ignora frases de menos palabras que esto y sin el nombre (filtra alucinaciones de 1 palabra). 1 = sin filtro
+  ignore_phrases: # frases-basura que Whisper inventa en silencio: se descartan siempre (comparación sin tildes)
+    - "gracias"
+    - "muchas gracias"
+    - "gracias por ver el video"
+    - "subtitulos realizados por la comunidad de amara.org"
+    - "suscribete"
+    - "hasta la proxima"
   ambient_context: true # frases ignoradas se pasan como contexto en la siguiente consulta real
   ambient_context_max: 5 # cuántas frases ignoradas se conservan como máximo
   ambient_context_ttl_secs: 120 # las más viejas que esto se descartan

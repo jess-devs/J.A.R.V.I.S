@@ -57,6 +57,11 @@ def main() -> None:
             post_speech_silence_duration=init_msg.get(
                 "post_speech_silence_duration", 0.6
             ),
+            min_length_of_recording=init_msg.get("min_length_of_recording", 1.0),
+            min_gap_between_recordings=init_msg.get("min_gap_between_recordings", 1.0),
+            silero_deactivity_detection=init_msg.get(
+                "silero_deactivity_detection", True
+            ),
             beam_size=profile["beam_size"],
             initial_prompt=init_msg.get("initial_prompt") or None,
             early_transcription_on_silence=profile["early_transcription"],

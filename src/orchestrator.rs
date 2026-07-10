@@ -107,12 +107,16 @@ impl Orchestrator {
 
     async fn dispatch_by_gate(&mut self, text: String) {
         match self.gate.decide(&text) {
+            GateDecision::Drop => {
+                tracing::info!(text = %text, "ignorado: probable alucinación o frase-basura");
+            }
             GateDecision::Ignore => {
                 tracing::info!(text = %text, "ignorado: sin wake word y fuera de ventana");
                 self.gate.push_ambient(text);
             }
             GateDecision::Respond => {
                 tracing::info!(text = %text, "usuario dijo");
+                self.gate.mark_responded(&text);
                 self.handle_utterance(text).await;
             }
         }

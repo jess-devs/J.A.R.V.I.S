@@ -14,13 +14,21 @@ use crate::config::WakeConfig;
 #[derive(Debug, PartialEq, Eq)]
 pub enum GateDecision {
     Respond,
+    /// Ignorar, pero conservar como contexto ambiental (frase real dicha
+    /// fuera de la ventana, sin el nombre).
     Ignore,
+    /// Descartar por completo: probable alucinación de Whisper o frase-basura.
+    /// Ni siquiera se guarda como contexto ambiental.
+    Drop,
 }
 
 pub struct AttentionGate {
     config: WakeConfig,
     window_deadline: Option<Instant>,
     ambient: VecDeque<(Instant, String)>,
+    /// Última transcripción respondida (normalizada) y cuándo, para descartar
+    /// repeticiones inmediatas (Whisper entra en loops en silencio).
+    last_responded: Option<(Instant, String)>,
 }
 
 impl AttentionGate {
@@ -29,15 +37,67 @@ impl AttentionGate {
             config,
             window_deadline: None,
             ambient: VecDeque::new(),
+            last_responded: None,
         }
     }
 
     pub fn decide(&self, text: &str) -> GateDecision {
-        if !self.config.enabled || self.contains_wake_word(text) || self.window_open() {
-            GateDecision::Respond
+        let normalized = normalize_phrase(text);
+        if normalized.is_empty() {
+            return GateDecision::Drop;
+        }
+
+        // Frase-basura conocida (alucinación típica en silencio/ruido).
+        if self.is_ignore_phrase(&normalized) {
+            return GateDecision::Drop;
+        }
+
+        // Repetición inmediata de lo último respondido: loop de Whisper.
+        if self.is_recent_repeat(&normalized) {
+            return GateDecision::Drop;
+        }
+
+        // El nombre siempre activa, sin importar la ventana.
+        if self.contains_wake_word(text) {
+            return GateDecision::Respond;
+        }
+
+        if !self.config.enabled {
+            return GateDecision::Respond;
+        }
+
+        if self.window_open() {
+            // Dentro de la ventana pero sin el nombre: exigir sustancia
+            // mínima. Las alucinaciones en silencio son casi siempre de una
+            // sola palabra.
+            let word_count = normalized.split(' ').filter(|w| !w.is_empty()).count();
+            if word_count < self.config.window_min_words {
+                GateDecision::Drop
+            } else {
+                GateDecision::Respond
+            }
         } else {
             GateDecision::Ignore
         }
+    }
+
+    /// Registra la transcripción como respondida, para el guard de repetición.
+    /// Se llama al aceptar una frase que va a generar respuesta.
+    pub fn mark_responded(&mut self, text: &str) {
+        self.last_responded = Some((Instant::now(), normalize_phrase(text)));
+    }
+
+    fn is_ignore_phrase(&self, normalized: &str) -> bool {
+        self.config
+            .ignore_phrases
+            .iter()
+            .any(|p| normalize_phrase(p) == normalized)
+    }
+
+    fn is_recent_repeat(&self, normalized: &str) -> bool {
+        self.last_responded.as_ref().is_some_and(|(at, prev)| {
+            prev == normalized && Instant::now().duration_since(*at) <= Duration::from_secs(10)
+        })
     }
 
     /// Abre (o extiende) la ventana de atención. Se llama al terminar cada
@@ -92,6 +152,25 @@ impl AttentionGate {
                 .any(|word| levenshtein(token, &normalize(word)) <= 1)
         })
     }
+}
+
+/// Minúsculas, sin tildes ni puntuación, pero CONSERVANDO los espacios entre
+/// palabras — "¡Sí, señor!" → "si senor". Para comparar frases completas
+/// (frases-basura, repeticiones) y contar palabras.
+fn normalize_phrase(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.to_lowercase().chars() {
+        match c {
+            'á' => out.push('a'),
+            'é' => out.push('e'),
+            'í' => out.push('i'),
+            'ó' => out.push('o'),
+            'ú' | 'ü' => out.push('u'),
+            c if c.is_alphanumeric() => out.push(c),
+            _ => out.push(' '),
+        }
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Minúsculas, sin tildes/diéresis y solo letras — "¡Járvis!" → "jarvis".
@@ -172,7 +251,49 @@ mod tests {
     fn ignora_sin_nombre_y_sin_ventana() {
         let g = default_gate();
         assert_eq!(g.decide("voy a pedir una pizza"), GateDecision::Ignore);
-        assert_eq!(g.decide(""), GateDecision::Ignore);
+    }
+
+    #[test]
+    fn descarta_vacio_y_frases_basura() {
+        let g = default_gate();
+        assert_eq!(g.decide(""), GateDecision::Drop);
+        assert_eq!(g.decide("   "), GateDecision::Drop);
+        // Alucinaciones típicas de Whisper, con y sin tildes/puntuación.
+        assert_eq!(g.decide("Gracias."), GateDecision::Drop);
+        assert_eq!(g.decide("¡Suscríbete!"), GateDecision::Drop);
+        assert_eq!(
+            g.decide("Subtítulos realizados por la comunidad de Amara.org"),
+            GateDecision::Drop
+        );
+    }
+
+    #[test]
+    fn en_ventana_descarta_una_palabra_pero_responde_multipalabra() {
+        let mut g = default_gate();
+        g.open_window();
+        // Alucinaciones de una palabra dentro de la ventana → Drop.
+        for fantasma in ["Bip", "Liz", "Bienvenido", "Bien"] {
+            assert_eq!(g.decide(fantasma), GateDecision::Drop, "{fantasma}");
+        }
+        // Un comando real multi-palabra dentro de la ventana → Respond.
+        assert_eq!(g.decide("pon una canción de mora"), GateDecision::Respond);
+    }
+
+    #[test]
+    fn el_nombre_activa_aunque_sea_una_palabra() {
+        let g = default_gate();
+        assert_eq!(g.decide("Jarvis"), GateDecision::Respond);
+    }
+
+    #[test]
+    fn descarta_repeticion_inmediata() {
+        let mut g = default_gate();
+        g.open_window();
+        let frase = "abre el bloc de notas";
+        assert_eq!(g.decide(frase), GateDecision::Respond);
+        g.mark_responded(frase);
+        // Misma frase repetida de inmediato (loop de Whisper) → Drop.
+        assert_eq!(g.decide(frase), GateDecision::Drop);
     }
 
     #[test]

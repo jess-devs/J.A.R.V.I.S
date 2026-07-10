@@ -111,6 +111,16 @@ pub struct SttConfig {
     pub silero_sensitivity: f32,
     pub webrtc_sensitivity: u8,
     pub post_speech_silence_duration: f32,
+    /// Segundos mínimos de grabación para considerarla habla válida: filtra
+    /// blips muy cortos que Whisper convertiría en alucinaciones.
+    pub min_length_of_recording: f32,
+    /// Segundos mínimos entre grabaciones: evita grabaciones fantasma
+    /// consecutivas.
+    pub min_gap_between_recordings: f32,
+    /// true = usa Silero también para detectar el fin del habla (más robusto
+    /// que solo el silencio; reduce cortes espurios que Whisper rellenaría con
+    /// alucinaciones).
+    pub silero_deactivity_detection: bool,
 }
 
 impl Default for SttConfig {
@@ -130,6 +140,9 @@ impl Default for SttConfig {
             silero_sensitivity: 0.4,
             webrtc_sensitivity: 3,
             post_speech_silence_duration: 0.6,
+            min_length_of_recording: 1.0,
+            min_gap_between_recordings: 1.0,
+            silero_deactivity_detection: true,
         }
     }
 }
@@ -145,6 +158,15 @@ pub struct WakeConfig {
     /// Segundos tras la última respuesta durante los que Jarvis sigue atento
     /// y responde sin necesidad de repetir el nombre.
     pub attention_window_secs: u64,
+    /// Dentro de la ventana de atención, ignora frases con menos de esta
+    /// cantidad de palabras y sin el nombre: las alucinaciones de Whisper en
+    /// silencio son casi siempre de una sola palabra ("bip", "bien"), los
+    /// comandos reales son multi-palabra. 1 = sin filtro.
+    pub window_min_words: usize,
+    /// Frases-basura típicas de Whisper en silencio/ruido: si la transcripción
+    /// normalizada coincide con alguna, se descarta por completo (ni siquiera
+    /// se guarda como contexto ambiental).
+    pub ignore_phrases: Vec<String>,
     /// true = las frases ignoradas se anteponen como contexto a la siguiente
     /// consulta real del usuario.
     pub ambient_context: bool,
@@ -157,7 +179,18 @@ impl Default for WakeConfig {
         Self {
             enabled: true,
             words: vec!["jarvis".to_string()],
-            attention_window_secs: 45,
+            attention_window_secs: 25,
+            window_min_words: 2,
+            ignore_phrases: [
+                "gracias",
+                "muchas gracias",
+                "gracias por ver el video",
+                "subtitulos realizados por la comunidad de amara org",
+                "suscribete",
+                "hasta la proxima",
+            ]
+            .map(String::from)
+            .to_vec(),
             ambient_context: true,
             ambient_context_max: 5,
             ambient_context_ttl_secs: 120,

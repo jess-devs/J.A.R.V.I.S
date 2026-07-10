@@ -43,6 +43,9 @@ impl SttWorker {
                 silero_sensitivity: stt.silero_sensitivity,
                 webrtc_sensitivity: stt.webrtc_sensitivity,
                 post_speech_silence_duration: stt.post_speech_silence_duration,
+                min_length_of_recording: stt.min_length_of_recording,
+                min_gap_between_recordings: stt.min_gap_between_recordings,
+                silero_deactivity_detection: stt.silero_deactivity_detection,
             })
             .await?;
 
