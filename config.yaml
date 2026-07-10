@@ -55,13 +55,13 @@ wake:
   ambient_context_ttl_secs: 120 # las más viejas que esto se descartan
 
 llm:
-  provider: deepseek # ollama | anthropic | openai | deepseek
+  provider: ollama # ollama | anthropic | openai | deepseek
   ollama:
     base_url: "http://localhost:11434"
     model: "qwen2.5:7b" # soporta tool calling. Alternativa recomendada: "qwen3:8b" (mejor con herramientas, requiere think: false)
     think: null # null = no enviar el campo (qwen2.5 lo rechaza). Con qwen3/deepseek-r1 poner false para no hablar los tokens de razonamiento
   anthropic:
-    model: "claude-sonnet-4-5"
+    model: "claude-sonnet-5"
     api_key_env: "ANTHROPIC_API_KEY"
   openai:
     model: "gpt-4o-mini"
