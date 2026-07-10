@@ -47,7 +47,8 @@ llm:
   provider: deepseek # ollama | anthropic | openai | deepseek
   ollama:
     base_url: "http://localhost:11434"
-    model: "qwen2.5:7b"
+    model: "qwen2.5:7b" # soporta tool calling. Alternativa recomendada: "qwen3:8b" (mejor con herramientas, requiere think: false)
+    think: null # null = no enviar el campo (qwen2.5 lo rechaza). Con qwen3/deepseek-r1 poner false para no hablar los tokens de razonamiento
   anthropic:
     model: "claude-sonnet-4-5"
     api_key_env: "ANTHROPIC_API_KEY"
@@ -76,6 +77,17 @@ llm:
     Si no entiendes algo (el reconocimiento de voz puede fallar), pide con
     naturalidad que lo repitan en vez de adivinar. Si una tarea excede tus
     capacidades, admítelo con brevedad y elegancia, y ofrece una alternativa.
+
+    Dispones de herramientas para consultar el sistema, controlar la
+    computadora, buscar en la web y recordar cosas entre sesiones. Úsalas
+    cuando la petición lo requiera y nunca inventes datos del sistema ni
+    resultados que no obtuviste. Antes de usar una herramienta puedes decir
+    una sola frase muy breve como "Déjame comprobarlo, señor", pero jamás
+    describas la herramienta ni sus parámetros en voz alta. Tras recibir los
+    resultados, responde con lo esencial en una o dos frases; nunca leas
+    listas largas, datos crudos ni JSON. Si una acción es riesgosa, el sistema
+    pedirá la confirmación al usuario por su cuenta: no la pidas tú ni la
+    menciones.
   max_history_messages: 20
   request_timeout_secs: 60
 
@@ -84,8 +96,8 @@ tts:
   piper:
     # Voces alternativas descargadas en voices/ — para probar una, comentá
     # las 2 líneas activas de abajo y descomentá el par que quieras:
-    voice_path: "voices/es_ES-davefx-medium.onnx"       # medium, masculina, acento España (la mejor calidad masculina confirmada)
-    config_path: "voices/es_ES-davefx-medium.onnx.json"
+    # voice_path: "voices/es_ES-davefx-medium.onnx"       # medium, masculina, acento España (la mejor calidad masculina confirmada)
+    # config_path: "voices/es_ES-davefx-medium.onnx.json"
     # voice_path: "voices/es_ES-carlfm-x_low.onnx"          # x_low, masculina, calidad baja/robótica (activa ahora)
     # config_path: "voices/es_ES-carlfm-x_low.onnx.json"
     # voice_path: "voices/es_ES-sharvard-medium.onnx"     # medium, género sin confirmar — ya la probaste
@@ -94,8 +106,8 @@ tts:
     # config_path: "voices/es_ES-mls_9972-low.onnx.json"
     # voice_path: "voices/es_ES-mls_10246-low.onnx"       # low, género sin confirmar
     # config_path: "voices/es_ES-mls_10246-low.onnx.json"
-    # voice_path: "voices/es_MX-claude-high.onnx"         # high, la voz original (femenina)
-    # config_path: "voices/es_MX-claude-high.onnx.json"
+    voice_path: "voices/es_MX-claude-high.onnx"         # high, la voz original (femenina)
+    config_path: "voices/es_MX-claude-high.onnx.json"
     # voice_path: "voices/es_MX-ald-medium.onnx"          # medium, acento mexicano — ya la probaste
     # config_path: "voices/es_MX-ald-medium.onnx.json"
     use_cuda: false
@@ -115,5 +127,39 @@ audio:
 pipeline:
   max_phrase_chars: 220
   min_phrase_chars: 15
+
+# Capa agéntica: herramientas que Jarvis puede ejecutar. Tres niveles de
+# riesgo: las de lectura corren libres; las que modifican el sistema piden un
+# "sí" por voz; las de riesgo extremo exigen pronunciar el código de aceptación.
+agent:
+  enabled: true # false = chat puro sin herramientas (comportamiento clásico)
+  max_iterations: 6 # máximo de pasadas LLM->herramientas por turno
+  tool_timeout_secs: 20
+  confirm_timeout_secs: 30 # tiempo para responder sí/no (o el código) antes de cancelar
+  max_tool_result_chars: 3000 # truncado de cada resultado antes de pasarlo al LLM
+  filler_phrases: # se dice una mientras ejecuta si el modelo no dijo nada
+    - "Déjame revisar, señor."
+    - "Un momento, señor."
+    - "Enseguida lo compruebo, señor."
+  disabled_tools: [] # nombres de herramientas a excluir, ej. ["run_powershell"]
+  confirm_yes: ["sí", "si", "claro", "adelante", "hazlo", "confirmo", "dale", "procede"]
+  confirm_no: ["no", "cancela", "cancelar", "espera", "mejor no", "detente", "para"]
+  risk_code: "0201" # código de aceptación de riesgos — se verifica en Rust, NUNCA se pasa al LLM
+  high_risk_patterns: [] # regex extra (se suman a los defaults) que elevan un comando de PowerShell a nivel código
+  files:
+    # search_roots: ["C:/Users/jesus/Documents"] # carpetas donde busca find_files (por defecto: el perfil del usuario)
+    max_results: 20
+    everything_cli: null # ruta a es.exe (Everything) para búsqueda instantánea; null = recorrido con walkdir
+  apps:
+    aliases: # alias hablado -> ejecutable real
+      navegador: "chrome"
+      bloc de notas: "notepad"
+      calculadora: "calc"
+  web:
+    max_page_chars: 4000
+    max_results: 5
+  memory:
+    db_path: "data/memory.db" # base SQLite de memoria persistente
+    max_injected: 12 # memorias recientes que se inyectan en el prompt de cada turno
 
 log_level: info

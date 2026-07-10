@@ -1,8 +1,10 @@
 # Jarvis
 
-Asistente de voz conversacional en tiempo real (STT → LLM → TTS), en español, pensado para correr 100% local (sin ninguna API key) con opción de usar servicios en la nube.
+Asistente de voz conversacional y **agéntico** en tiempo real (STT → LLM → TTS), en español, pensado para correr 100% local (sin ninguna API key) con opción de usar servicios en la nube.
 
 Loop continuo: escuchás → VAD detecta la pausa natural → se transcribe → el LLM responde en streaming → cada frase se sintetiza y se reproduce mientras el LLM sigue generando el resto → vuelve a escuchar.
+
+Además de conversar, Jarvis puede **usar herramientas**: consultar el estado del sistema y la fecha, abrir y cerrar aplicaciones, buscar y abrir archivos, ejecutar comandos, controlar el volumen, buscar en la web y recordar cosas entre sesiones — todo por voz, con confirmación hablada para las acciones riesgosas. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 
 ## Arquitectura
 
@@ -49,6 +51,8 @@ ollama serve            # si no corre ya como servicio
 ollama pull qwen2.5:7b  # modelo default en config.yaml
 ```
 
+El modo agéntico necesita un modelo que soporte **tool calling**. `qwen2.5:7b` (el default) funciona, aunque a veces olvida llamar una herramienta o alucina argumentos. Para mejores resultados con herramientas se recomienda `qwen3:8b` (`ollama pull qwen3:8b`) o `llama3.1:8b`; con `qwen3` poné `llm.ollama.think: false` en `config.yaml` para que los tokens de razonamiento no se hablen en voz alta. Si preferís chat puro sin herramientas, poné `agent.enabled: false`.
+
 ### 3. Voz de Piper
 
 ```powershell
@@ -90,6 +94,36 @@ Todas las claves son opcionales — lo que no se especifique usa el valor por de
 - **`tts`**: `provider: piper | elevenlabs`, ruta a la voz de Piper o config de ElevenLabs (`voice_id`, `output_format`).
 - **`audio`**: dispositivo de salida (`null` = default del sistema) y volumen.
 - **`pipeline`**: longitud mínima/máxima de las frases que se mandan a sintetizar.
+- **`agent`**: capa agéntica — activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, y sub-config de `files`/`apps`/`web`/`memory`. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
+
+## Capacidades agénticas (herramientas)
+
+Cuando `agent.enabled: true` (el default), Jarvis dispone de un conjunto de herramientas que el LLM decide usar según lo que pidas. Mientras las ejecuta, dice una frase breve ("Déjame revisar, señor") y luego responde con el resultado.
+
+**Herramientas disponibles:**
+
+| Herramienta | Qué hace | Riesgo |
+|---|---|---|
+| `get_datetime` | Fecha y hora actual (también se inyecta en el prompt cada turno). | — |
+| `system_status` | Uso de CPU, RAM y batería. | — |
+| `list_processes` | Procesos que más CPU o memoria consumen. | — |
+| `open_app` | Abre una aplicación por nombre o alias. | — |
+| `close_app` | Cierra los procesos de una app. | 🔸 confirmación |
+| `find_files` / `open_file` | Busca archivos por nombre y los abre con su app por defecto. | — |
+| `run_powershell` | Ejecuta un comando de PowerShell. | 🔸 confirmación / 🔴 código |
+| `get_volume` / `set_volume` | Consulta y ajusta el volumen maestro. | — |
+| `web_search` / `fetch_page` | Busca en la web (DuckDuckGo, sin API key) y lee páginas. | — |
+| `remember` / `recall` / `forget` | Memoria persistente entre sesiones (SQLite local). | `forget` 🔸 |
+
+**Tres niveles de seguridad**, clasificados de forma determinista en Rust (nunca los decide el LLM):
+
+- **Lectura** (sin marca): se ejecutan directo.
+- 🔸 **Confirmación**: acciones que modifican el sistema. Jarvis pregunta "¿Confirma, señor?" y espera un sí/no por voz.
+- 🔴 **Código**: acciones de riesgo extremo (borrado recursivo, apagado, cambios en el registro, etc., detectadas por patrones sobre el comando). Jarvis describe el riesgo y exige que **pronuncies el código de aceptación** (`agent.risk_code`, por defecto `0201` — cámbialo). El código se verifica en Rust y nunca se pasa al LLM, así que el modelo no puede auto-confirmarse ni revelarlo. Un intento; si es incorrecto, se cancela.
+
+La memoria persistente vive en `data/memory.db`. Las memorias recientes se inyectan en el prompt de cada turno, así que Jarvis "recuerda" sin necesitar `recall` para lo habitual. Ejemplo: decile "recuerda que mi cumpleaños es el 3 de marzo", reiniciá Jarvis, y preguntá "¿cuándo es mi cumpleaños?".
+
+Para búsqueda de archivos instantánea sobre todo el disco, instalá [Everything](https://www.voidtools.com/) y apuntá `agent.files.everything_cli` a `es.exe`; si no, se usa un recorrido acotado de las carpetas en `agent.files.search_roots`.
 
 ### Detección de hardware (calibración medida)
 
@@ -144,3 +178,4 @@ El `system_prompt` por defecto le pide al modelo respuestas breves (1-2 oracione
 
 - ✅ Modo local completo: STT (RealtimeSTT/faster-whisper), LLM (Ollama, streaming), TTS (Piper), pipeline de streaming frase-por-frase con reproducción superpuesta a la síntesis.
 - ✅ Modo nube: LLM (Anthropic, OpenAI, DeepSeek, streaming SSE) y TTS (ElevenLabs), intercambiables por configuración.
+- ✅ Modo agéntico: tool calling con streaming en los cuatro proveedores de LLM, herramientas de sistema/PC/web/memoria, loop multi-paso, y seguridad por voz en tres niveles (lectura / confirmación / código de aceptación de riesgos).
