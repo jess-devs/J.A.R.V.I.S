@@ -23,3 +23,12 @@ async-trait = "0.1"
 dotenvy = "0.15"
 clap = { version = "4", features = ["derive"] }
 regex = "1"
+chrono = "0.4"
+sysinfo = "0.33"
+starship-battery = "0.10"
+rand = "0.8"
+walkdir = "2"
+scraper = "0.22"
+url = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com"] }
