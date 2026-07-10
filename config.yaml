@@ -10,8 +10,8 @@ workers:
   stt_init_timeout_secs: 60
   tts_init_timeout_secs: 20
   shutdown_timeout_secs: 3
-  restart_on_crash: true
-  max_restarts: 1
+  restart_on_crash: true # si el worker de STT muere o se cuelga, se reinicia solo en vez de tumbar todo Jarvis
+  max_restarts: 1 # tope de reinicios por corrida; si se agota, Jarvis termina y hay que reiniciarlo a mano
 
 stt:
   language: "es"

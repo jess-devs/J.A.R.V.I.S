@@ -43,6 +43,9 @@ pub struct Orchestrator {
     registry: ToolRegistry,
     memory: Arc<MemoryStore>,
     state: AgentState,
+    /// Cuántas veces se reinició el worker de STT en esta corrida, contra
+    /// `config.workers.max_restarts`.
+    stt_restarts: u32,
 }
 
 impl Orchestrator {
@@ -72,6 +75,7 @@ impl Orchestrator {
             registry,
             memory,
             state: AgentState::Idle,
+            stt_restarts: 0,
         })
     }
 
@@ -86,10 +90,34 @@ impl Orchestrator {
                     self.on_transcript(text).await;
                 }
                 SttEvent::WorkerDied => {
-                    return Err(WorkerError::Crashed(None).into());
+                    self.restart_stt_or_die().await?;
                 }
             }
         }
+        Ok(())
+    }
+
+    /// El worker de STT murió (crash real, o se auto-terminó porque su propio
+    /// watchdog lo detectó irrecuperablemente colgado — ver
+    /// `workers/stt_worker.py::watchdog_loop`). Si `restart_on_crash` está
+    /// activo y queda presupuesto en `max_restarts`, lo reemplaza por uno
+    /// nuevo y Jarvis sigue escuchando sin perder historial ni el estado de
+    /// la conversación. Si no, propaga el error (comportamiento previo: la
+    /// app termina).
+    async fn restart_stt_or_die(&mut self) -> Result<()> {
+        if !self.config.workers.restart_on_crash
+            || self.stt_restarts >= self.config.workers.max_restarts
+        {
+            return Err(WorkerError::Crashed(None).into());
+        }
+        self.stt_restarts += 1;
+        tracing::warn!(
+            intento = self.stt_restarts,
+            maximo = self.config.workers.max_restarts,
+            "el worker de STT se cayó o quedó colgado; reiniciándolo"
+        );
+        self.stt = SttWorker::spawn(&self.config.workers, &self.config.stt).await?;
+        tracing::info!("worker de STT reiniciado, Jarvis sigue escuchando");
         Ok(())
     }
 
