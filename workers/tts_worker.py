@@ -9,9 +9,7 @@ estrictamente secuencial (una frase a la vez), asi que no hace falta
 concurrencia ni un hilo de control separado como en el worker de STT.
 """
 
-import io
 import sys
-import wave
 
 import ipc  # primer import: aplica la redireccion de stdout a nivel de fd
 
@@ -64,19 +62,22 @@ def main() -> None:
         request_id = msg.get("request_id")
         text = msg.get("text", "")
         try:
-            buffer = io.BytesIO()
-            with wave.open(buffer, "wb") as wav_out:
-                voice.synthesize_wav(text, wav_out, syn_config=syn_config)
-            buffer.seek(0)
-            with wave.open(buffer, "rb") as wav_in:
-                header = {
-                    "type": "audio",
-                    "request_id": request_id,
-                    "sample_rate": wav_in.getframerate(),
-                    "channels": wav_in.getnchannels(),
-                    "sample_width": wav_in.getsampwidth(),
-                }
-                pcm = wav_in.readframes(wav_in.getnframes())
+            # synthesize() entrega PCM s16le mono directo (un AudioChunk por
+            # frase interna): no hace falta codificar un WAV en memoria para
+            # releerlo al instante. Se acumula todo el audio de la frase en
+            # un solo mensaje porque el protocolo IPC espera exactamente un
+            # "audio" por request_id (PendingSlot unico en el lado Rust).
+            pcm = b"".join(
+                chunk.audio_int16_bytes
+                for chunk in voice.synthesize(text, syn_config=syn_config)
+            )
+            header = {
+                "type": "audio",
+                "request_id": request_id,
+                "sample_rate": sample_rate,
+                "channels": 1,
+                "sample_width": 2,
+            }
             ipc.send_audio(header, pcm)
         except Exception as exc:  # noqa: BLE001 - un fallo de sintesis puntual no debe matar el worker
             ipc.send(
