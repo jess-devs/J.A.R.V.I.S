@@ -159,10 +159,27 @@ impl LlmProvider for AnthropicProvider {
         let api_key = std::env::var(&self.api_key_env)
             .map_err(|_| LlmError::MissingApiKey(self.api_key_env.clone()))?;
 
-        let system = history
+        // El system va como array de bloques: el primero (prompt base +
+        // memorias) es estable entre turnos y se marca como breakpoint de
+        // prompt caching; los siguientes (fecha/hora) cambian por turno y
+        // quedan fuera del prefijo cacheado. Si el prefijo no llega al
+        // mínimo cacheable, la API ignora el marcador sin error.
+        let system_blocks: Vec<Value> = history
             .iter()
-            .find(|m| m.role == Role::System)
-            .map(|m| m.content.as_str());
+            .filter(|m| m.role == Role::System && !m.content.is_empty())
+            .enumerate()
+            .map(|(i, m)| {
+                if i == 0 {
+                    json!({
+                        "type": "text",
+                        "text": m.content,
+                        "cache_control": { "type": "ephemeral" },
+                    })
+                } else {
+                    json!({ "type": "text", "text": m.content })
+                }
+            })
+            .collect();
 
         let mut body = json!({
             "model": self.model,
@@ -170,11 +187,11 @@ impl LlmProvider for AnthropicProvider {
             "messages": build_messages(history),
             "stream": true,
         });
-        if let Some(system) = system {
-            body["system"] = json!(system);
+        if !system_blocks.is_empty() {
+            body["system"] = json!(system_blocks);
         }
         if !tools.is_empty() {
-            let specs: Vec<Value> = tools
+            let mut specs: Vec<Value> = tools
                 .iter()
                 .map(|t| {
                     json!({
@@ -184,6 +201,11 @@ impl LlmProvider for AnthropicProvider {
                     })
                 })
                 .collect();
+            if let Some(last) = specs.last_mut() {
+                // Los tools van antes del system en el prefijo cacheable:
+                // este breakpoint cachea las definiciones de herramientas.
+                last["cache_control"] = json!({ "type": "ephemeral" });
+            }
             body["tools"] = json!(specs);
         }
 
