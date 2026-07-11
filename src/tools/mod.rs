@@ -56,6 +56,9 @@ pub trait Tool: Send + Sync {
 
 pub struct ToolRegistry {
     tools: Vec<Arc<dyn Tool>>,
+    /// Specs precalculados una sola vez: nombres/schemas son estáticos, no
+    /// hay que reclonarlos en cada turno.
+    specs: Arc<Vec<ToolSpec>>,
     max_result_chars: usize,
 }
 
@@ -81,21 +84,25 @@ impl ToolRegistry {
             tools.push(Arc::new(memory::Forget::new(memory.clone())));
         }
         tools.retain(|t| !cfg.disabled_tools.iter().any(|d| d == t.name()));
+        let specs = Arc::new(
+            tools
+                .iter()
+                .map(|t| ToolSpec {
+                    name: t.name().to_string(),
+                    description: t.description().to_string(),
+                    parameters: t.parameters_schema(),
+                })
+                .collect(),
+        );
         Self {
             tools,
+            specs,
             max_result_chars: cfg.max_tool_result_chars,
         }
     }
 
-    pub fn specs(&self) -> Vec<ToolSpec> {
-        self.tools
-            .iter()
-            .map(|t| ToolSpec {
-                name: t.name().to_string(),
-                description: t.description().to_string(),
-                parameters: t.parameters_schema(),
-            })
-            .collect()
+    pub fn specs(&self) -> Arc<Vec<ToolSpec>> {
+        self.specs.clone()
     }
 
     pub fn get(&self, name: &str) -> Option<&Arc<dyn Tool>> {

@@ -192,7 +192,7 @@ impl Orchestrator {
             self.tts.clone(),
             &mut self.player,
             &self.history,
-            &[],
+            Arc::new(Vec::new()),
             &self.config.pipeline,
         )
         .await?;

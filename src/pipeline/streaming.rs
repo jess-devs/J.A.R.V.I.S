@@ -38,7 +38,7 @@ pub async fn run_speaking_turn(
     tts: Arc<dyn TtsProvider>,
     player: &mut AudioPlayer,
     history: &[ChatMessage],
-    tools: &[ToolSpec],
+    tools: Arc<Vec<ToolSpec>>,
     cfg: &PipelineConfig,
 ) -> Result<TurnOutput, JarvisError> {
     let (event_tx, mut event_rx) = mpsc::channel::<Result<LlmEvent, LlmError>>(32);
@@ -48,7 +48,6 @@ pub async fn run_speaking_turn(
     let llm_task = tokio::spawn({
         let llm = llm.clone();
         let history = history.to_vec();
-        let tools = tools.to_vec();
         async move { llm.stream_chat(&history, &tools, event_tx).await }
     });
 

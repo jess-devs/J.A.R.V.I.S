@@ -95,7 +95,7 @@ async fn turn_loop(
             ctx.tts.clone(),
             ctx.player,
             history,
-            &specs,
+            specs.clone(),
             &ctx.config.pipeline,
         )
         .await?;
@@ -147,7 +147,7 @@ async fn turn_loop(
         ctx.tts.clone(),
         ctx.player,
         history,
-        &[],
+        Arc::new(Vec::new()),
         &ctx.config.pipeline,
     )
     .await?;
