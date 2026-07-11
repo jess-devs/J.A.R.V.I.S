@@ -16,6 +16,7 @@ use tokio_stream::StreamExt;
 use crate::config::OllamaConfig;
 use crate::errors::LlmError;
 
+use super::decode::Utf8StreamDecoder;
 use super::{ChatMessage, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
 
 pub struct OllamaProvider {
@@ -193,6 +194,7 @@ impl LlmProvider for OllamaProvider {
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut decoder = Utf8StreamDecoder::new();
         let mut call_counter = 0usize;
 
         while let Some(chunk) = stream.next().await {
@@ -206,7 +208,7 @@ impl LlmProvider for OllamaProvider {
                     return Err(LlmError::UnexpectedResponse(message));
                 }
             };
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            decoder.feed(&chunk, &mut buffer);
 
             while let Some(pos) = buffer.find('\n') {
                 let line = buffer[..pos].trim().to_string();

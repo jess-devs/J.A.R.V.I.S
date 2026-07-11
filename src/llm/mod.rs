@@ -7,6 +7,7 @@
 //! protocolo — el consumidor solo ve `ToolCall` ya completos y parseados.
 
 pub mod anthropic;
+mod decode;
 pub mod deepseek;
 pub mod ollama;
 pub mod openai;

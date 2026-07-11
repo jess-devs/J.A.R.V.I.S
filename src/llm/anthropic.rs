@@ -19,6 +19,7 @@ use tokio_stream::StreamExt;
 use crate::config::AnthropicConfig;
 use crate::errors::LlmError;
 
+use super::decode::Utf8StreamDecoder;
 use super::{ChatMessage, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -208,11 +209,12 @@ impl LlmProvider for AnthropicProvider {
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut decoder = Utf8StreamDecoder::new();
         let mut current_tool: Option<PartialToolUse> = None;
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(LlmError::Network)?;
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            decoder.feed(&chunk, &mut buffer);
 
             while let Some(pos) = buffer.find('\n') {
                 let line = buffer[..pos].trim().to_string();

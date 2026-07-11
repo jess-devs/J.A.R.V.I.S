@@ -19,6 +19,7 @@ use tokio_stream::StreamExt;
 
 use crate::errors::LlmError;
 
+use super::decode::Utf8StreamDecoder;
 use super::{ChatMessage, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
 
 pub struct OpenAiCompatibleProvider {
@@ -247,6 +248,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
         let mut stream = response.bytes_stream();
         let mut buffer = String::new();
+        let mut decoder = Utf8StreamDecoder::new();
         let mut partial_calls: BTreeMap<u32, PartialCall> = BTreeMap::new();
 
         // Emite los tool calls acumulados y el Done final. Se llama al ver
@@ -266,7 +268,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(LlmError::Network)?;
-            buffer.push_str(&String::from_utf8_lossy(&chunk));
+            decoder.feed(&chunk, &mut buffer);
 
             while let Some(pos) = buffer.find('\n') {
                 let line = buffer[..pos].trim().to_string();
