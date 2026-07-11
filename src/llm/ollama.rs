@@ -171,15 +171,13 @@ impl LlmProvider for OllamaProvider {
         let response = match self.client.post(&url).json(&body).send().await {
             Ok(r) => r,
             Err(_) => {
-                let err = LlmError::OllamaUnreachable {
+                // LlmError no es Clone (arrastra reqwest::Error), así que se
+                // construye dos veces vía closure en vez de duplicar el literal.
+                let unreachable = || LlmError::OllamaUnreachable {
                     base_url: self.base_url.clone(),
                 };
-                let _ = tx
-                    .send(Err(LlmError::OllamaUnreachable {
-                        base_url: self.base_url.clone(),
-                    }))
-                    .await;
-                return Err(err);
+                let _ = tx.send(Err(unreachable())).await;
+                return Err(unreachable());
             }
         };
 
