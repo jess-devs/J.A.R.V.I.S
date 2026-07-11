@@ -21,8 +21,7 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
 
 fn build_client(cfg: &WebToolConfig) -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(FETCH_TIMEOUT)
+    crate::http::client_builder(FETCH_TIMEOUT)
         .user_agent(cfg.user_agent.clone())
         .build()
         .expect("configuración de cliente reqwest válida")

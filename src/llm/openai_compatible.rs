@@ -39,10 +39,7 @@ impl OpenAiCompatibleProvider {
         if std::env::var(&api_key_env).is_err() {
             return Err(LlmError::MissingApiKey(api_key_env));
         }
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(request_timeout_secs))
-            .build()
-            .expect("configuración de cliente reqwest válida");
+        let client = crate::http::client(Duration::from_secs(request_timeout_secs));
         Ok(Self {
             client,
             base_url: base_url.into(),

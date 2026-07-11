@@ -36,10 +36,7 @@ impl AnthropicProvider {
         if std::env::var(&config.api_key_env).is_err() {
             return Err(LlmError::MissingApiKey(config.api_key_env.clone()));
         }
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(request_timeout_secs))
-            .build()
-            .expect("configuración de cliente reqwest válida");
+        let client = crate::http::client(Duration::from_secs(request_timeout_secs));
         Ok(Self {
             client,
             model: config.model.clone(),

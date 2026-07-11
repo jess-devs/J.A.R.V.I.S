@@ -29,10 +29,7 @@ impl ElevenLabsProvider {
         if std::env::var(&config.api_key_env).is_err() {
             return Err(TtsError::MissingApiKey(config.api_key_env.clone()));
         }
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-            .build()
-            .expect("configuración de cliente reqwest válida");
+        let client = crate::http::client(Duration::from_secs(REQUEST_TIMEOUT_SECS));
         Ok(Self {
             client,
             voice_id: config.voice_id.clone(),

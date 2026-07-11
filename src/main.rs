@@ -2,6 +2,7 @@ mod agent;
 mod audio;
 mod config;
 mod errors;
+mod http;
 mod ipc;
 mod llm;
 mod memory;
