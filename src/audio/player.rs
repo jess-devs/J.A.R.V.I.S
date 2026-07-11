@@ -151,9 +151,14 @@ impl AudioPlayer {
     /// de reproducirse, con un margen residual de la latencia física de la
     /// tarjeta de sonido). Ver nota de timeout en `play_chunk`.
     pub async fn wait_until_drained(&self) -> Result<(), AudioError> {
+        // Poll de 10ms en vez de notificación desde el callback de cpal:
+        // `Notify::notify_one` toma un lock de waiters y puede invocar el
+        // waker de tokio, y el callback de audio (hilo de tiempo real) no
+        // debe bloquearse esperando al runtime. El desperdicio medio es
+        // ~5ms una vez por turno, con coste de CPU despreciable.
         let drain = async {
             while !self.producer.is_empty() {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         };
         tokio::time::timeout(self.drain_timeout, drain)
