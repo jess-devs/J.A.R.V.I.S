@@ -7,6 +7,7 @@
 //! compilado en el bundle de SQLite), no un vector store.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use rusqlite::Connection;
 use tokio::sync::Mutex;
@@ -23,6 +24,10 @@ pub struct Memory {
 
 pub struct MemoryStore {
     conn: Mutex<Connection>,
+    /// Se incrementa en cada escritura (remember/forget) para que el
+    /// orquestador sepa cuándo invalidar el bloque de memorias cacheado en
+    /// el system prompt.
+    generation: AtomicU64,
 }
 
 impl MemoryStore {
@@ -44,7 +49,14 @@ impl MemoryStore {
         .map_err(|e| ToolError::Execution(format!("no se pudo crear el schema: {e}")))?;
         Ok(Self {
             conn: Mutex::new(conn),
+            generation: AtomicU64::new(0),
         })
+    }
+
+    /// Contador de escrituras: cambia cada vez que remember/forget modifican
+    /// la base. Sirve como clave de invalidación de caches.
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
     }
 
     pub async fn remember(
@@ -58,6 +70,7 @@ impl MemoryStore {
             rusqlite::params![content, category],
         )
         .map_err(|e| ToolError::Execution(format!("no se pudo guardar: {e}")))?;
+        self.generation.fetch_add(1, Ordering::Relaxed);
         Ok(conn.last_insert_rowid())
     }
 
@@ -126,6 +139,9 @@ impl MemoryStore {
                 [],
             )
             .map_err(|e| ToolError::Execution(format!("no se pudo borrar: {e}")))?;
+        if deleted > 0 {
+            self.generation.fetch_add(1, Ordering::Relaxed);
+        }
         Ok(deleted)
     }
 
@@ -150,6 +166,7 @@ mod tests {
         .unwrap();
         MemoryStore {
             conn: Mutex::new(conn),
+            generation: AtomicU64::new(0),
         }
     }
 

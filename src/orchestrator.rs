@@ -42,6 +42,10 @@ pub struct Orchestrator {
     gate: AttentionGate,
     registry: ToolRegistry,
     memory: Arc<MemoryStore>,
+    /// Bloque estático del system prompt (prompt base + memorias) cacheado
+    /// como `(generación del MemoryStore, contenido)`. Ver
+    /// [`Self::static_system_content`].
+    system_static_cache: Option<(u64, String)>,
     state: AgentState,
     /// Cuántas veces se reinició el worker de STT en esta corrida, contra
     /// `config.workers.max_restarts`.
@@ -59,7 +63,13 @@ impl Orchestrator {
             config.audio.drain_timeout_secs,
         )?;
 
-        let history = vec![ChatMessage::system(config.llm.system_prompt.clone())];
+        // Dos mensajes system: [0] el bloque estático (prompt base +
+        // memorias, estable entre turnos para el prompt caching de los
+        // proveedores) y [1] el dinámico (fecha/hora del turno).
+        let history = vec![
+            ChatMessage::system(config.llm.system_prompt.clone()),
+            ChatMessage::system(String::new()),
+        ];
         let gate = AttentionGate::new(config.wake.clone());
         let memory = Arc::new(MemoryStore::open(&config.agent.memory.db_path)?);
         let registry = ToolRegistry::build(&config.agent, memory.clone());
@@ -74,6 +84,7 @@ impl Orchestrator {
             gate,
             registry,
             memory,
+            system_static_cache: None,
             state: AgentState::Idle,
             stt_restarts: 0,
         })
@@ -165,9 +176,13 @@ impl Orchestrator {
             tracing::warn!(error = %e, "no se pudo silenciar el micrófono, sigo igual");
         }
 
-        // El system prompt es dinámico: se reconstruye con la fecha/hora de
-        // este turno y las memorias persistentes relevantes.
-        self.history[0] = self.build_system_message().await;
+        // history[0] es el bloque estático (prompt base + memorias, cacheado)
+        // y history[1] el dinámico (fecha/hora de este turno).
+        self.history[0] = ChatMessage::system(self.static_system_content().await);
+        self.history[1] = ChatMessage::system(format!(
+            "Contexto actual: hoy es {} (hora local).",
+            system_info::fecha_hora_es()
+        ));
 
         let result = if self.registry.is_empty() {
             self.plain_speaking_turn().await
@@ -354,16 +369,23 @@ impl Orchestrator {
         self.trim_history();
     }
 
-    /// System prompt dinámico: prompt base + fecha/hora local + memorias
-    /// persistentes recientes (para que Jarvis conozca al usuario sin tener
-    /// que llamar a `recall` en cada turno).
-    async fn build_system_message(&self) -> ChatMessage {
-        let mut content = self.config.llm.system_prompt.clone();
-        content.push_str(&format!(
-            "\n\nContexto actual: hoy es {} (hora local).",
-            system_info::fecha_hora_es()
-        ));
+    /// Parte estática del system prompt: prompt base + memorias persistentes
+    /// recientes (para que Jarvis conozca al usuario sin tener que llamar a
+    /// `recall` en cada turno). Se cachea y solo se reconstruye cuando la
+    /// generación del MemoryStore cambió (alguna tool remember/forget
+    /// escribió) — evita una consulta a SQLite por turno y mantiene estable
+    /// el prefijo para el prompt caching de los proveedores en nube. La
+    /// fecha/hora va en un segundo mensaje system aparte, justamente para no
+    /// invalidar este prefijo en cada turno.
+    async fn static_system_content(&mut self) -> String {
+        let generation = self.memory.generation();
+        if let Some((cached_gen, content)) = &self.system_static_cache {
+            if *cached_gen == generation {
+                return content.clone();
+            }
+        }
 
+        let mut content = self.config.llm.system_prompt.clone();
         let max = self.config.agent.memory.max_injected;
         match self.memory.all_recent(max).await {
             Ok(memories) if !memories.is_empty() => {
@@ -380,26 +402,27 @@ impl Orchestrator {
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "no se pudieron leer las memorias"),
         }
-        ChatMessage::system(content)
+        self.system_static_cache = Some((generation, content.clone()));
+        content
     }
 
-    /// Conserva el system prompt (siempre el primer mensaje) + los últimos
-    /// `max_history_messages` mensajes de la conversación. El corte solo
-    /// puede caer en un mensaje `User`: nunca debe quedar un `Tool` huérfano
-    /// ni un `Assistant` con tool_calls sin sus resultados (rompe los
-    /// protocolos de OpenAI/Anthropic y confunde a Ollama).
+    /// Conserva los dos system prompts (siempre los dos primeros mensajes) +
+    /// los últimos `max_history_messages` mensajes de la conversación. El
+    /// corte solo puede caer en un mensaje `User`: nunca debe quedar un
+    /// `Tool` huérfano ni un `Assistant` con tool_calls sin sus resultados
+    /// (rompe los protocolos de OpenAI/Anthropic y confunde a Ollama).
     fn trim_history(&mut self) {
         let max = self.config.llm.max_history_messages;
-        if self.history.len() <= max + 1 {
+        if self.history.len() <= max + 2 {
             return;
         }
-        let mut tail_start = self.history.len() - max;
+        let mut tail_start = (self.history.len() - max).max(2);
         while tail_start < self.history.len() && self.history[tail_start].role != Role::User {
             tail_start += 1;
         }
-        let system = self.history[0].clone();
-        let mut trimmed = Vec::with_capacity(self.history.len() - tail_start + 1);
-        trimmed.push(system);
+        let mut trimmed = Vec::with_capacity(self.history.len() - tail_start + 2);
+        trimmed.push(self.history[0].clone());
+        trimmed.push(self.history[1].clone());
         trimmed.extend_from_slice(&self.history[tail_start..]);
         self.history = trimmed;
     }
