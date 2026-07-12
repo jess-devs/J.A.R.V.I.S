@@ -48,10 +48,14 @@ impl SentenceChunker {
         }
 
         while self.buffer.len() > self.max_len {
-            let cut = self.buffer[..self.max_len]
+            let mut boundary = self.max_len;
+            while !self.buffer.is_char_boundary(boundary) {
+                boundary -= 1;
+            }
+            let cut = self.buffer[..boundary]
                 .rfind(' ')
                 .map(|p| p + 1)
-                .unwrap_or(self.max_len);
+                .unwrap_or(boundary);
             if cut == 0 {
                 break;
             }
@@ -167,6 +171,18 @@ mod tests {
         let phrases = chunker.push("una oracion muy larga sin puntuacion alguna que sigue y sigue");
         assert!(!phrases.is_empty());
         assert!(phrases.iter().all(|p| p.len() <= 21));
+    }
+
+    #[test]
+    fn fallback_no_panickea_en_frontera_multibyte() {
+        // El carácter multibyte '｜' (3 bytes, U+FF5C) debe caer justo en o
+        // cerca del offset de corte (max_len) para reproducir el panic
+        // original: "end byte index N is not a char boundary".
+        let mut chunker = SentenceChunker::new(20, 3);
+        let texto = "una oracion larga｜sin puntuacion que sigue y sigue";
+        let phrases = chunker.push(texto);
+        assert!(!phrases.is_empty());
+        assert!(phrases.iter().all(|p| p.is_char_boundary(0)));
     }
 
     #[test]
