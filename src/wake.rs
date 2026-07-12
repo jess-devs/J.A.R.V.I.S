@@ -144,7 +144,10 @@ impl AttentionGate {
             .is_some_and(|deadline| Instant::now() < deadline)
     }
 
-    fn contains_wake_word(&self, text: &str) -> bool {
+    /// Expuesto a `crate::echo_gate` para la detección de wake word durante
+    /// una interrupción por voz (barge-in en modo `wake_word`), fuera del
+    /// flujo normal de `decide()` (que también mira la ventana de atención).
+    pub(crate) fn contains_wake_word(&self, text: &str) -> bool {
         tokens(text).iter().any(|token| {
             self.config
                 .words
@@ -189,7 +192,8 @@ fn normalize(text: &str) -> String {
         .collect()
 }
 
-fn tokens(text: &str) -> Vec<String> {
+/// Expuesto a `crate::echo_gate` para comparar por solapamiento de tokens.
+pub(crate) fn tokens(text: &str) -> Vec<String> {
     text.split_whitespace()
         .map(normalize)
         .filter(|t| !t.is_empty())

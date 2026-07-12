@@ -14,6 +14,8 @@
 //! lineal) y se remezcla (mono -> N canales) al formato del dispositivo antes
 //! de empujarlo al ring buffer.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -34,6 +36,11 @@ pub struct AudioPlayer {
     output_channels: u16,
     producer: HeapProd<f32>,
     drain_timeout: Duration,
+    /// Compartido con el callback de cpal: `stop()` la arma, y el callback
+    /// (en su próxima invocación, unos pocos milisegundos después) descarta
+    /// todo lo que quede en el ring buffer. No hay locks en el hilo de
+    /// tiempo real — solo esta bandera atómica.
+    stop_flag: Arc<AtomicBool>,
     _stream: cpal::Stream,
 }
 
@@ -76,10 +83,21 @@ impl AudioPlayer {
         let ring = HeapRb::<f32>::new(ring_capacity);
         let (producer, mut consumer) = ring.split();
 
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let stop_flag_cb = stop_flag.clone();
+
         let stream = device
             .build_output_stream(
                 config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    if stop_flag_cb.swap(false, Ordering::AcqRel) {
+                        // Interrupción: descarta todo el audio que ya
+                        // estaba encolado (hasta RING_BUFFER_SECONDS), para
+                        // que el corte se escuche de inmediato en vez de
+                        // seguir hablando con lo que ya estaba en el buffer.
+                        let mut scratch = [0.0f32; 1024];
+                        while consumer.pop_slice(&mut scratch) > 0 {}
+                    }
                     let filled = consumer.pop_slice(data);
                     for sample in &mut data[filled..] {
                         *sample = 0.0;
@@ -107,8 +125,17 @@ impl AudioPlayer {
             output_channels,
             producer,
             drain_timeout: Duration::from_secs(drain_timeout_secs),
+            stop_flag,
             _stream: stream,
         })
+    }
+
+    /// Corta de inmediato lo que esté sonando: no espera a que termine de
+    /// reproducirse, arma la bandera que el callback de audio consume en su
+    /// próxima invocación (siguiente buffer, unos pocos milisegundos). No
+    /// bloquea al hilo de tiempo real.
+    pub fn stop(&mut self) {
+        self.stop_flag.store(true, Ordering::Release);
     }
 
     /// Resamplea/remezcla el chunk al formato nativo del dispositivo y lo

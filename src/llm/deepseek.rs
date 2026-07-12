@@ -20,7 +20,7 @@ impl DeepSeekProvider {
         Ok(Self(OpenAiCompatibleProvider::new(
             BASE_URL,
             &config.model,
-            &config.api_key_env,
+            Some(config.api_key_env.clone()),
             request_timeout_secs,
         )?))
     }

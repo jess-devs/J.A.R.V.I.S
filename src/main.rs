@@ -1,6 +1,7 @@
 mod agent;
 mod audio;
 mod config;
+mod echo_gate;
 mod errors;
 mod http;
 mod ipc;

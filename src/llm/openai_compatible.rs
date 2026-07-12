@@ -1,8 +1,9 @@
 //! Cliente compartido para APIs compatibles con el formato de OpenAI
 //! (`POST {base_url}/chat/completions`, streaming SSE con `data: {...}` y
-//! terminador `data: [DONE]`). Lo usan tanto `OpenAiProvider` como
-//! `DeepSeekProvider` (la API de DeepSeek es explícitamente compatible con
-//! el formato de OpenAI, solo cambia `base_url`/modelo/API key).
+//! terminador `data: [DONE]`). Lo usan `OpenAiProvider`, `DeepSeekProvider`
+//! (API explícitamente compatible con el formato de OpenAI) y
+//! `LmStudioProvider` (servidor local, normalmente sin autenticación — por
+//! eso `api_key_env` es `Option<String>`, no `String`).
 //!
 //! Tool calling: en este protocolo los tool calls llegan fragmentados en
 //! deltas (`choices[].delta.tool_calls[]` con `index`), con los `arguments`
@@ -26,24 +27,27 @@ pub struct OpenAiCompatibleProvider {
     client: reqwest::Client,
     base_url: String,
     model: String,
-    api_key_env: String,
+    api_key_env: Option<String>,
 }
 
 impl OpenAiCompatibleProvider {
     pub fn new(
         base_url: impl Into<String>,
         model: impl Into<String>,
-        api_key_env: impl Into<String>,
+        api_key_env: Option<String>,
         request_timeout_secs: u64,
     ) -> Result<Self, LlmError> {
-        let api_key_env = api_key_env.into();
-        if std::env::var(&api_key_env).is_err() {
-            return Err(LlmError::MissingApiKey(api_key_env));
+        if let Some(env) = &api_key_env {
+            if std::env::var(env).is_err() {
+                return Err(LlmError::MissingApiKey(env.clone()));
+            }
         }
         let client = crate::http::client(Duration::from_secs(request_timeout_secs));
         Ok(Self {
             client,
-            base_url: base_url.into(),
+            // Tolera un base_url con "/" final (común al copiarlo de la UI
+            // de LM Studio) para no generar "//chat/completions".
+            base_url: base_url.into().trim_end_matches('/').to_string(),
             model: model.into(),
             api_key_env,
         })
@@ -185,8 +189,12 @@ impl LlmProvider for OpenAiCompatibleProvider {
         tools: &[ToolSpec],
         tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
     ) -> Result<(), LlmError> {
-        let api_key = std::env::var(&self.api_key_env)
-            .map_err(|_| LlmError::MissingApiKey(self.api_key_env.clone()))?;
+        let api_key = match &self.api_key_env {
+            Some(env) => Some(
+                std::env::var(env).map_err(|_| LlmError::MissingApiKey(env.clone()))?,
+            ),
+            None => None,
+        };
 
         let messages: Vec<ChatCompletionMessage> = history
             .iter()
@@ -227,14 +235,11 @@ impl LlmProvider for OpenAiCompatibleProvider {
                 .collect(),
         };
 
-        let response = self
-            .client
-            .post(&url)
-            .bearer_auth(api_key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(LlmError::Network)?;
+        let mut request = self.client.post(&url).json(&body);
+        if let Some(api_key) = api_key {
+            request = request.bearer_auth(api_key);
+        }
+        let response = request.send().await.map_err(LlmError::Network)?;
 
         if !response.status().is_success() {
             let status = response.status();

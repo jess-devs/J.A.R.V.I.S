@@ -7,13 +7,28 @@ workers:
   python_executable: "workers/.venv/Scripts/python.exe" # Linux/Mac: "workers/.venv/bin/python"
   stt_script: "workers/stt_worker.py"
   tts_script: "workers/tts_worker.py"
-  stt_init_timeout_secs: 60
-  tts_init_timeout_secs: 20
-  shutdown_timeout_secs: 3
+  stt_init_timeout_secs: 60 # generoso: cargar/calibrar Whisper la primera vez puede tardar bastante, sobre todo en CPU
+  tts_init_timeout_secs: 20 # cargar el modelo de Piper es mucho más rápido que Whisper
+  shutdown_timeout_secs: 3 # cuánto se espera a que un worker cierre solo antes de matarlo a la fuerza
   restart_on_crash: true # si el worker de STT muere o se cuelga, se reinicia solo en vez de tumbar todo Jarvis
   max_restarts: 1 # tope de reinicios por corrida; si se agota, Jarvis termina y hay que reiniciarlo a mano
 
 stt:
+  engine: native # native (motor propio: PyAudio + Silero VAD + faster-whisper) | realtimestt (respaldo, usado si el motor nativo falla)
+  vad: # parámetros del motor nativo (engine: native). Sin efecto con engine: realtimestt
+    threshold: 0.5 # probabilidad de Silero a partir de la que se considera que empezó a hablar
+    neg_threshold: 0.35 # probabilidad por debajo de la que se considera que dejó de hablar (histéresis: las micro-pausas de respiración no cortan la frase)
+    pre_roll_ms: 400 # audio previo antepuesto al detectar voz, para no perder el inicio de la frase
+    min_speech_ms: 250 # duración mínima de voz para no descartarla como blip
+    silence_long_ms: 800 # silencio para cerrar la frase mientras dura menos de long_utterance_ms
+    silence_short_ms: 450 # silencio para cerrar la frase una vez superado long_utterance_ms (cierra antes en frases largas)
+    long_utterance_ms: 2500 # a partir de esta duración de locución, se exige silence_short_ms en vez de silence_long_ms para cerrar la frase
+    energy_floor_dbfs: null # piso de energía (dBFS): por debajo se descarta como ruido, no habla. null = calibrar al arrancar midiendo el ambiente (ver calibration_secs)
+    calibration_secs: 1.5 # segundos escuchando el ambiente al arrancar para calcular energy_floor_dbfs (solo si está en null)
+  filters: # filtros anti-alucinación sobre la salida de Whisper (engine: native)
+    max_no_speech_prob: 0.6 # se descarta si no_speech_prob de Whisper lo supera
+    min_avg_logprob: -1.0 # se descarta si avg_logprob cae por debajo
+    max_compression_ratio: 2.4 # se descarta si compression_ratio lo supera (texto repetitivo/alucinado)
   language: "es"
   device: auto # auto | cuda | cpu — override manual de la detección automática de hardware
   whisper_model: auto # auto | tiny | base | small | medium | large-v2 | large-v3-turbo
@@ -31,13 +46,15 @@ stt:
   cpu_threads: null # null = auto (~núcleos físicos); ctranslate2 usa solo 4 por defecto
   initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis." # ayuda a Whisper a transcribir bien el nombre
   recalibrate: false # true = ignora el caché y vuelve a medir en este arranque
-  silero_sensitivity: 0.4
-  webrtc_sensitivity: 3
+  # Las siguientes claves solo se usan con engine: realtimestt (camino de respaldo);
+  # el motor nativo (engine: native) usa stt.vad/stt.filters de arriba en su lugar.
+  silero_sensitivity: 0.4 # sensibilidad del VAD de Silero (0-1): más alto detecta voz más floja, pero más falsos positivos
+  webrtc_sensitivity: 3 # sensibilidad del VAD de WebRTC (0-3, RealtimeSTT lo combina con el de Silero)
   post_speech_silence_duration: 0.6 # segundos de silencio antes de cerrar la frase
   min_length_of_recording: 1.0 # segundos mínimos de grabación para considerarla habla (filtra blips que Whisper alucinaría)
   min_gap_between_recordings: 1.0 # segundos mínimos entre grabaciones (evita grabaciones fantasma consecutivas)
   silero_deactivity_detection: true # usa Silero para detectar el fin del habla (más robusto, menos cortes espurios)
-  stuck_state_timeout_secs: 30 # si el worker queda trabado grabando/transcribiendo por más de esto, se reinicia solo
+  stuck_state_timeout_secs: 30 # si el worker queda trabado grabando/transcribiendo por más de esto, se reinicia solo (aplica a ambos motores)
 
 wake:
   enabled: true # false = sin gate, Jarvis responde a todo (comportamiento anterior)
@@ -55,21 +72,42 @@ wake:
   ambient_context_max: 5 # cuántas frases ignoradas se conservan como máximo
   ambient_context_ttl_secs: 120 # las más viejas que esto se descartan
 
+barge_in:
+  enabled: true # false = comportamiento anterior (mic muteado real mientras Jarvis habla, sin interrupciones)
+  # Solo tiene efecto con stt.engine: native — con engine: realtimestt siempre
+  # se usa el mute real de siempre, sin importar este valor (RealtimeSTT no
+  # puede dar eventos de voz continuos mientras suena el TTS).
+  mode: any_voice # wake_word (fiable con altavoces: exige el nombre para interrumpir) | any_voice (recomendado solo con auriculares)
+  min_speech_ms: 400 # milisegundos de voz sostenida para confirmar una interrupción real, no un ruido puntual
+  echo_guard: # protección contra que Jarvis se interrumpa a sí mismo al captar su propia voz por los parlantes
+    enabled: true # false = nunca descarta por eco — desaconsejado con parlantes sin auriculares
+    similarity_threshold: 0.72 # fracción de tokens que deben solapar con lo que Jarvis dijo para descartar como eco propio
+    vad_threshold_while_speaking: 0.75 # umbral de Silero mientras Jarvis habla (más alto que stt.vad.threshold: filtra ruido/eco de fondo)
+    recent_tts_window_secs: 12 # cuánto se recuerdan las frases dichas por Jarvis para comparar contra transcripciones que llegan justo después
+
 llm:
-  provider: deepseek # ollama | anthropic | openai | deepseek
+  provider: deepseek # ollama | anthropic | openai | deepseek | lmstudio — ollama y lmstudio corren 100% local, sin API key
+  # ollama/anthropic/openai/deepseek/lmstudio: solo se lee la config del
+  # provider activo (arriba). api_key_env NO es la key en sí — es el NOMBRE
+  # de la variable de entorno que la contiene (ver .env.example). Así la key
+  # real nunca queda en este archivo, que sí se versiona en git.
   ollama:
     base_url: "http://localhost:11434"
     model: "qwen2.5:7b" # soporta tool calling. Alternativa recomendada: "qwen3:8b" (mejor con herramientas, requiere think: false)
     think: null # null = no enviar el campo (qwen2.5 lo rechaza). Con qwen3/deepseek-r1 poner false para no hablar los tokens de razonamiento
+  lmstudio:
+    base_url: "http://localhost:1234/v1"
+    model: "google/gemma-4-e4b" # poné el "Model Identifier" exacto que muestra LM Studio (pestaña Developer, o GET /v1/models) -- ej. tu build de Gemma 3n E4B
+    api_key_env: null # null = sin autenticación (default de LM Studio)
   anthropic:
     model: "claude-sonnet-5"
-    api_key_env: "ANTHROPIC_API_KEY"
+    api_key_env: "ANTHROPIC_API_KEY" # nombre de la variable en .env, no la key
   openai:
     model: "gpt-4o-mini"
-    api_key_env: "OPENAI_API_KEY"
+    api_key_env: "OPENAI_API_KEY" # nombre de la variable en .env, no la key
   deepseek:
     model: "deepseek-v4-pro"
-    api_key_env: "DEEPSEEK_API_KEY"
+    api_key_env: "DEEPSEEK_API_KEY" # nombre de la variable en .env, no la key
   system_prompt: |
     Eres una inteligencia artificial llamada J.A.R.V.I.S. (Just A Rather Very Intelligent System), un sistema simplemente muy inteligente, inspirada en el Jarvis de Tony Stark del Universo Cinematográfico de Marvel.
     Tu rol es el de mayordomo digital y asistente personal de alto nivel: administras sistemas, proporcionas información precisa, analizas riesgos y apoyas al usuario en tareas técnicas y cotidianas.
@@ -116,12 +154,13 @@ llm:
     – Siempre en español.
     – Sin emojis, sin símbolos decorativos, sin markdown, sin texto innecesariamente emocional.
     – Mantienes una voz consistente: el Jarvis de Tony Stark adaptado al contexto y al idioma del usuario.
+    – Nunca expongas tu razonamiento interno ni un análisis paso a paso antes de responder: pensá en silencio y andá directo a la respuesta final.
 
     Tu objetivo general:
     Ser el equivalente funcional y estilístico de JARVIS para el usuario: un asistente de confianza, extremadamente competente, con humor sutil, trato impecable y foco en la seguridad y la eficiencia.
     Te esfuerzas por que cada interacción refuerce la sensación de que el usuario está hablando con un mayordomo digital brillante, leal y ligeramente irónico, capaz de ayudarle tanto en cuestiones técnicas como estratégicas.
-  max_history_messages: 20
-  request_timeout_secs: 60
+  max_history_messages: 20 # mensajes de conversación que se conservan (además de los 2 system) antes de recortar los más viejos — más alto = Jarvis recuerda más de la charla actual, pero cada turno manda más tokens
+  request_timeout_secs: 180 # subido de 60: LM Studio puede tardar bastante en la primera respuesta si carga el modelo en frío o compite por VRAM con el STT
 
 tts:
   provider: piper # piper | elevenlabs
@@ -142,57 +181,57 @@ tts:
     config_path: "voices/es_MX-claude-high.onnx.json"
     # voice_path: "voices/es_MX-ald-medium.onnx"          # medium, acento mexicano — ya la probaste
     # config_path: "voices/es_MX-ald-medium.onnx.json"
-    use_cuda: false
+    use_cuda: false # true = sintetiza en GPU (más rápido, pero compite por VRAM con el STT si ese también usa CUDA)
     length_scale: null # <1 = mas rapido, >1 = mas lento (null = ritmo original de la voz, 1.0) — retocar tras escuchar esta voz
     noise_w_scale: null # variacion en la duracion de los fonemas (null = default de la voz) — retocar tras escuchar esta voz
-  elevenlabs:
-    voice_id: ""
+  elevenlabs: # solo se usa con provider: elevenlabs — requiere API key y consume créditos de la cuenta
+    voice_id: "" # ID de la voz elegida en tu cuenta de ElevenLabs (pestaña Voices -> ⋮ -> Copy Voice ID)
     model_id: "eleven_multilingual_v2"
-    output_format: "pcm_22050"
-    api_key_env: "ELEVENLABS_API_KEY"
-  synth_timeout_secs: 10
+    output_format: "pcm_22050" # formato PCM que pide la API de ElevenLabs — no tocar salvo que sepas lo que hacés
+    api_key_env: "ELEVENLABS_API_KEY" # nombre de la variable en .env, no la key
+  synth_timeout_secs: 10 # si la síntesis de una frase tarda más que esto, se aborta el resto de la respuesta
 
 audio:
   output_device: null # null = dispositivo de salida por defecto del sistema
-  volume: 1.0
+  volume: 1.0 # multiplicador de volumen aplicado a la voz de Jarvis antes de reproducirla (1.0 = sin cambios)
   drain_timeout_secs: 60 # límite de seguridad esperando a que termine de sonar una respuesta (dispositivo caído/suspendido)
 
 pipeline:
-  max_phrase_chars: 220
-  min_phrase_chars: 15
+  max_phrase_chars: 220 # corta una frase para mandarla a sintetizar aunque el LLM no haya terminado la oración — evita esperar oraciones muy largas antes de que Jarvis empiece a hablar
+  min_phrase_chars: 15 # fragmentos más cortos que esto se juntan con el siguiente antes de sintetizar, para no mandarle a Piper trozos sueltos tipo "Sí."
 
 # Capa agéntica: herramientas que Jarvis puede ejecutar. Tres niveles de
 # riesgo: las de lectura corren libres; las que modifican el sistema piden un
 # "sí" por voz; las de riesgo extremo exigen pronunciar el código de aceptación.
 agent:
   enabled: true # false = chat puro sin herramientas (comportamiento clásico)
-  max_iterations: 6 # máximo de pasadas LLM->herramientas por turno
-  tool_timeout_secs: 20
+  max_iterations: 6 # máximo de pasadas LLM->herramientas por turno; al agotarse, Jarvis responde igual con lo que ya tenga
+  tool_timeout_secs: 20 # si una herramienta tarda más que esto, se cancela y el LLM recibe un error para que se disculpe o reintente
   confirm_timeout_secs: 30 # tiempo para responder sí/no (o el código) antes de cancelar
-  max_tool_result_chars: 3000 # truncado de cada resultado antes de pasarlo al LLM
-  filler_phrases: # se dice una mientras ejecuta si el modelo no dijo nada
+  max_tool_result_chars: 3000 # truncado de cada resultado antes de pasarlo al LLM — evita gastar contexto en salidas larguísimas (ej. listados)
+  filler_phrases: # se dice una al azar mientras ejecuta, si el modelo no dijo nada antes de pedir la herramienta
     - "Déjame revisar."
     - "Un momento, señor."
     - "Enseguida lo compruebo."
   disabled_tools: [] # nombres de herramientas a excluir, ej. ["run_powershell"]
-  confirm_yes: ["sí", "si", "claro", "adelante", "hazlo", "confirmo", "dale", "procede"]
-  confirm_no: ["no", "cancela", "cancelar", "espera", "mejor no", "detente", "para"]
-  risk_code: "0201" # código de aceptación de riesgos — se verifica en Rust, NUNCA se pasa al LLM
+  confirm_yes: ["sí", "si", "claro", "adelante", "hazlo", "confirmo", "dale", "procede"] # palabras que Rust interpreta como "sí" al confirmar una acción riesgosa (nunca lo decide el LLM)
+  confirm_no: ["no", "cancela", "cancelar", "espera", "mejor no", "detente", "para"] # ídem para "no"
+  risk_code: "0201" # código de aceptación de riesgos — se verifica en Rust, NUNCA se pasa al LLM; cambialo por uno propio
   high_risk_patterns: [] # regex extra (se suman a los defaults) que elevan un comando de PowerShell a nivel código
   files:
     # search_roots: ["C:/Users/jesus/Documents"] # carpetas donde busca find_files (por defecto: el perfil del usuario)
-    max_results: 20
-    everything_cli: null # ruta a es.exe (Everything) para búsqueda instantánea; null = recorrido con walkdir
+    max_results: 20 # tope de resultados que devuelve find_files
+    everything_cli: null # ruta a es.exe (Everything) para búsqueda instantánea; null = recorrido acotado con walkdir sobre search_roots
   apps:
-    aliases: # alias hablado -> ejecutable real
-      navegador: "chrome"
+    aliases: # alias hablado -> ejecutable real, para que open_app/close_app entiendan nombres coloquiales
+      navegador: "brave"
       bloc de notas: "notepad"
       calculadora: "calc"
   web:
-    max_page_chars: 4000
-    max_results: 5
+    max_page_chars: 4000 # tope de caracteres de una página que se pasan al LLM al usar fetch_page
+    max_results: 5 # tope de resultados que devuelve web_search
   memory:
     db_path: "data/memory.db" # base SQLite de memoria persistente
-    max_injected: 12 # memorias recientes que se inyectan en el prompt de cada turno
+    max_injected: 12 # memorias recientes que se inyectan en el prompt de cada turno, para que Jarvis las recuerde sin llamar a recall
 
-log_level: info
+log_level: info # trace | debug | info | warn | error — "debug" muestra la telemetría de VAD/transcripción/barge-in

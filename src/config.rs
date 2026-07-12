@@ -16,6 +16,7 @@ pub struct Config {
     pub workers: WorkersConfig,
     pub stt: SttConfig,
     pub wake: WakeConfig,
+    pub barge_in: BargeInConfig,
     pub llm: LlmConfig,
     pub tts: TtsConfig,
     pub audio: AudioConfig,
@@ -30,6 +31,7 @@ impl Default for Config {
             workers: WorkersConfig::default(),
             stt: SttConfig::default(),
             wake: WakeConfig::default(),
+            barge_in: BargeInConfig::default(),
             llm: LlmConfig::default(),
             tts: TtsConfig::default(),
             audio: AudioConfig::default(),
@@ -86,9 +88,88 @@ impl Default for WorkersConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SttEngineKind {
+    /// Motor propio: PyAudio + Silero VAD + faster-whisper directo.
+    #[default]
+    Native,
+    /// RealtimeSTT — camino de respaldo si el motor nativo falla.
+    Realtimestt,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct VadConfig {
+    /// Probabilidad de Silero a partir de la cual se considera que empezó a hablar.
+    pub threshold: f32,
+    /// Probabilidad de Silero por debajo de la cual se considera que dejó de hablar
+    /// (histéresis: menor que `threshold` para que las micro-pausas no corten).
+    pub neg_threshold: f32,
+    /// Audio previo a la detección de voz que se antepone al buffer, para no
+    /// perder el inicio de la frase.
+    pub pre_roll_ms: u32,
+    /// Duración mínima de voz detectada para considerarla habla real (filtra blips).
+    pub min_speech_ms: u32,
+    /// Silencio requerido para cerrar la frase mientras dura menos de `long_utterance_ms`.
+    pub silence_long_ms: u32,
+    /// Silencio requerido para cerrar la frase una vez superado `long_utterance_ms`.
+    pub silence_short_ms: u32,
+    /// A partir de esta duración de locución, se exige `silence_short_ms` en vez
+    /// de `silence_long_ms` para cerrar la frase.
+    pub long_utterance_ms: u32,
+    /// Piso de energía (dBFS) por debajo del cual se descarta como ruido.
+    /// null = se calibra al arrancar midiendo el ambiente.
+    pub energy_floor_dbfs: Option<f32>,
+    /// Segundos de calibración del piso de energía al arrancar.
+    pub calibration_secs: f32,
+}
+
+impl Default for VadConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 0.5,
+            neg_threshold: 0.35,
+            pre_roll_ms: 400,
+            min_speech_ms: 250,
+            silence_long_ms: 800,
+            silence_short_ms: 450,
+            long_utterance_ms: 2500,
+            energy_floor_dbfs: None,
+            calibration_secs: 1.5,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct SttFiltersConfig {
+    /// Se descarta la transcripción si `no_speech_prob` de Whisper la supera.
+    pub max_no_speech_prob: f32,
+    /// Se descarta la transcripción si `avg_logprob` de Whisper cae por debajo.
+    pub min_avg_logprob: f32,
+    /// Se descarta la transcripción si `compression_ratio` de Whisper la supera
+    /// (indicio de texto repetitivo/alucinado).
+    pub max_compression_ratio: f32,
+}
+
+impl Default for SttFiltersConfig {
+    fn default() -> Self {
+        Self {
+            max_no_speech_prob: 0.6,
+            min_avg_logprob: -1.0,
+            max_compression_ratio: 2.4,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct SttConfig {
+    /// native (motor propio) | realtimestt (respaldo).
+    pub engine: SttEngineKind,
+    pub vad: VadConfig,
+    pub filters: SttFiltersConfig,
     pub language: String,
     /// "auto" | cuda | cpu — override manual de la detección automática de hardware.
     pub device: String,
@@ -108,6 +189,8 @@ pub struct SttConfig {
     pub initial_prompt: String,
     /// true = ignora el caché de calibración y vuelve a medir en este arranque.
     pub recalibrate: bool,
+    /// Las siguientes claves solo se usan con `engine: realtimestt` (camino de
+    /// respaldo) — el motor nativo tiene sus propios parámetros bajo `vad`.
     pub silero_sensitivity: f32,
     pub webrtc_sensitivity: u8,
     pub post_speech_silence_duration: f32,
@@ -121,16 +204,20 @@ pub struct SttConfig {
     /// que solo el silencio; reduce cortes espurios que Whisper rellenaría con
     /// alucinaciones).
     pub silero_deactivity_detection: bool,
-    /// Segundos que el worker de STT tolera al recorder trabado en un estado
-    /// ocupado ("recording"/"transcribing", nunca deberían tardar más de
-    /// unos pocos segundos) antes de asumir que quedó irrecuperablemente
-    /// colgado y forzar su propia salida (para que Rust lo reinicie).
+    /// Segundos que el worker de STT tolera trabado en un estado ocupado
+    /// ("recording"/"transcribing", nunca deberían tardar más de unos pocos
+    /// segundos) antes de asumir que quedó irrecuperablemente colgado y
+    /// forzar su propia salida (para que Rust lo reinicie). Aplica a ambos
+    /// motores.
     pub stuck_state_timeout_secs: u64,
 }
 
 impl Default for SttConfig {
     fn default() -> Self {
         Self {
+            engine: SttEngineKind::default(),
+            vad: VadConfig::default(),
+            filters: SttFiltersConfig::default(),
             language: "es".to_string(),
             device: "auto".to_string(),
             whisper_model: "auto".to_string(),
@@ -212,6 +299,7 @@ pub enum LlmProviderKind {
     Anthropic,
     Openai,
     Deepseek,
+    LmStudio,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -285,6 +373,31 @@ impl Default for DeepSeekConfig {
     }
 }
 
+/// LM Studio expone un servidor local compatible con la API de OpenAI (ver
+/// `llm::lmstudio`). A diferencia de los proveedores de nube normalmente no
+/// requiere API key, por eso `api_key_env` es opcional.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct LmStudioConfig {
+    pub base_url: String,
+    /// Placeholder deliberado: si no calza con lo cargado, el preflight
+    /// (`check_lmstudio`) lista los modelos que LM Studio sí tiene.
+    pub model: String,
+    /// null = sin autenticación (caso normal). Some = exige esa variable de
+    /// entorno, igual que los proveedores de nube.
+    pub api_key_env: Option<String>,
+}
+
+impl Default for LmStudioConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:1234/v1".to_string(),
+            model: "local-model".to_string(),
+            api_key_env: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
@@ -293,6 +406,7 @@ pub struct LlmConfig {
     pub anthropic: AnthropicConfig,
     pub openai: OpenAiConfig,
     pub deepseek: DeepSeekConfig,
+    pub lmstudio: LmStudioConfig,
     pub system_prompt: String,
     pub max_history_messages: usize,
     pub request_timeout_secs: u64,
@@ -306,6 +420,7 @@ impl Default for LlmConfig {
             anthropic: AnthropicConfig::default(),
             openai: OpenAiConfig::default(),
             deepseek: DeepSeekConfig::default(),
+            lmstudio: LmStudioConfig::default(),
             system_prompt: "Eres Jarvis, un asistente de voz conversacional en español. \
                 Estás hablando en voz alta, no escribiendo texto: nunca uses markdown \
                 (nada de **, #, guiones de lista, bloques de código ni links). Respondé \
@@ -594,6 +709,69 @@ impl Default for PipelineConfig {
         Self {
             max_phrase_chars: 220,
             min_phrase_chars: 15,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BargeInMode {
+    /// Solo interrumpe si la transcripción capturada mientras Jarvis habla
+    /// contiene el wake word — fiable con altavoces (sin AEC, el eco no
+    /// suele incluir el nombre a menos que Jarvis lo diga).
+    #[default]
+    WakeWord,
+    /// Interrumpe con cualquier voz sostenida, sin exigir el nombre —
+    /// recomendado solo con auriculares (con altavoces, el eco puede
+    /// disparar falsos positivos incluso con el echo guard).
+    AnyVoice,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct EchoGuardConfig {
+    pub enabled: bool,
+    /// Fracción de tokens de la transcripción que deben solapar con frases
+    /// TTS recientes para descartarla como eco propio.
+    pub similarity_threshold: f32,
+    /// Umbral de Silero para entrar en "recording" mientras Jarvis habla
+    /// (más alto que `stt.vad.threshold`: filtra ruido/eco de fondo, solo
+    /// reacciona a voz sostenida y relativamente fuerte).
+    pub vad_threshold_while_speaking: f32,
+    /// Cuánto se conservan las frases dichas por Jarvis para comparar contra
+    /// transcripciones que llegan poco después de terminar de hablar.
+    pub recent_tts_window_secs: u64,
+}
+
+impl Default for EchoGuardConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            similarity_threshold: 0.72,
+            vad_threshold_while_speaking: 0.75,
+            recent_tts_window_secs: 12,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct BargeInConfig {
+    pub enabled: bool,
+    pub mode: BargeInMode,
+    /// Milisegundos de voz sostenida (modo `speaking` del motor STT nativo)
+    /// para confirmar una interrupción real y no un ruido puntual.
+    pub min_speech_ms: u32,
+    pub echo_guard: EchoGuardConfig,
+}
+
+impl Default for BargeInConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mode: BargeInMode::WakeWord,
+            min_speech_ms: 400,
+            echo_guard: EchoGuardConfig::default(),
         }
     }
 }

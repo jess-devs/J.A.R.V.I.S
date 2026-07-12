@@ -7,12 +7,14 @@
 //! retoma con `resume_agentic_turn`. El micrófono permanece muteado durante
 //! todo el loop; solo el orquestador lo reabre.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rand::seq::SliceRandom;
+use tokio_util::sync::CancellationToken;
 
 use crate::audio::AudioPlayer;
 use crate::config::Config;
+use crate::echo_gate::EchoGate;
 use crate::errors::{JarvisError, ToolError};
 use crate::llm::{ChatMessage, LlmProvider, ToolCallRequest};
 use crate::pipeline::run_speaking_turn;
@@ -28,6 +30,12 @@ pub struct TurnContext<'a> {
     pub player: &'a mut AudioPlayer,
     pub registry: &'a ToolRegistry,
     pub config: &'a Config,
+    /// Se dispara para cortar el turno a mitad de respuesta (barge-in, o el
+    /// hook de prueba `JARVIS_TEST_CANCEL`). Un token nuevo por turno.
+    pub cancel: CancellationToken,
+    /// Registra las frases que Jarvis efectivamente dice, para descartar
+    /// como eco propio transcripciones que lleguen mientras habla.
+    pub echo_gate: Arc<Mutex<EchoGate>>,
 }
 
 /// Una herramienta esperando aprobación por voz del usuario.
@@ -51,6 +59,10 @@ pub enum AgentTurnResult {
     /// historial.
     Completed { final_text: String },
     NeedsConfirmation(PendingConfirmation),
+    /// Se canceló a mitad de respuesta (barge-in, o `JARVIS_TEST_CANCEL`).
+    /// `spoken_so_far` es solo lo que alcanzó a sonar; el orquestador es
+    /// quien decide qué guardar en el historial.
+    Interrupted { spoken_so_far: String },
 }
 
 pub async fn run_agentic_turn(
@@ -97,9 +109,22 @@ async fn turn_loop(
             history,
             specs.clone(),
             &ctx.config.pipeline,
+            ctx.cancel.clone(),
+            ctx.echo_gate.clone(),
         )
         .await?;
         iterations += 1;
+
+        if out.interrupted {
+            // No se empuja nada al historial por esta pasada: si el modelo
+            // ya había pedido herramientas en una pasada ANTERIOR de este
+            // mismo turno, esas ya quedaron completas (assistant_with_tools
+            // + sus tool_result) antes de llegar acá. Esta pasada, la que
+            // se cortó, no llegó a pedir nada todavía.
+            return Ok(AgentTurnResult::Interrupted {
+                spoken_so_far: out.spoken_text,
+            });
+        }
 
         if out.tool_calls.is_empty() {
             history.push(ChatMessage::assistant(out.spoken_text.clone()));
@@ -149,8 +174,15 @@ async fn turn_loop(
         history,
         Arc::new(Vec::new()),
         &ctx.config.pipeline,
+        ctx.cancel.clone(),
+        ctx.echo_gate.clone(),
     )
     .await?;
+    if out.interrupted {
+        return Ok(AgentTurnResult::Interrupted {
+            spoken_so_far: out.spoken_text,
+        });
+    }
     history.push(ChatMessage::assistant(out.spoken_text.clone()));
     Ok(AgentTurnResult::Completed {
         final_text: out.spoken_text,
