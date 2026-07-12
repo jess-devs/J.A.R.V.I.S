@@ -8,7 +8,7 @@ Además de conversar, Jarvis puede **usar herramientas**: consultar el estado de
 
 ## Arquitectura
 
-- **Rust** (`src/`) es el orquestador: el loop principal, la configuración, todas las llamadas de red (Ollama, Anthropic, OpenAI, DeepSeek, ElevenLabs), la reproducción de audio y el pipeline de streaming LLM→frases→TTS→reproducción.
+- **Rust** (`src/`) es el orquestador: el loop principal, la configuración, todas las llamadas de red (Ollama, LM Studio, Anthropic, OpenAI, DeepSeek, ElevenLabs), la reproducción de audio y el pipeline de streaming LLM→frases→TTS→reproducción.
 - **Python** (`workers/`) queda reducido a dos procesos de inferencia ML pura, spawneados por Rust y hablados por stdio (no HTTP):
   - `stt_worker.py`: envuelve [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT) (`faster-whisper` + VAD), posee el micrófono.
   - `tts_worker.py`: envuelve [Piper](https://github.com/OHF-voice/piper1-gpl) para síntesis de voz local offline en español.
@@ -19,7 +19,7 @@ Ver [`workers/README.md`](workers/README.md) para detalle del protocolo entre Ru
 
 - **Rust** (toolchain estable, `cargo`/`rustc`).
 - **Python 3.11 o 3.12** — no uses el Python 3.14 del sistema ni el de Microsoft Store: `PyAudio` (dependencia de RealtimeSTT) todavía no tiene wheel de Windows para 3.14, y el Python de Store da problemas con dependencias nativas (torch, onnxruntime) en un venv.
-- **[Ollama](https://ollama.com)** instalado y corriendo (para el modo LLM local, que es el default).
+- **[Ollama](https://ollama.com)** instalado y corriendo (para el modo LLM local, que es el default) — alternativamente, [LM Studio](https://lmstudio.ai) con su servidor local activado (`llm.provider: lmstudio`).
 - Un micrófono y parlantes/auriculares.
 
 ## Instalación
@@ -89,12 +89,16 @@ Hablá una frase en español y esperá la pausa — vas a ver la transcripción,
 Todas las claves son opcionales — lo que no se especifique usa el valor por defecto. Secciones principales:
 
 - **`workers`**: ruta al Python del venv y a los scripts de los workers, timeouts de arranque/apagado, política de reinicio ante crash.
-- **`stt`**: idioma, `device`/`whisper_model`/`compute_type` (todos `auto` por defecto — se detectan según haya o no GPU CUDA disponible y cuánta VRAM tenga; podés forzarlos manualmente), sensibilidad del VAD.
-- **`llm`**: `provider: ollama | anthropic | openai | deepseek`, configuración de cada uno (modelo, variable de entorno de la API key), prompt de sistema, cuántos mensajes de historial conservar.
+- **`stt`**: `engine: native | realtimestt` (motor propio vs. el camino de respaldo con RealtimeSTT), `stt.vad`/`stt.filters` (detección de voz y filtros anti-alucinación del motor nativo), idioma, `device`/`whisper_model`/`compute_type` (todos `auto` por defecto — se detectan según haya o no GPU CUDA disponible y cuánta VRAM tenga; podés forzarlos manualmente).
+- **`wake`**: el "gate" de atención — qué palabra activa a Jarvis y por cuánto tiempo sigue atento sin repetirla.
+- **`barge_in`**: interrumpir a Jarvis mientras habla (solo con `engine: native`) — modo `wake_word` vs `any_voice`, y el `echo_guard` que evita que se autointerrumpa con sus propios parlantes.
+- **`llm`**: `provider: ollama | anthropic | openai | deepseek | lmstudio`, configuración de cada uno (modelo, variable de entorno de la API key), prompt de sistema, cuántos mensajes de historial conservar.
 - **`tts`**: `provider: piper | elevenlabs`, ruta a la voz de Piper o config de ElevenLabs (`voice_id`, `output_format`).
 - **`audio`**: dispositivo de salida (`null` = default del sistema) y volumen.
 - **`pipeline`**: longitud mínima/máxima de las frases que se mandan a sintetizar.
 - **`agent`**: capa agéntica — activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, y sub-config de `files`/`apps`/`web`/`memory`. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
+
+Referencia clave por clave, con qué tocar según el síntoma (corta frases, no detecta, se autointerrumpe, etc.): [`CONFIGURACION.md`](CONFIGURACION.md).
 
 ## Capacidades agénticas (herramientas)
 
@@ -149,13 +153,15 @@ Cualquier override manual (`device`, `whisper_model` ≠ `auto`) salta la calibr
 
 El default es **100% local y no necesita ninguna API key**: `llm.provider: ollama` + `tts.provider: piper`.
 
+Como alternativa local a Ollama, si preferís [LM Studio](https://lmstudio.ai) (por ejemplo porque ya tenés un modelo cargado ahí, o Ollama te resulta lento), poné `llm.provider: lmstudio` y activá el servidor local de LM Studio (pestaña Developer → Start Server, expone `http://localhost:1234/v1` por defecto). Tampoco necesita API key.
+
 Para usar un LLM o TTS en la nube:
 
 1. Cambiá `llm.provider` a `anthropic` / `openai` / `deepseek`, o `tts.provider` a `elevenlabs`, en `config.yaml`.
 2. Copiá `.env.example` a `.env` y completá la API key correspondiente (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY` o `ELEVENLABS_API_KEY`). `.env` nunca se versiona.
 3. No hace falta tocar ningún código — el cambio de modo es enteramente por configuración.
 
-Los cuatro proveedores de nube están completamente implementados (streaming incluido para los LLM). DeepSeek usa el mismo cliente HTTP que OpenAI porque su API es explícitamente compatible con ese formato — solo cambia `base_url`, modelo y API key.
+Los cuatro proveedores de nube están completamente implementados (streaming incluido para los LLM). DeepSeek y LM Studio usan el mismo cliente HTTP que OpenAI porque su API es explícitamente (DeepSeek) o por diseño (LM Studio) compatible con ese formato — solo cambia `base_url`, modelo y, si aplica, API key.
 
 ## Estilo de conversación
 
@@ -169,6 +175,8 @@ El `system_prompt` por defecto le pide al modelo respuestas breves (1-2 oracione
 | `el entorno Python no tiene las dependencias instaladas` | `workers\.venv\Scripts\pip install -r workers/requirements.txt` |
 | `no se pudo conectar a Ollama` | Corré `ollama serve` (o confirmá que corre como servicio). |
 | `el modelo '...' no está descargado en Ollama` | `ollama pull qwen2.5:7b` (o el modelo que hayas configurado). |
+| `no se pudo conectar a LM Studio` | Abrí LM Studio, cargá un modelo y activá el servidor local (pestaña Developer → Start Server). |
+| `el modelo '...' no está cargado en LM Studio` | Cargá el modelo desde LM Studio, o ajustá `llm.lmstudio.model` al identificador exacto que aparece ahí. |
 | `faltan archivos de voz Piper` | `workers\.venv\Scripts\python.exe -m piper.download_voices <voz>` y moveé los `.onnx`/`.onnx.json` a `voices/`. |
 | `no se detectó ningún micrófono` | Revisá que el sistema tenga un dispositivo de entrada de audio conectado y habilitado. |
 | `el dispositivo de salida espera muestras en formato ...; por ahora Jarvis solo sabe reproducir en f32` | El dispositivo de salida por defecto no usa f32 (poco común). Elegí otro dispositivo con `audio.output_device` en `config.yaml`, o probá con los parlantes/auriculares "reales" en vez de un dispositivo de audio virtual (ej. software de mezcla de un headset gaming). |
@@ -176,6 +184,6 @@ El `system_prompt` por defecto le pide al modelo respuestas breves (1-2 oracione
 
 ## Estado del proyecto
 
-- ✅ Modo local completo: STT (RealtimeSTT/faster-whisper), LLM (Ollama, streaming), TTS (Piper), pipeline de streaming frase-por-frase con reproducción superpuesta a la síntesis.
+- ✅ Modo local completo: STT (RealtimeSTT/faster-whisper), LLM (Ollama y LM Studio, streaming), TTS (Piper), pipeline de streaming frase-por-frase con reproducción superpuesta a la síntesis.
 - ✅ Modo nube: LLM (Anthropic, OpenAI, DeepSeek, streaming SSE) y TTS (ElevenLabs), intercambiables por configuración.
-- ✅ Modo agéntico: tool calling con streaming en los cuatro proveedores de LLM, herramientas de sistema/PC/web/memoria, loop multi-paso, y seguridad por voz en tres niveles (lectura / confirmación / código de aceptación de riesgos).
+- ✅ Modo agéntico: tool calling con streaming en los cinco proveedores de LLM, herramientas de sistema/PC/web/memoria, loop multi-paso, y seguridad por voz en tres niveles (lectura / confirmación / código de aceptación de riesgos).
