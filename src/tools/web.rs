@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use crate::config::WebToolConfig;
 use crate::errors::ToolError;
 
-use super::{required_str, RiskLevel, Tool};
+use super::{required_str, RiskLevel, Tool, ToolOutput};
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
@@ -200,7 +200,7 @@ impl Tool for WebSearch {
         format!("buscar en la web '{query}'")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let query = required_str(&args, "query")?;
         let max = self.cfg.max_results;
 
@@ -210,7 +210,7 @@ impl Tool for WebSearch {
         let body = self.get_body(&html_url).await?;
         let hits = parse_ddg_html(&body, max);
         if !hits.is_empty() {
-            return Ok(format_hits(query, &hits));
+            return Ok(ToolOutput::text(format_hits(query, &hits)));
         }
 
         // El endpoint html a veces sirve un captcha o variante: probar lite.
@@ -219,12 +219,12 @@ impl Tool for WebSearch {
         let body = self.get_body(&lite_url).await?;
         let hits = parse_ddg_lite(&body, max);
         if hits.is_empty() {
-            return Ok(format!(
+            return Ok(ToolOutput::text(format!(
                 "La búsqueda de '{query}' no devolvió resultados (o el buscador \
                  bloqueó la consulta)."
-            ));
+            )));
         }
-        Ok(format_hits(query, &hits))
+        Ok(ToolOutput::text(format_hits(query, &hits)))
     }
 }
 
@@ -309,7 +309,7 @@ impl Tool for FetchPage {
         format!("leer la página {url}")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let page_url = required_str(&args, "url")?;
         url::Url::parse(page_url)
             .map_err(|_| ToolError::InvalidArgs(format!("URL inválida: {page_url}")))?;
@@ -334,10 +334,10 @@ impl Tool for FetchPage {
 
         let (title, text) = extract_readable_text(&body);
         if text.trim().is_empty() {
-            return Ok(format!(
+            return Ok(ToolOutput::text(format!(
                 "La página {page_url} no tiene texto legible extraíble \
                  (puede ser una app dinámica)."
-            ));
+            )));
         }
         let truncated: String = text.chars().take(self.cfg.max_page_chars).collect();
         let suffix = if truncated.len() < text.len() {
@@ -345,10 +345,10 @@ impl Tool for FetchPage {
         } else {
             ""
         };
-        Ok(if title.is_empty() {
+        Ok(ToolOutput::text(if title.is_empty() {
             format!("{truncated}{suffix}")
         } else {
             format!("Título: {title}\n\n{truncated}{suffix}")
-        })
+        }))
     }
 }

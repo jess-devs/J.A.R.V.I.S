@@ -22,7 +22,9 @@ use crate::errors::{Result, WorkerError};
 use crate::llm::{self, ChatMessage, LlmProvider, Role};
 use crate::memory::MemoryStore;
 use crate::pipeline;
+use crate::reminders::{self, DueReminder, ReminderStore};
 use crate::stt::{SttEvent, SttMode, SttWorker};
+use crate::tools::scripted_store::ScriptedToolStore;
 use crate::tools::{system_info, ToolRegistry};
 use crate::tts::{self, TtsProvider};
 use crate::wake::{AttentionGate, GateDecision};
@@ -45,6 +47,15 @@ pub struct Orchestrator {
     gate: AttentionGate,
     registry: ToolRegistry,
     memory: Arc<MemoryStore>,
+    /// Canal por el que el poller de recordatorios (`reminders::run_poller`,
+    /// corriendo en su propia tarea) avisa recordatorios vencidos. El
+    /// poller no puede hablar directo: no tiene acceso al `AudioPlayer`
+    /// (`&mut self`-only, vive acá).
+    reminder_rx: tokio::sync::mpsc::Receiver<DueReminder>,
+    /// Recordatorios que vencieron mientras había un turno o una
+    /// confirmación en curso; se hablan al volver a `Idle` (`finish_turn`)
+    /// para no pisar el barge-in/la confirmación en marcha.
+    pending_reminders: Vec<DueReminder>,
     /// Frases que Jarvis dijo hace poco, para descartar como eco propio
     /// transcripciones que lleguen mientras habla (barge-in). `Arc<Mutex<_>>`
     /// porque también lo necesita `pipeline::run_speaking_turn`, que corre
@@ -86,8 +97,23 @@ impl Orchestrator {
         ];
         let gate = AttentionGate::new(config.wake.clone());
         let memory = Arc::new(MemoryStore::open(&config.agent.memory.db_path)?);
-        let registry = ToolRegistry::build(&config.agent, memory.clone());
+        let reminder_store = Arc::new(ReminderStore::open(&config.agent.reminders.db_path)?);
+        let scripted_store = Arc::new(ScriptedToolStore::open(&config.agent.scripted_tools.db_path)?);
+        let registry = ToolRegistry::build(
+            &config.agent,
+            memory.clone(),
+            reminder_store.clone(),
+            scripted_store,
+        )
+        .await;
         let echo_gate = Arc::new(Mutex::new(EchoGate::new(config.barge_in.echo_guard.clone())));
+
+        let (reminder_tx, reminder_rx) = tokio::sync::mpsc::channel(16);
+        tokio::spawn(reminders::run_poller(
+            reminder_store,
+            reminder_tx,
+            Duration::from_secs(config.agent.reminders.poll_interval_secs),
+        ));
 
         let test_cancel_slot = if std::env::var_os("JARVIS_TEST_CANCEL").is_some() {
             tracing::warn!(
@@ -120,6 +146,8 @@ impl Orchestrator {
             gate,
             registry,
             memory,
+            reminder_rx,
+            pending_reminders: Vec::new(),
             echo_gate,
             system_static_cache: None,
             state: AgentState::Idle,
@@ -173,7 +201,18 @@ impl Orchestrator {
 
     pub async fn run(&mut self) -> Result<()> {
         tracing::info!("Jarvis listo. Escuchando...");
-        while let Some(event) = self.stt.next_event().await {
+        loop {
+            let event = tokio::select! {
+                biased;
+                due = self.reminder_rx.recv() => {
+                    if let Some(due) = due {
+                        self.handle_due_reminder(due).await;
+                    }
+                    continue;
+                }
+                event = self.stt.next_event() => event,
+            };
+            let Some(event) = event else { break };
             match event {
                 SttEvent::Transcript { text, meta, .. } => {
                     if let Some(meta) = &meta {
@@ -212,6 +251,25 @@ impl Orchestrator {
             }
         }
         Ok(())
+    }
+
+    /// Un recordatorio venció. Si Jarvis está libre (`Idle`), lo dice de
+    /// inmediato; si hay un turno o una confirmación en curso, lo encola
+    /// para hablarlo al volver a `Idle` (`finish_turn`), en vez de pisar el
+    /// barge-in o la confirmación en marcha.
+    async fn handle_due_reminder(&mut self, due: DueReminder) {
+        if matches!(self.state, AgentState::Idle) {
+            self.speak_reminder(&due).await;
+        } else {
+            self.pending_reminders.push(due);
+        }
+    }
+
+    async fn speak_reminder(&mut self, due: &DueReminder) {
+        tracing::info!(id = due.id, text = %due.text, "recordatorio vencido");
+        self.begin_speaking().await;
+        agent::speak(&self.tts, &mut self.player, &format!("Recordatorio, señor: {}", due.text)).await;
+        self.end_speaking().await;
     }
 
     /// El worker de STT murió (crash real, o se auto-terminó porque su propio
@@ -629,6 +687,12 @@ impl Orchestrator {
         self.end_speaking().await;
 
         self.trim_history();
+
+        // Recordatorios que vencieron mientras el turno estaba en curso.
+        let due = std::mem::take(&mut self.pending_reminders);
+        for reminder in due {
+            self.speak_reminder(&reminder).await;
+        }
     }
 
     /// Parte estática del system prompt: prompt base + memorias persistentes

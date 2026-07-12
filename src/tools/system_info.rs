@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use crate::errors::ToolError;
 
-use super::{RiskLevel, Tool};
+use super::{RiskLevel, Tool, ToolOutput};
 
 const DIAS: [&str; 7] = [
     "lunes",
@@ -72,13 +72,13 @@ impl Tool for GetDatetime {
         "consultar la fecha y hora".to_string()
     }
 
-    async fn execute(&self, _args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, _args: Value) -> Result<ToolOutput, ToolError> {
         let now = Local::now();
-        Ok(format!(
+        Ok(ToolOutput::text(format!(
             "Ahora es {} (fecha ISO: {}).",
             fecha_hora_es(),
             now.format("%Y-%m-%d %H:%M:%S")
-        ))
+        )))
     }
 }
 
@@ -107,7 +107,7 @@ impl Tool for SystemStatus {
         "consultar el estado del sistema".to_string()
     }
 
-    async fn execute(&self, _args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, _args: Value) -> Result<ToolOutput, ToolError> {
         tokio::task::spawn_blocking(|| {
             use sysinfo::System;
             let mut sys = System::new();
@@ -131,7 +131,7 @@ impl Tool for SystemStatus {
             lines.join("\n")
         })
         .await
-        .map(Ok)
+        .map(|text| Ok(ToolOutput::text(text)))
         .unwrap_or_else(|e| Err(ToolError::Execution(e.to_string())))
     }
 }
@@ -195,7 +195,7 @@ impl Tool for ListProcesses {
         "listar los procesos activos".to_string()
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let by_memory = args.get("sort_by").and_then(Value::as_str) == Some("memory");
         tokio::task::spawn_blocking(move || {
             use sysinfo::System;
@@ -235,7 +235,7 @@ impl Tool for ListProcesses {
             out
         })
         .await
-        .map(Ok)
+        .map(|text| Ok(ToolOutput::text(text)))
         .unwrap_or_else(|e| Err(ToolError::Execution(e.to_string())))
     }
 }

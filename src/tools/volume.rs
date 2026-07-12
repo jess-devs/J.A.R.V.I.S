@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 use crate::errors::ToolError;
 
-use super::{RiskLevel, Tool};
+use super::{RiskLevel, Tool, ToolOutput};
 
 /// Ejecuta `f` sobre el endpoint de volumen del dispositivo de salida por
 /// defecto, con COM inicializado en un hilo bloqueante.
@@ -70,7 +70,7 @@ impl Tool for GetVolume {
         "consultar el volumen".to_string()
     }
 
-    async fn execute(&self, _args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, _args: Value) -> Result<ToolOutput, ToolError> {
         let (level, muted) = with_endpoint_volume(|v| unsafe {
             let level = v.GetMasterVolumeLevelScalar()?;
             let muted = v.GetMute()?.as_bool();
@@ -78,11 +78,11 @@ impl Tool for GetVolume {
         })
         .await?;
         let pct = (level * 100.0).round() as u32;
-        Ok(if muted {
+        Ok(ToolOutput::text(if muted {
             format!("El volumen está en {pct}% pero la salida está silenciada.")
         } else {
             format!("El volumen está en {pct}%.")
-        })
+        }))
     }
 }
 
@@ -124,7 +124,7 @@ impl Tool for SetVolume {
         format!("poner el volumen al {pct} por ciento")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let pct = args
             .get("percent")
             .and_then(Value::as_u64)
@@ -137,6 +137,6 @@ impl Tool for SetVolume {
             Ok(())
         })
         .await?;
-        Ok(format!("Volumen ajustado al {pct}%."))
+        Ok(ToolOutput::text(format!("Volumen ajustado al {pct}%.")))
     }
 }

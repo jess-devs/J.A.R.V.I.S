@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use crate::config::FilesToolConfig;
 use crate::errors::ToolError;
 
-use super::{required_str, RiskLevel, Tool};
+use super::{required_str, RiskLevel, Tool, ToolOutput};
 
 /// Carpetas que no vale la pena recorrer: enormes y sin archivos del usuario.
 const SKIP_DIRS: [&str; 6] = [
@@ -129,17 +129,20 @@ impl Tool for FindFiles {
         format!("buscar archivos con '{query}'")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let query = required_str(&args, "query")?.to_string();
         if let Some(es) = self.cfg.everything_cli.as_ref().filter(|p| p.exists()) {
-            return self.search_with_everything(es, &query).await;
+            return self
+                .search_with_everything(es, &query)
+                .await
+                .map(ToolOutput::text);
         }
         let this = Self {
             cfg: self.cfg.clone(),
         };
         tokio::task::spawn_blocking(move || this.search_with_walkdir(query))
             .await
-            .map(Ok)
+            .map(|text| Ok(ToolOutput::text(text)))
             .unwrap_or_else(|e| Err(ToolError::Execution(e.to_string())))
     }
 }
@@ -180,7 +183,7 @@ impl Tool for OpenFile {
         format!("abrir el archivo {path}")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let path = PathBuf::from(required_str(&args, "path")?);
         if !path.exists() {
             return Err(ToolError::InvalidArgs(format!(
@@ -195,7 +198,7 @@ impl Tool for OpenFile {
             .await
             .map_err(|e| ToolError::Execution(format!("no se pudo abrir: {e}")))?;
         if status.success() {
-            Ok(format!("Abierto: {}.", path.display()))
+            Ok(ToolOutput::text(format!("Abierto: {}.", path.display())))
         } else {
             Err(ToolError::Execution(format!(
                 "Windows no pudo abrir {}.",

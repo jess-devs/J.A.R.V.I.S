@@ -246,17 +246,34 @@ pub async fn execute_and_record(
     call: &ToolCallRequest,
 ) {
     let timeout_secs = config.agent.tool_timeout_secs;
-    let result = match registry.get(&call.name) {
-        None => format!("Error: no existe ninguna herramienta llamada '{}'.", call.name),
+    let mut succeeded = false;
+    let (result, images) = match registry.get(&call.name) {
+        None => (
+            format!("Error: no existe ninguna herramienta llamada '{}'.", call.name),
+            Vec::new(),
+        ),
         Some(tool) => {
             let fut = tool.execute(call.arguments.clone());
             match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), fut).await {
-                Err(_) => format!("Error: {}", ToolError::Timeout(timeout_secs)),
-                Ok(Err(e)) => format!("Error: {e}"),
-                Ok(Ok(output)) => registry.truncate_result(output),
+                Err(_) => (format!("Error: {}", ToolError::Timeout(timeout_secs)), Vec::new()),
+                Ok(Err(e)) => (format!("Error: {e}"), Vec::new()),
+                Ok(Ok(output)) => {
+                    succeeded = true;
+                    (registry.truncate_result(output.text), output.images)
+                }
             }
         }
     };
+    // create_tool/delete_custom_tool mutan el set de tools persistidas:
+    // recargar acá para que la tool nueva/borrada esté disponible desde el
+    // siguiente turno, sin reiniciar Jarvis.
+    if succeeded && crate::tools::SCRIPTED_TOOL_MUTATORS.contains(&call.name.as_str()) {
+        if let Err(e) = registry.reload_scripted().await {
+            tracing::warn!(error = %e, "no se pudo recargar el registro de tools tras {}", call.name);
+        }
+    }
     tracing::info!(tool = %call.name, args = %call.arguments, result = %result, "herramienta ejecutada");
-    history.push(ChatMessage::tool_result(&call.id, &call.name, result));
+    history.push(ChatMessage::tool_result_with_images(
+        &call.id, &call.name, result, images,
+    ));
 }

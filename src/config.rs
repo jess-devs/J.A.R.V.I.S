@@ -636,6 +636,9 @@ pub struct AgentConfig {
     pub apps: AppsConfig,
     pub web: WebToolConfig,
     pub memory: MemoryConfig,
+    pub translate: TranslateConfig,
+    pub reminders: RemindersConfig,
+    pub scripted_tools: ScriptedToolsConfig,
 }
 
 impl Default for AgentConfig {
@@ -669,6 +672,70 @@ impl Default for AgentConfig {
             apps: AppsConfig::default(),
             web: WebToolConfig::default(),
             memory: MemoryConfig::default(),
+            translate: TranslateConfig::default(),
+            reminders: RemindersConfig::default(),
+            scripted_tools: ScriptedToolsConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TranslateConfig {
+    /// Idioma destino usado si el LLM no especifica `target_lang`.
+    pub default_target_lang: String,
+}
+
+impl Default for TranslateConfig {
+    fn default() -> Self {
+        Self {
+            default_target_lang: "es".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct RemindersConfig {
+    /// Ruta del archivo SQLite de recordatorios.
+    pub db_path: PathBuf,
+    /// Cada cuántos segundos el poller revisa recordatorios vencidos.
+    pub poll_interval_secs: u64,
+    /// Tope de recordatorios activos simultáneos.
+    pub max_active: usize,
+}
+
+impl Default for RemindersConfig {
+    fn default() -> Self {
+        Self {
+            db_path: PathBuf::from("data/reminders.db"),
+            poll_interval_secs: 20,
+            max_active: 50,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ScriptedToolsConfig {
+    /// Ruta del archivo SQLite de tools personalizadas (separado de
+    /// memory.db: datos de mayor riesgo, conviene poder borrarlos aparte).
+    pub db_path: PathBuf,
+    /// Tope de tools personalizadas simultáneas.
+    pub max_tools: usize,
+    /// Timeout de las recetas HTTP.
+    pub http_timeout_secs: u64,
+    /// Hosts permitidos para recetas HTTP; vacío = sin restricción.
+    pub allowed_hosts: Vec<String>,
+}
+
+impl Default for ScriptedToolsConfig {
+    fn default() -> Self {
+        Self {
+            db_path: PathBuf::from("data/scripted_tools.db"),
+            max_tools: 20,
+            http_timeout_secs: 15,
+            allowed_hosts: Vec::new(),
         }
     }
 }

@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use crate::config::AppsConfig;
 use crate::errors::ToolError;
 
-use super::{required_str, RiskLevel, Tool};
+use super::{required_str, RiskLevel, Tool, ToolOutput};
 
 pub struct OpenApp {
     aliases: HashMap<String, String>,
@@ -68,7 +68,7 @@ impl Tool for OpenApp {
         format!("abrir {name}")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let name = required_str(&args, "name")?;
         let target = self.resolve(name);
         // `start` no bloquea y resuelve como lo haría el usuario en Win+R.
@@ -78,7 +78,7 @@ impl Tool for OpenApp {
             .await
             .map_err(|e| ToolError::Execution(format!("no se pudo lanzar '{target}': {e}")))?;
         if status.success() {
-            Ok(format!("Aplicación '{target}' lanzada."))
+            Ok(ToolOutput::text(format!("Aplicación '{target}' lanzada.")))
         } else {
             Err(ToolError::Execution(format!(
                 "No encontré ninguna aplicación llamada '{target}'. Si querías abrir un \
@@ -157,7 +157,7 @@ impl Tool for OpenUrl {
         format!("abrir {host}")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let raw = required_str(&args, "url")?;
         let url = Self::normalize_url(raw)?;
         let status = tokio::process::Command::new("cmd")
@@ -167,7 +167,7 @@ impl Tool for OpenUrl {
             .await
             .map_err(|e| ToolError::Execution(format!("no se pudo abrir '{url}': {e}")))?;
         if status.success() {
-            Ok(format!("Abriendo {url} en el navegador."))
+            Ok(ToolOutput::text(format!("Abriendo {url} en el navegador.")))
         } else {
             Err(ToolError::Execution(format!(
                 "Windows no pudo abrir la URL '{url}'."
@@ -213,7 +213,7 @@ impl Tool for CloseApp {
         format!("cerrar todos los procesos de {name}")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let name = required_str(&args, "name")?.to_lowercase();
         if name.len() < 3 {
             return Err(ToolError::InvalidArgs(
@@ -238,7 +238,7 @@ impl Tool for CloseApp {
             }
         })
         .await
-        .map(Ok)
+        .map(|text| Ok(ToolOutput::text(text)))
         .unwrap_or_else(|e| Err(ToolError::Execution(e.to_string())))
     }
 }

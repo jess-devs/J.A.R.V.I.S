@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use crate::errors::ToolError;
 use crate::memory::MemoryStore;
 
-use super::{required_str, RiskLevel, Tool};
+use super::{required_str, RiskLevel, Tool, ToolOutput};
 
 pub struct Remember {
     store: Arc<MemoryStore>,
@@ -59,11 +59,11 @@ impl Tool for Remember {
         format!("recordar que {content}")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let content = required_str(&args, "content")?;
         let category = args.get("category").and_then(Value::as_str);
         self.store.remember(content, category).await?;
-        Ok(format!("Memorizado: {content}"))
+        Ok(ToolOutput::text(format!("Memorizado: {content}")))
     }
 }
 
@@ -110,11 +110,13 @@ impl Tool for Recall {
         format!("buscar '{query}' en la memoria")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let query = required_str(&args, "query")?;
         let memories = self.store.recall(query, 10).await?;
         if memories.is_empty() {
-            return Ok(format!("No hay memorias que coincidan con '{query}'."));
+            return Ok(ToolOutput::text(format!(
+                "No hay memorias que coincidan con '{query}'."
+            )));
         }
         let mut out = String::from("Memorias encontradas:\n");
         for m in memories {
@@ -125,7 +127,7 @@ impl Tool for Recall {
                 .unwrap_or_default();
             out.push_str(&format!("- {}{cat} (guardado: {})\n", m.content, m.created_at));
         }
-        Ok(out)
+        Ok(ToolOutput::text(out))
     }
 }
 
@@ -173,13 +175,13 @@ impl Tool for Forget {
         format!("borrar de la memoria lo relacionado con '{query}'")
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let query = required_str(&args, "query")?;
         let deleted = self.store.forget(query).await?;
-        Ok(if deleted == 0 {
+        Ok(ToolOutput::text(if deleted == 0 {
             format!("No había memorias que coincidieran con '{query}'.")
         } else {
             format!("Borradas {deleted} memorias relacionadas con '{query}'.")
-        })
+        }))
     }
 }

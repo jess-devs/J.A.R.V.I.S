@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 
 use crate::errors::ToolError;
 
-use super::{required_str, RiskLevel, Tool};
+use super::{required_str, RiskLevel, Tool, ToolOutput};
 
 /// Patrones (case-insensitive) que elevan un comando a nivel `Code`. Los de
 /// `agent.high_risk_patterns` de la config se suman a estos.
@@ -26,6 +26,39 @@ const DEFAULT_HIGH_RISK: [&str; 11] = [
     r"cipher\s+/w",
     r"\bdisable-\w",
 ];
+
+/// Ejecuta un comando de PowerShell y devuelve su salida formateada
+/// (stdout + stderr, o un mensaje si no hubo salida). Compartida por
+/// `RunPowershell` y por `ScriptedTool` (`scripted.rs`) para recetas
+/// `Powershell`.
+pub async fn run_powershell_command(command: &str) -> Result<String, ToolError> {
+    let output = tokio::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", command])
+        .output()
+        .await
+        .map_err(|e| ToolError::Execution(format!("no se pudo lanzar PowerShell: {e}")))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut result = String::new();
+    if !stdout.trim().is_empty() {
+        result.push_str(stdout.trim());
+    }
+    if !stderr.trim().is_empty() {
+        if !result.is_empty() {
+            result.push('\n');
+        }
+        result.push_str(&format!("(stderr) {}", stderr.trim()));
+    }
+    if result.is_empty() {
+        result = if output.status.success() {
+            "Comando ejecutado sin salida.".to_string()
+        } else {
+            format!("El comando falló (código {:?}) sin salida.", output.status.code())
+        };
+    }
+    Ok(result)
+}
 
 pub struct RunPowershell {
     high_risk: Vec<Regex>,
@@ -120,33 +153,9 @@ impl Tool for RunPowershell {
         }
     }
 
-    async fn execute(&self, args: Value) -> Result<String, ToolError> {
+    async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let command = required_str(&args, "command")?;
-        let output = tokio::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", command])
-            .output()
-            .await
-            .map_err(|e| ToolError::Execution(format!("no se pudo lanzar PowerShell: {e}")))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let mut result = String::new();
-        if !stdout.trim().is_empty() {
-            result.push_str(stdout.trim());
-        }
-        if !stderr.trim().is_empty() {
-            if !result.is_empty() {
-                result.push('\n');
-            }
-            result.push_str(&format!("(stderr) {}", stderr.trim()));
-        }
-        if result.is_empty() {
-            result = if output.status.success() {
-                "Comando ejecutado sin salida.".to_string()
-            } else {
-                format!("El comando falló (código {:?}) sin salida.", output.status.code())
-            };
-        }
-        Ok(result)
+        let result = run_powershell_command(command).await?;
+        Ok(ToolOutput::text(result))
     }
 }

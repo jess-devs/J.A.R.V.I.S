@@ -9,6 +9,7 @@ mod llm;
 mod memory;
 mod orchestrator;
 mod pipeline;
+mod reminders;
 mod startup_checks;
 mod stt;
 mod text;
