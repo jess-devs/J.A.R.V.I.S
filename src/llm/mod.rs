@@ -1,4 +1,4 @@
-//! Interfaz común de LLM: `OllamaProvider` (local, foco principal) y
+//! Interfaz común de LLM: `OllamaProvider`/`LmStudioProvider` (locales) y
 //! `AnthropicProvider`/`OpenAiProvider`/`DeepSeekProvider` (nube).
 //!
 //! El streaming se modela como eventos (`LlmEvent`): texto incremental para
@@ -9,6 +9,7 @@
 pub mod anthropic;
 mod decode;
 pub mod deepseek;
+pub mod lmstudio;
 pub mod ollama;
 pub mod openai;
 mod openai_compatible;
@@ -149,6 +150,10 @@ pub fn build_provider(config: &Config) -> Result<Arc<dyn LlmProvider>, LlmError>
         )?)),
         LlmProviderKind::Deepseek => Ok(Arc::new(deepseek::DeepSeekProvider::new(
             &config.llm.deepseek,
+            timeout,
+        )?)),
+        LlmProviderKind::LmStudio => Ok(Arc::new(lmstudio::LmStudioProvider::new(
+            &config.llm.lmstudio,
             timeout,
         )?)),
     }

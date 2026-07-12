@@ -42,7 +42,7 @@ pub async fn run(config: &Config) -> Result<()> {
             if let Err(e) = check_ollama(config).await {
                 problems.push(e);
             } else if config.agent.enabled {
-                warn_ollama_tool_support(&config.llm.ollama.model);
+                warn_model_tool_support("Ollama", &config.llm.ollama.model);
             }
         }
         LlmProviderKind::Anthropic => {
@@ -58,6 +58,13 @@ pub async fn run(config: &Config) -> Result<()> {
         LlmProviderKind::Deepseek => {
             if let Err(e) = check_cloud_api_key(&config.llm.deepseek.api_key_env) {
                 problems.push(e);
+            }
+        }
+        LlmProviderKind::LmStudio => {
+            if let Err(e) = check_lmstudio(config).await {
+                problems.push(e);
+            } else if config.agent.enabled {
+                warn_model_tool_support("LM Studio", &config.llm.lmstudio.model);
             }
         }
     }
@@ -177,22 +184,25 @@ struct TagsModel {
 }
 
 /// El modo agéntico depende de tool calling. Casi todos los modelos
-/// instruidos recientes de Ollama lo soportan, pero algunos populares (las
-/// familias `llama2`, `gemma` base, `phi`, `mistral` clásico) no. No se puede
-/// saber con certeza sin una petición de prueba, así que solo avisamos: si el
-/// modelo pertenece a una familia conocida sin tools, sugerimos un cambio.
-fn warn_ollama_tool_support(model: &str) {
-    const SIN_TOOLS: [&str; 5] = ["llama2", "gemma:", "gemma2", "phi", "orca"];
+/// instruidos recientes lo soportan, pero algunos populares (las familias
+/// `llama2`, `gemma`, `phi`, `mistral` clásico) no. No se puede saber con
+/// certeza sin una petición de prueba, así que solo avisamos: si el modelo
+/// pertenece a una familia conocida sin tools, sugerimos un cambio.
+/// `contains` (no `starts_with`) porque catálogos como el de LM Studio
+/// anteponen el namespace del autor, ej. "google/gemma-4-e4b".
+fn warn_model_tool_support(provider: &str, model: &str) {
+    const SIN_TOOLS: [&str; 4] = ["llama2", "gemma", "phi", "orca"];
     let lower = model.to_lowercase();
-    if SIN_TOOLS.iter().any(|fam| lower.starts_with(fam)) {
+    if SIN_TOOLS.iter().any(|fam| lower.contains(fam)) {
         tracing::warn!(
+            provider,
             model,
-            "el modo agéntico está activo pero '{model}' podría no soportar tool calling. \
-             Si Jarvis no usa las herramientas, prueba con 'qwen3:8b' o 'qwen2.5:7b' \
-             (ollama pull qwen3:8b).",
+            "el modo agéntico está activo pero '{model}' ({provider}) podría no soportar \
+             tool calling. Si Jarvis no usa las herramientas, probá con un modelo de la \
+             familia qwen (ej. 'qwen3:8b' en Ollama).",
         );
     } else {
-        tracing::info!(model, "modo agéntico activo con Ollama");
+        tracing::info!(provider, model, "modo agéntico activo con {provider}");
     }
 }
 
@@ -227,6 +237,61 @@ async fn check_ollama(config: &Config) -> std::result::Result<(), String> {
         };
         Err(format!(
             "el modelo '{model}' no está descargado en Ollama. Ejecutá: ollama pull {model} (modelos disponibles: {listado})"
+        ))
+    }
+}
+
+#[derive(Deserialize)]
+struct ModelsResponse {
+    #[serde(default)]
+    data: Vec<ModelsEntry>,
+}
+
+#[derive(Deserialize)]
+struct ModelsEntry {
+    id: String,
+}
+
+async fn check_lmstudio(config: &Config) -> std::result::Result<(), String> {
+    let lmstudio = &config.llm.lmstudio;
+    if let Some(env_var) = &lmstudio.api_key_env {
+        check_cloud_api_key(env_var)?;
+    }
+
+    let base_url = lmstudio.base_url.trim_end_matches('/');
+    let model = &lmstudio.model;
+    let url = format!("{base_url}/models");
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let response = client.get(&url).send().await.map_err(|_| {
+        format!(
+            "no se pudo conectar a LM Studio en {base_url}. ¿Tenés el servidor local \
+             activado? (pestaña Developer -> Start Server)"
+        )
+    })?;
+
+    let body: ModelsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("respuesta inesperada de LM Studio: {e}"))?;
+
+    let found = body.data.iter().any(|m| &m.id == model);
+    let available: Vec<&str> = body.data.iter().map(|m| m.id.as_str()).collect();
+    if found {
+        Ok(())
+    } else {
+        let listado = if available.is_empty() {
+            "ninguno".to_string()
+        } else {
+            available.join(", ")
+        };
+        Err(format!(
+            "el modelo '{model}' no está cargado en LM Studio (modelos disponibles: \
+             {listado}). Cargalo desde la pestaña Developer o ajustá llm.lmstudio.model."
         ))
     }
 }

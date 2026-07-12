@@ -212,6 +212,7 @@ pub enum LlmProviderKind {
     Anthropic,
     Openai,
     Deepseek,
+    LmStudio,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -285,6 +286,31 @@ impl Default for DeepSeekConfig {
     }
 }
 
+/// LM Studio expone un servidor local compatible con la API de OpenAI (ver
+/// `llm::lmstudio`). A diferencia de los proveedores de nube normalmente no
+/// requiere API key, por eso `api_key_env` es opcional.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct LmStudioConfig {
+    pub base_url: String,
+    /// Placeholder deliberado: si no calza con lo cargado, el preflight
+    /// (`check_lmstudio`) lista los modelos que LM Studio sí tiene.
+    pub model: String,
+    /// null = sin autenticación (caso normal). Some = exige esa variable de
+    /// entorno, igual que los proveedores de nube.
+    pub api_key_env: Option<String>,
+}
+
+impl Default for LmStudioConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:1234/v1".to_string(),
+            model: "local-model".to_string(),
+            api_key_env: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
@@ -293,6 +319,7 @@ pub struct LlmConfig {
     pub anthropic: AnthropicConfig,
     pub openai: OpenAiConfig,
     pub deepseek: DeepSeekConfig,
+    pub lmstudio: LmStudioConfig,
     pub system_prompt: String,
     pub max_history_messages: usize,
     pub request_timeout_secs: u64,
@@ -306,6 +333,7 @@ impl Default for LlmConfig {
             anthropic: AnthropicConfig::default(),
             openai: OpenAiConfig::default(),
             deepseek: DeepSeekConfig::default(),
+            lmstudio: LmStudioConfig::default(),
             system_prompt: "Eres Jarvis, un asistente de voz conversacional en español. \
                 Estás hablando en voz alta, no escribiendo texto: nunca uses markdown \
                 (nada de **, #, guiones de lista, bloques de código ni links). Respondé \
