@@ -21,7 +21,7 @@ use tokio_stream::StreamExt;
 use crate::errors::LlmError;
 
 use super::decode::Utf8StreamDecoder;
-use super::{ChatMessage, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
+use super::{ChatMessage, ImageBlock, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
 
 pub struct OpenAiCompatibleProvider {
     client: reqwest::Client,
@@ -72,11 +72,30 @@ struct RequestToolCall {
 #[derive(Serialize)]
 struct ChatCompletionMessage<'a> {
     role: &'a str,
-    content: &'a str,
+    /// Texto plano en el caso común; array de bloques `text`/`image_url`
+    /// (formato OpenAI) cuando el mensaje trae imágenes adjuntas.
+    content: serde_json::Value,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tool_calls: Vec<RequestToolCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_call_id: Option<&'a str>,
+}
+
+/// Bloque `image_url` en formato OpenAI (data URI inline). Lo usan DeepSeek
+/// y los proveedores locales (LM Studio) además de OpenAI mismo, todos
+/// compartiendo este cliente.
+fn image_content(content: &str, images: &[ImageBlock]) -> serde_json::Value {
+    if images.is_empty() {
+        return serde_json::Value::String(content.to_string());
+    }
+    let mut blocks = vec![serde_json::json!({ "type": "text", "text": content })];
+    blocks.extend(images.iter().map(|img| {
+        serde_json::json!({
+            "type": "image_url",
+            "image_url": { "url": format!("data:{};base64,{}", img.media_type, img.base64_data) }
+        })
+    }));
+    serde_json::Value::Array(blocks)
 }
 
 #[derive(Serialize)]
@@ -200,7 +219,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .iter()
             .map(|m| ChatCompletionMessage {
                 role: role_str(m.role),
-                content: &m.content,
+                content: image_content(&m.content, &m.images),
                 tool_calls: m
                     .tool_calls
                     .iter()

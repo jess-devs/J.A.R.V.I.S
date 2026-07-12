@@ -20,7 +20,19 @@ use crate::config::AnthropicConfig;
 use crate::errors::LlmError;
 
 use super::decode::Utf8StreamDecoder;
-use super::{ChatMessage, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
+use super::{ChatMessage, ImageBlock, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
+
+/// Bloque `image` en formato Anthropic (base64 inline).
+fn image_block(img: &ImageBlock) -> Value {
+    json!({
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": img.media_type,
+            "data": img.base64_data,
+        }
+    })
+}
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -63,15 +75,28 @@ fn build_messages(history: &[ChatMessage]) -> Vec<Value> {
         match m.role {
             Role::System => continue, // va en el campo `system` de nivel superior
             Role::Tool => {
+                let content = if m.images.is_empty() {
+                    json!(m.content)
+                } else {
+                    let mut blocks = vec![json!({ "type": "text", "text": m.content })];
+                    blocks.extend(m.images.iter().map(image_block));
+                    json!(blocks)
+                };
                 pending_results.push(json!({
                     "type": "tool_result",
                     "tool_use_id": m.tool_call_id.as_deref().unwrap_or_default(),
-                    "content": m.content,
+                    "content": content,
                 }));
             }
             Role::User => {
                 flush_results(&mut messages, &mut pending_results);
-                messages.push(json!({ "role": "user", "content": m.content }));
+                if m.images.is_empty() {
+                    messages.push(json!({ "role": "user", "content": m.content }));
+                } else {
+                    let mut blocks = vec![json!({ "type": "text", "text": m.content })];
+                    blocks.extend(m.images.iter().map(image_block));
+                    messages.push(json!({ "role": "user", "content": blocks }));
+                }
             }
             Role::Assistant => {
                 flush_results(&mut messages, &mut pending_results);

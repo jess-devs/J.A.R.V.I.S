@@ -19,6 +19,9 @@ use crate::errors::LlmError;
 use super::decode::Utf8StreamDecoder;
 use super::{ChatMessage, LlmEvent, LlmProvider, Role, ToolCallRequest, ToolSpec};
 
+/// Ollama acepta imágenes como strings base64 planos (sin data URI) en un
+/// campo `images` aparte del mensaje.
+
 pub struct OllamaProvider {
     client: reqwest::Client,
     base_url: String,
@@ -60,6 +63,8 @@ struct OllamaMessage<'a> {
     tool_calls: Vec<OllamaToolCall<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    images: Vec<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -148,6 +153,7 @@ impl LlmProvider for OllamaProvider {
                     })
                     .collect(),
                 tool_name: m.tool_name.as_deref(),
+                images: m.images.iter().map(|img| img.base64_data.as_str()).collect(),
             })
             .collect();
         let body = OllamaChatRequest {

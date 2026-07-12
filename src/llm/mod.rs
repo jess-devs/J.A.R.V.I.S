@@ -42,6 +42,17 @@ pub struct ToolCallRequest {
     pub arguments: serde_json::Value,
 }
 
+/// Imagen adjunta a un mensaje (típicamente un resultado de `take_screenshot`).
+/// Solo lo renderizan Anthropic, DeepSeek y los proveedores locales (Ollama,
+/// LM Studio); el resto de los proveedores simplemente ignoran este campo.
+#[derive(Debug, Clone)]
+pub struct ImageBlock {
+    /// MIME type, ej. "image/png".
+    pub media_type: String,
+    /// Datos de la imagen codificados en base64 (sin el prefijo data:...).
+    pub base64_data: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
     pub role: Role,
@@ -53,6 +64,9 @@ pub struct ChatMessage {
     /// Solo en mensajes Tool: el nombre de la herramienta (Ollama lo usa en
     /// lugar de ids).
     pub tool_name: Option<String>,
+    /// Imágenes adjuntas (ej. un screenshot devuelto por una tool). Vacío en
+    /// la inmensa mayoría de los mensajes.
+    pub images: Vec<ImageBlock>,
 }
 
 impl ChatMessage {
@@ -63,6 +77,7 @@ impl ChatMessage {
             tool_calls: Vec::new(),
             tool_call_id: None,
             tool_name: None,
+            images: Vec::new(),
         }
     }
 
@@ -94,6 +109,18 @@ impl ChatMessage {
             tool_call_id: Some(call_id.into()),
             tool_name: Some(tool_name.into()),
             ..Self::new(Role::Tool, content)
+        }
+    }
+
+    pub fn tool_result_with_images(
+        call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        content: impl Into<String>,
+        images: Vec<ImageBlock>,
+    ) -> Self {
+        Self {
+            images,
+            ..Self::tool_result(call_id, tool_name, content)
         }
     }
 }
