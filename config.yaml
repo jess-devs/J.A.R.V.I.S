@@ -163,32 +163,29 @@ llm:
   request_timeout_secs: 180 # subido de 60: LM Studio puede tardar bastante en la primera respuesta si carga el modelo en frío o compite por VRAM con el STT
 
 tts:
-  provider: piper # piper | elevenlabs
+  provider: cartesia # piper | elevenlabs | cartesia
   piper:
-    # Voces alternativas descargadas en voices/ — para probar una, comentá
-    # las 2 líneas activas de abajo y descomentá el par que quieras:
-    # voice_path: "voices/es_ES-davefx-medium.onnx"       # medium, masculina, acento España (la mejor calidad masculina confirmada)
-    # config_path: "voices/es_ES-davefx-medium.onnx.json"
-    # voice_path: "voices/es_ES-carlfm-x_low.onnx"          # x_low, masculina, calidad baja/robótica (activa ahora)
-    # config_path: "voices/es_ES-carlfm-x_low.onnx.json"
-    # voice_path: "voices/es_ES-sharvard-medium.onnx"     # medium, género sin confirmar — ya la probaste
-    # config_path: "voices/es_ES-sharvard-medium.onnx.json"
-    # voice_path: "voices/es_ES-mls_9972-low.onnx"        # low, género sin confirmar
-    # config_path: "voices/es_ES-mls_9972-low.onnx.json"
-    # voice_path: "voices/es_ES-mls_10246-low.onnx"       # low, género sin confirmar
-    # config_path: "voices/es_ES-mls_10246-low.onnx.json"
-    voice_path: "voices/es_MX-claude-high.onnx"         # high, la voz original (femenina)
+    voice_path: "voices/es_MX-claude-high.onnx"
     config_path: "voices/es_MX-claude-high.onnx.json"
-    # voice_path: "voices/es_MX-ald-medium.onnx"          # medium, acento mexicano — ya la probaste
-    # config_path: "voices/es_MX-ald-medium.onnx.json"
     use_cuda: false # true = sintetiza en GPU (más rápido, pero compite por VRAM con el STT si ese también usa CUDA)
     length_scale: null # <1 = mas rapido, >1 = mas lento (null = ritmo original de la voz, 1.0) — retocar tras escuchar esta voz
     noise_w_scale: null # variacion en la duracion de los fonemas (null = default de la voz) — retocar tras escuchar esta voz
   elevenlabs: # solo se usa con provider: elevenlabs — requiere API key y consume créditos de la cuenta
-    voice_id: "" # ID de la voz elegida en tu cuenta de ElevenLabs (pestaña Voices -> ⋮ -> Copy Voice ID)
+    voice_id: "57D8YIbQSuE3REDPO6Vm" # ID de la voz elegida en tu cuenta de ElevenLabs (pestaña Voices -> ⋮ -> Copy Voice ID)
     model_id: "eleven_multilingual_v2"
     output_format: "pcm_22050" # formato PCM que pide la API de ElevenLabs — no tocar salvo que sepas lo que hacés
     api_key_env: "ELEVENLABS_API_KEY" # nombre de la variable en .env, no la key
+  cartesia: # solo se usa con provider: cartesia — requiere API key y consume créditos de la cuenta
+    model_id: "sonic-3.5" # sonic-3.5 | sonic-3 | sonic-latest
+    voice_id: "b4b8e2af-6139-466e-a93a-30c20d2e1fc5" # ID de la voz en Cartesia (https://play.cartesia.ai/voices)
+    language: "es" # null = autodetectar; "es" = español
+    output_format:
+      container: "raw" # raw | wav | mp3 — "raw" devuelve PCM crudo sin parsear
+      encoding: "pcm_s16le" # pcm_s16le (16-bit) | pcm_f32le (32-bit float) | pcm_mulaw | pcm_alaw
+      sample_rate: 22050 # 8000 | 16000 | 22050 | 24000 | 44100 | 48000
+    api_key_env: "CARTESIA_API_KEY" # nombre de la variable en .env, no la key
+    cartesia_version: "2026-03-01" # fecha de la versión de API que usás (YYYY-MM-DD)
+    transport: websocket # rest | websocket
   synth_timeout_secs: 10 # si la síntesis de una frase tarda más que esto, se aborta el resto de la respuesta
 
 audio:
