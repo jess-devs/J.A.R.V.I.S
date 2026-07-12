@@ -33,3 +33,6 @@ scraper = "0.22"
 url = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+base64 = "0.22"
+futures-util = "0.3"

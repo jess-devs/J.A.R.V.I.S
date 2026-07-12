@@ -453,6 +453,7 @@ pub enum TtsProviderKind {
     #[default]
     Piper,
     Elevenlabs,
+    Cartesia,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -505,12 +506,65 @@ impl Default for ElevenLabsConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CartesiaTransport {
+    #[default]
+    Rest,
+    WebSocket,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CartesiaOutputFormat {
+    pub container: String,
+    pub encoding: String,
+    pub sample_rate: u32,
+}
+
+impl Default for CartesiaOutputFormat {
+    fn default() -> Self {
+        Self {
+            container: "raw".to_string(),
+            encoding: "pcm_s16le".to_string(),
+            sample_rate: 22050,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct CartesiaConfig {
+    pub model_id: String,
+    pub voice_id: String,
+    pub language: Option<String>,
+    pub output_format: CartesiaOutputFormat,
+    pub api_key_env: String,
+    pub cartesia_version: String,
+    pub transport: CartesiaTransport,
+}
+
+impl Default for CartesiaConfig {
+    fn default() -> Self {
+        Self {
+            model_id: "sonic-3.5".to_string(),
+            voice_id: String::new(),
+            language: Some("es".to_string()),
+            output_format: CartesiaOutputFormat::default(),
+            api_key_env: "CARTESIA_API_KEY".to_string(),
+            cartesia_version: "2026-03-01".to_string(),
+            transport: CartesiaTransport::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct TtsConfig {
     pub provider: TtsProviderKind,
     pub piper: PiperConfig,
     pub elevenlabs: ElevenLabsConfig,
+    pub cartesia: CartesiaConfig,
     pub synth_timeout_secs: u64,
 }
 
@@ -520,6 +574,7 @@ impl Default for TtsConfig {
             provider: TtsProviderKind::default(),
             piper: PiperConfig::default(),
             elevenlabs: ElevenLabsConfig::default(),
+            cartesia: CartesiaConfig::default(),
             synth_timeout_secs: 10,
         }
     }
