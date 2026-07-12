@@ -20,7 +20,7 @@ pub async fn run(config: &Config) -> Result<()> {
         problems.push(e);
     }
 
-    if let Err(e) = check_input_device_present() {
+    if let Err(e) = check_input_device_present(config) {
         problems.push(e);
     }
 
@@ -148,14 +148,30 @@ fn check_piper_voice_files(config: &Config) -> std::result::Result<(), String> {
     ))
 }
 
-fn check_input_device_present() -> std::result::Result<(), String> {
+/// Comprobación genérica: hace falta que exista al menos un micrófono en el
+/// sistema. No valida el `input_device_index` específico configurado — los
+/// índices de cpal (usado acá) y de PyAudio (usado por el worker de STT) no
+/// tienen por qué coincidir, así que una validación cruzada podría dar tanto
+/// falsos positivos como falsos negativos. La validación real de ese índice
+/// ocurre en el worker Python al abrir el stream (reporta `fatal_error` con
+/// un mensaje accionable si el índice no existe para PyAudio); acá solo se
+/// deja una pista hacia `--list-devices` cuando hay un índice configurado.
+fn check_input_device_present(config: &Config) -> std::result::Result<(), String> {
     let host = cpal::default_host();
     match host.input_devices() {
         Ok(mut devices) => {
             if devices.next().is_some() {
                 Ok(())
             } else {
-                Err("no se detectó ningún micrófono en el sistema".to_string())
+                let hint = match config.stt.input_device_index {
+                    Some(idx) => format!(
+                        " (configuraste input_device_index: {idx} — corré \
+                         `python workers/stt_worker.py --list-devices` para ver \
+                         los índices reales de PyAudio)"
+                    ),
+                    None => String::new(),
+                };
+                Err(format!("no se detectó ningún micrófono en el sistema{hint}"))
             }
         }
         Err(e) => Err(format!("no se pudo enumerar dispositivos de audio: {e}")),

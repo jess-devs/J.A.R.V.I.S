@@ -1,16 +1,28 @@
-"""Worker de STT: envuelve RealtimeSTT (faster-whisper + VAD + microfono).
+"""Worker de STT: dispatcher entre el motor nativo (PyAudio + Silero VAD +
+faster-whisper directo, ver stt_engine.py) y RealtimeSTT (camino de
+respaldo, `engine: realtimestt` en config.yaml).
 
 Protocolo (ver README.md de este directorio):
   Rust -> Python (stdin):  init | mute | unmute | shutdown
   Python -> Rust (stdout): ready | transcript | error | fatal_error
+  (motor nativo, además):  vad_start | vad_end | discarded
 
-Posee el microfono por completo. "mute"/"unmute" apagan y prenden el
-microfono real via recorder.set_microphone(), en vez de descartar eventos,
-para no gastar CPU/GPU mientras Jarvis esta hablando.
+Con el motor nativo, "mute"/"unmute" no apagan el micrófono físico (PyAudio
+no lo permite tan barato como RealtimeSTT.set_microphone) sino que activan
+el modo "suppressed": el hilo de audio sigue leyendo el stream pero descarta
+los frames antes del VAD, así que no hay costo de Whisper/GPU mientras
+Jarvis habla. Con `engine: realtimestt` se conserva el comportamiento
+original (apaga el micrófono real).
 
 El perfil de rendimiento (modelo, beam size, hilos) sale de
-hardware_detect.resolve_profile(): calibracion medida en el primer arranque,
-cacheada por fingerprint de hardware en los siguientes.
+hardware_detect.resolve_profile() en ambos caminos: calibracion medida en el
+primer arranque, cacheada por fingerprint de hardware en los siguientes.
+
+CLI de diagnóstico (no participa del protocolo IPC — se resuelve antes de
+importar `ipc`, que redirige stdout a nivel de fd, para que estos comandos
+impriman donde el usuario los puede ver):
+  python stt_worker.py --list-devices          enumera dispositivos de entrada de PyAudio
+  python stt_worker.py --calibrate [--device N] vúmetro en vivo del RMS del dispositivo
 """
 
 import os
@@ -18,12 +30,80 @@ import sys
 import threading
 import time
 
-import ipc  # primer import: aplica la redireccion de stdout a nivel de fd
+
+def _cli_list_devices() -> None:
+    import pyaudio
+
+    pa = pyaudio.PyAudio()
+    try:
+        print(f"{'idx':>4}  {'canales':>7}  {'rate':>7}  nombre")
+        for i in range(pa.get_device_count()):
+            info = pa.get_device_info_by_index(i)
+            if info.get("maxInputChannels", 0) > 0:
+                print(
+                    f"{i:>4}  {int(info['maxInputChannels']):>7}  "
+                    f"{int(info['defaultSampleRate']):>7}  {info['name']}"
+                )
+    finally:
+        pa.terminate()
+
+
+def _cli_calibrate() -> None:
+    import numpy as np
+    import pyaudio
+
+    device_index = None
+    if "--device" in sys.argv:
+        device_index = int(sys.argv[sys.argv.index("--device") + 1])
+
+    pa = pyaudio.PyAudio()
+    info = (
+        pa.get_device_info_by_index(device_index)
+        if device_index is not None
+        else pa.get_default_input_device_info()
+    )
+    rate = int(info["defaultSampleRate"])
+    frame = 512
+    stream = pa.open(
+        format=pyaudio.paInt16,
+        channels=1,
+        rate=rate,
+        input=True,
+        input_device_index=int(info["index"]),
+        frames_per_buffer=frame,
+    )
+    print(f"Escuchando '{info['name']}' (índice {info['index']}) a {rate}Hz. Ctrl+C para salir.")
+    try:
+        while True:
+            raw = stream.read(frame, exception_on_overflow=False)
+            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            rms = float(np.sqrt(np.mean(audio**2)) + 1e-9)
+            dbfs = 20 * np.log10(rms)
+            bars = int(max(0.0, dbfs + 60))
+            print(f"\r{dbfs:6.1f} dBFS  " + "#" * bars + " " * max(0, 40 - bars), end="", flush=True)
+    except KeyboardInterrupt:
+        print()
+    finally:
+        stream.stop_stream()
+        stream.close()
+        pa.terminate()
+
+
+if len(sys.argv) > 1 and sys.argv[1] in ("--list-devices", "--calibrate"):
+    if sys.argv[1] == "--list-devices":
+        _cli_list_devices()
+    else:
+        _cli_calibrate()
+    sys.exit(0)
+
+import ipc  # primer import "real": aplica la redireccion de stdout a nivel de fd
 
 
 def watchdog_loop(recorder, shutdown: threading.Event, stuck_state_timeout: float) -> None:
     """Vigila el estado interno del recorder para recuperarse de dos fallas
-    conocidas de RealtimeSTT que, sin esto, cuelgan el worker para siempre:
+    conocidas de RealtimeSTT que, sin esto, cuelgan el worker para siempre.
+    Solo aplica al camino `engine: realtimestt` — el motor nativo tiene su
+    propio watchdog liviano en stt_engine.py.
 
     1. Bug confirmado: una deteccion de voz demasiado cerca (en el tiempo) de
        la grabacion anterior cae dentro de `min_gap_between_recordings` y
@@ -74,28 +154,43 @@ def watchdog_loop(recorder, shutdown: threading.Event, stuck_state_timeout: floa
             os._exit(1)
 
 
-def main() -> None:
-    init_msg = ipc.read_line()
-    if init_msg is None or init_msg.get("type") != "init":
-        ipc.send(
-            {
-                "type": "fatal_error",
-                "code": "protocol_error",
-                "message": "esperaba mensaje 'init' como primer mensaje",
-            }
-        )
+def _run_native(init_msg: dict, profile: dict, shutdown: threading.Event) -> None:
+    import stt_engine
+
+    mode_state = stt_engine.ModeState()
+
+    def control_loop() -> None:
+        while not shutdown.is_set():
+            msg = ipc.read_line()
+            if msg is None or msg.get("type") == "shutdown":
+                shutdown.set()
+                break
+            msg_type = msg.get("type")
+            if msg_type == "mute":
+                mode_state.set(stt_engine.ModeState.SUPPRESSED)
+            elif msg_type == "unmute":
+                mode_state.set(stt_engine.ModeState.LISTENING)
+            elif msg_type == "set_mode":
+                mode = msg.get("mode")
+                if mode in (
+                    stt_engine.ModeState.LISTENING,
+                    stt_engine.ModeState.SPEAKING,
+                    stt_engine.ModeState.SUPPRESSED,
+                ):
+                    mode_state.set(mode)
+
+    threading.Thread(target=control_loop, daemon=True, name="stt-control").start()
+
+    try:
+        stt_engine.run(init_msg, profile, shutdown, mode_state)
+    except Exception as exc:  # noqa: BLE001 - cualquier fallo de carga/apertura debe reportarse
+        ipc.send({"type": "fatal_error", "code": "model_load_failed", "message": str(exc)})
         sys.exit(1)
 
-    # ctranslate2 lee OMP_NUM_THREADS al cargarse (via faster-whisper) y por
-    # defecto usa solo 4 hilos: hay que fijarla ANTES de importar torch o
-    # RealtimeSTT. Hasta este punto, solo stdlib.
-    cpu_threads = init_msg.get("cpu_threads") or max(2, (os.cpu_count() or 4) // 2)
-    os.environ["OMP_NUM_THREADS"] = str(cpu_threads)
+    sys.exit(0)
 
-    import hardware_detect
 
-    profile = hardware_detect.resolve_profile(init_msg, cpu_threads)
-
+def _run_realtimestt(init_msg: dict, profile: dict, shutdown: threading.Event) -> None:
     try:
         from RealtimeSTT import AudioToTextRecorder
 
@@ -107,23 +202,17 @@ def main() -> None:
             input_device_index=init_msg.get("input_device_index"),
             silero_sensitivity=init_msg.get("silero_sensitivity", 0.4),
             webrtc_sensitivity=init_msg.get("webrtc_sensitivity", 3),
-            post_speech_silence_duration=init_msg.get(
-                "post_speech_silence_duration", 0.6
-            ),
+            post_speech_silence_duration=init_msg.get("post_speech_silence_duration", 0.6),
             min_length_of_recording=init_msg.get("min_length_of_recording", 1.0),
             min_gap_between_recordings=init_msg.get("min_gap_between_recordings", 1.0),
-            silero_deactivity_detection=init_msg.get(
-                "silero_deactivity_detection", True
-            ),
+            silero_deactivity_detection=init_msg.get("silero_deactivity_detection", True),
             beam_size=profile["beam_size"],
             initial_prompt=init_msg.get("initial_prompt") or None,
             early_transcription_on_silence=profile["early_transcription"],
             spinner=False,
         )
     except Exception as exc:  # noqa: BLE001 - cualquier fallo de carga debe reportarse, no crashear silencioso
-        ipc.send(
-            {"type": "fatal_error", "code": "model_load_failed", "message": str(exc)}
-        )
+        ipc.send({"type": "fatal_error", "code": "model_load_failed", "message": str(exc)})
         sys.exit(1)
 
     ipc.send(
@@ -140,8 +229,6 @@ def main() -> None:
             "sample_rate": 16000,
         }
     )
-
-    shutdown = threading.Event()
 
     def control_loop() -> None:
         while not shutdown.is_set():
@@ -181,12 +268,39 @@ def main() -> None:
         if shutdown.is_set():
             break
         if text and text.strip():
-            ipc.send(
-                {"type": "transcript", "text": text.strip(), "timestamp": time.time()}
-            )
+            ipc.send({"type": "transcript", "text": text.strip(), "timestamp": time.time()})
 
     recorder.shutdown()
     sys.exit(0)
+
+
+def main() -> None:
+    init_msg = ipc.read_line()
+    if init_msg is None or init_msg.get("type") != "init":
+        ipc.send(
+            {
+                "type": "fatal_error",
+                "code": "protocol_error",
+                "message": "esperaba mensaje 'init' como primer mensaje",
+            }
+        )
+        sys.exit(1)
+
+    # ctranslate2 lee OMP_NUM_THREADS al cargarse (via faster-whisper) y por
+    # defecto usa solo 4 hilos: hay que fijarla ANTES de importar torch o
+    # RealtimeSTT. Hasta este punto, solo stdlib.
+    cpu_threads = init_msg.get("cpu_threads") or max(2, (os.cpu_count() or 4) // 2)
+    os.environ["OMP_NUM_THREADS"] = str(cpu_threads)
+
+    import hardware_detect
+
+    profile = hardware_detect.resolve_profile(init_msg, cpu_threads)
+    shutdown = threading.Event()
+
+    if init_msg.get("engine", "native") == "realtimestt":
+        _run_realtimestt(init_msg, profile, shutdown)
+    else:
+        _run_native(init_msg, profile, shutdown)
 
 
 if __name__ == "__main__":
