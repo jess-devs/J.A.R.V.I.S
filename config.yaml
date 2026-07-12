@@ -213,7 +213,7 @@ agent:
   disabled_tools: [] # nombres de herramientas a excluir, ej. ["run_powershell"]
   confirm_yes: ["sí", "si", "claro", "adelante", "hazlo", "confirmo", "dale", "procede"] # palabras que Rust interpreta como "sí" al confirmar una acción riesgosa (nunca lo decide el LLM)
   confirm_no: ["no", "cancela", "cancelar", "espera", "mejor no", "detente", "para"] # ídem para "no"
-  risk_code: "0201" # código de aceptación de riesgos — se verifica en Rust, NUNCA se pasa al LLM; cambialo por uno propio
+  risk_code: "0911" # código de aceptación de riesgos — se verifica en Rust, NUNCA se pasa al LLM; cambialo por uno propio
   high_risk_patterns: [] # regex extra (se suman a los defaults) que elevan un comando de PowerShell a nivel código
   files:
     # search_roots: ["C:/Users/jesus/Documents"] # carpetas donde busca find_files (por defecto: el perfil del usuario)
