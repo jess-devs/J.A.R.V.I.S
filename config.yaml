@@ -45,7 +45,7 @@ stt:
   beam_size: null # null = elegido automáticamente (5 en GPU / calibración en CPU)
   cpu_threads: null # null = auto (~núcleos físicos); ctranslate2 usa solo 4 por defecto
   initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis." # ayuda a Whisper a transcribir bien el nombre
-  recalibrate: false # true = ignora el caché y vuelve a medir en este arranque
+  recalibrate: true # true = ignora el caché y vuelve a medir en este arranque
   # Las siguientes claves solo se usan con engine: realtimestt (camino de respaldo);
   # el motor nativo (engine: native) usa stt.vad/stt.filters de arriba en su lugar.
   silero_sensitivity: 0.4 # sensibilidad del VAD de Silero (0-1): más alto detecta voz más floja, pero más falsos positivos
