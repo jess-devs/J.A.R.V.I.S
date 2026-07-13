@@ -226,6 +226,7 @@ agent:
       navegador: "brave"
       bloc de notas: "notepad"
       calculadora: "calc"
+    # extra_search_roots: ["C:/PortableApps"] # carpetas extra donde open_app busca accesos directos/ejecutables
   web:
     max_page_chars: 4000 # tope de caracteres de página pasados al LLM en fetch_page
     max_results: 5 # tope de resultados de web_search

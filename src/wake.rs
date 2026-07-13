@@ -159,8 +159,9 @@ impl AttentionGate {
 
 /// Minúsculas, sin tildes ni puntuación, pero CONSERVANDO los espacios entre
 /// palabras — "¡Sí, señor!" → "si senor". Para comparar frases completas
-/// (frases-basura, repeticiones) y contar palabras.
-fn normalize_phrase(text: &str) -> String {
+/// (frases-basura, repeticiones) y contar palabras. También la usa
+/// `tools::apps` para normalizar nombres de apps antes de compararlos.
+pub(crate) fn normalize_phrase(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.to_lowercase().chars() {
         match c {
@@ -202,7 +203,9 @@ pub(crate) fn tokens(text: &str) -> Vec<String> {
 
 /// Distancia de Levenshtein con DP de una sola fila. Suficiente para comparar
 /// tokens cortos contra el wake word; no vale la pena un crate para esto.
-fn levenshtein(a: &str, b: &str) -> usize {
+/// También la usa `tools::apps` para tolerar ruido del STT al matchear
+/// nombres de apps.
+pub(crate) fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     let mut row: Vec<usize> = (0..=b.len()).collect();

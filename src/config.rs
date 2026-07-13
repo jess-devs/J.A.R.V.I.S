@@ -814,19 +814,14 @@ impl Default for FilesToolConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct AppsConfig {
     /// Alias hablado → comando/ejecutable real ("navegador" → "chrome").
     pub aliases: std::collections::HashMap<String, String>,
-}
-
-impl Default for AppsConfig {
-    fn default() -> Self {
-        Self {
-            aliases: std::collections::HashMap::new(),
-        }
-    }
+    /// Carpetas extra donde `open_app` busca accesos directos/ejecutables,
+    /// además del Menú Inicio y el Escritorio (p.ej. apps portables).
+    pub extra_search_roots: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
