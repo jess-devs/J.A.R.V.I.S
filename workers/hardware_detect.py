@@ -14,6 +14,7 @@ Se importa dentro de stt_worker.py despues del handshake inicial, para que
 la carga de torch (lenta) no bloquee la respuesta al mensaje "init".
 """
 
+import ctypes
 import json
 import os
 import platform
@@ -31,9 +32,45 @@ RTF_COMFORTABLE = 0.5
 RTF_ACCEPTABLE = 1.0
 EARLY_TRANSCRIPTION_SECS = 0.3
 
+# Techo de modelo segun RAM fisica total: evita usar "small" como benchmark
+# inicial (y por lo tanto como modelo elegido) en maquinas donde cargarlo
+# junto con torch/ctranslate2 y el resto del sistema arriesga OOM/swapping
+# en el primerisimo arranque. Por debajo de RAM_LOW_GB_THRESHOLD arranca en
+# "base"; por debajo de RAM_CRITICAL_GB_THRESHOLD arranca directo en "tiny".
+RAM_LOW_GB_THRESHOLD = 6.0
+RAM_CRITICAL_GB_THRESHOLD = 4.0
+
 
 def _log(message: str) -> None:
     print(f"[hardware_detect] {message}", file=sys.stderr, flush=True)
+
+
+class _MEMORYSTATUSEX(ctypes.Structure):
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
+
+
+def _total_ram_gb() -> float | None:
+    """RAM fisica TOTAL (no la disponible en este instante): es un dato de
+    hardware estable entre arranques, a diferencia de la memoria libre
+    ahora mismo, que ensuciaria el fingerprint de calibracion con ruido."""
+    try:
+        stat = _MEMORYSTATUSEX()
+        stat.dwLength = ctypes.sizeof(_MEMORYSTATUSEX)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):  # type: ignore[attr-defined]
+            return None
+        return round(stat.ullTotalPhys / (1024**3), 1)
+    except Exception:
+        return None
 
 
 def _nvidia_smi_gpu() -> tuple[str | None, float]:
@@ -42,10 +79,19 @@ def _nvidia_smi_gpu() -> tuple[str | None, float]:
     liviana; el motor real de inferencia es ctranslate2, no torch)."""
     try:
         out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5, check=True,
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
         )
-        name, mem_mib = (part.strip() for part in out.stdout.strip().splitlines()[0].split(","))
+        name, mem_mib = (
+            part.strip() for part in out.stdout.strip().splitlines()[0].split(",")
+        )
         return name, round(float(mem_mib) / 1024, 1)
     except Exception:
         return None, 0.0
@@ -65,6 +111,7 @@ def detect() -> dict:
         "device": "cpu",
         "vram_gb": 0.0,
         "gpu_name": None,
+        "ram_gb": _total_ram_gb(),
     }
     try:
         import ctranslate2
@@ -139,43 +186,114 @@ def measure_rtf(model_size: str, compute_type: str, cpu_threads: int) -> float |
                 pass
             elapsed = time.perf_counter() - start
         rtf = elapsed / duration
-        _log(f"modelo '{model_size}': {elapsed:.2f}s para {duration:.2f}s de audio (RTF {rtf:.2f})")
+        _log(
+            f"modelo '{model_size}': {elapsed:.2f}s para {duration:.2f}s de audio (RTF {rtf:.2f})"
+        )
         return rtf
     finally:
         del model
 
 
-def _calibrate_cpu(compute_type: str, cpu_threads: int) -> dict:
-    """Escalera de decision: empieza en small y solo baja si la maquina no
-    llega. Nunca sube a modelos gigantes sin pedirlo explicitamente."""
-    rtf = measure_rtf("small", compute_type, cpu_threads)
-    if rtf is None:
-        # Sin benchmark posible: default conservador equivalente al anterior.
-        return {"whisper_model": "small", "beam_size": 3, "early_transcription": 0.0, "rtf": None}
-    if rtf <= RTF_COMFORTABLE:
-        return {
-            "whisper_model": "small",
-            "beam_size": 5,
-            "early_transcription": EARLY_TRANSCRIPTION_SECS,
-            "rtf": round(rtf, 3),
-        }
-    if rtf <= RTF_ACCEPTABLE:
-        return {"whisper_model": "small", "beam_size": 3, "early_transcription": 0.0, "rtf": round(rtf, 3)}
+def _cuda_smoke_test(compute_type: str) -> bool:
+    """Confirma que la GPU es realmente utilizable, mas alla de que el driver
+    este presente. ctranslate2.get_cuda_device_count() (usado en detect())
+    solo consulta el driver CUDA (nvcuda.dll, presente con cualquier
+    instalacion normal de NVIDIA), pero no carga cuBLAS/cuDNN: eso recien
+    pasa en la primera inferencia real. Sin este chequeo, una maquina con GPU
+    pero sin el runtime de computo instalado (falta cublas64_12.dll o
+    similar) pasa la deteccion y recien falla en produccion, en bucle, en
+    cada frase (el error queda atrapado como "recuperable" en
+    transcribe_loop y nunca cae a CPU)."""
+    wav_path = _warmup_wav_path()
+    if wav_path is None:
+        return (
+            True  # sin audio de prueba no se puede verificar: se confia en la deteccion
+        )
 
-    rtf_base = measure_rtf("base", compute_type, cpu_threads)
-    if rtf_base is not None and rtf_base <= RTF_ACCEPTABLE:
-        return {"whisper_model": "base", "beam_size": 3, "early_transcription": 0.0, "rtf": round(rtf_base, 3)}
+    try:
+        from faster_whisper import WhisperModel
+
+        model = WhisperModel("tiny", device="cuda", compute_type=compute_type)
+        segments, _ = model.transcribe(wav_path, language="es", beam_size=1)
+        for _segment in segments:  # el generador es lazy: hay que agotarlo
+            pass
+        del model
+        return True
+    except Exception as exc:
+        _log(f"GPU detectada pero no utilizable ({exc}); se usara CPU en su lugar")
+        return False
+
+
+def _calibration_start_tier(ram_gb: float | None) -> str:
+    """Techo de modelo segun RAM total: en maquinas ajustadas, ni siquiera se
+    intenta 'small' como benchmark inicial (cargarlo ya implica torch +
+    ctranslate2 + el resto del sistema compitiendo por poca RAM). No hay
+    camino de vuelta hacia arriba: una vez fijado el techo, la escalera solo
+    puede bajar desde ahi."""
+    if ram_gb is None or ram_gb >= RAM_LOW_GB_THRESHOLD:
+        return "small"
+    if ram_gb >= RAM_CRITICAL_GB_THRESHOLD:
+        return "base"
+    return "tiny"
+
+
+def _calibrate_cpu(
+    compute_type: str, cpu_threads: int, ram_gb: float | None = None
+) -> dict:
+    """Escalera de decision: empieza en el tier que permita la RAM disponible
+    (ver _calibration_start_tier) y solo baja si la maquina no llega. Nunca
+    sube a un modelo por encima de ese techo, aunque el RTF de un tier mas
+    chico de la escalera resulte comodo."""
+    ladder = ["small", "base", "tiny"]
+    start = _calibration_start_tier(ram_gb)
+    ladder = ladder[ladder.index(start) :]
+    if start != "small":
+        _log(
+            f"RAM total {ram_gb:.1f} GB por debajo de {RAM_LOW_GB_THRESHOLD} GB: "
+            f"se evita 'small' como benchmark inicial, arrancando en '{start}'"
+        )
+
+    last_rtf = None
+    for model in ladder:
+        rtf = measure_rtf(model, compute_type, cpu_threads)
+        if rtf is None:
+            # Sin benchmark posible: default conservador equivalente al anterior.
+            return {
+                "whisper_model": model,
+                "beam_size": 3,
+                "early_transcription": 0.0,
+                "rtf": round(last_rtf, 3) if last_rtf is not None else None,
+            }
+        last_rtf = rtf
+        if rtf <= RTF_COMFORTABLE:
+            return {
+                "whisper_model": model,
+                "beam_size": 5,
+                "early_transcription": EARLY_TRANSCRIPTION_SECS,
+                "rtf": round(rtf, 3),
+            }
+        if rtf <= RTF_ACCEPTABLE:
+            return {
+                "whisper_model": model,
+                "beam_size": 3,
+                "early_transcription": 0.0,
+                "rtf": round(rtf, 3),
+            }
+        # No alcanza: sigue al proximo modelo (mas chico) de la escalera.
+
     return {
-        "whisper_model": "tiny",
+        "whisper_model": ladder[-1],
         "beam_size": 3,
         "early_transcription": 0.0,
-        "rtf": round(rtf_base, 3) if rtf_base is not None else None,
+        "rtf": round(last_rtf, 3) if last_rtf is not None else None,
     }
 
 
 def _gpu_model_for_vram(vram_gb: float) -> str:
     if vram_gb >= 8:
-        return "large-v3-turbo"  # precision cercana a large-v3, velocidad cercana a medium
+        return (
+            "large-v3-turbo"  # precision cercana a large-v3, velocidad cercana a medium
+        )
     if vram_gb >= 6:
         return "medium"
     if vram_gb >= 4:
@@ -195,9 +313,10 @@ def _fingerprint(hw: dict) -> dict:
         "logical_cores": hw["logical_cores"],
         "gpu_name": hw["gpu_name"],
         "vram_gb": hw["vram_gb"],
+        "ram_gb": hw["ram_gb"],
         "realtimestt": stt_version,
         # Subir cuando cambie la logica de calibracion, para invalidar caches viejos.
-        "calib_version": 2,
+        "calib_version": 3,
     }
 
 
@@ -234,6 +353,10 @@ def resolve_profile(init_msg: dict, cpu_threads: int) -> dict:
 
     device = hw["device"] if device_override == "auto" else device_override
     compute_type = resolve_compute_type(device, init_msg.get("compute_type"))
+
+    if device == "cuda" and not _cuda_smoke_test(compute_type):
+        device = "cpu"
+        compute_type = resolve_compute_type(device, init_msg.get("compute_type"))
 
     base = {
         "device": device,
@@ -274,7 +397,7 @@ def resolve_profile(init_msg: dict, cpu_threads: int) -> dict:
                 profile["beam_size"] = beam_override
             return profile
 
-    calibrated = _calibrate_cpu(compute_type, cpu_threads)
+    calibrated = _calibrate_cpu(compute_type, cpu_threads, hw.get("ram_gb"))
     _save_cache(fingerprint, calibrated)
     profile = {**base, **calibrated}
     if beam_override:
