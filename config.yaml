@@ -85,7 +85,7 @@ barge_in:
     recent_tts_window_secs: 12 # ventana de frases recientes de Jarvis para comparar contra transcripciones
 
 llm:
-  provider: deepseek # ollama | anthropic | openai | deepseek | lmstudio — ollama/lmstudio corren local, sin API key
+  provider: ollama # ollama | anthropic | openai | deepseek | lmstudio — ollama/lmstudio corren local, sin API key
   # api_key_env es el NOMBRE de la variable de entorno con la key (ver .env.example), no la key en sí
   ollama:
     base_url: "http://localhost:11434"
@@ -164,7 +164,7 @@ llm:
   request_timeout_secs: 180
 
 tts:
-  provider: cartesia # piper | elevenlabs | cartesia
+  provider: piper # piper | elevenlabs | cartesia
   piper:
     # voice_path: "voices/es_ES-sharvard-medium.onnx"
     # config_path: "voices/es_ES-sharvard-medium.onnx.json"
