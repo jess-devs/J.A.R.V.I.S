@@ -2,6 +2,8 @@
 
 Estos dos scripts son procesos hijos spawneados por el binario Rust (`jarvis`). No se ejecutan directamente en uso normal, solo para debug manual (ver sección de pruebas más abajo).
 
+Con `stt.engine: native`, `stt_worker.py` también aloja `clap_detector.py`: un detector de doble aplauso (heurística de energía dBFS + tasa de cruces por cero + rechazo por probabilidad de voz de Silero) que corre frame a frame en el mismo hilo que el VAD, integrado en `stt_engine.py`. Al confirmar un doble aplauso emite el evento IPC `clap_detected` hacia Rust, que dispara el [modo bienvenida](../README.md#modo-bienvenida-doble-aplauso) (`welcome.*`/`stt.clap.*` en `config.yaml`, detalle en [`CONFIGURACION.md`](../CONFIGURACION.md#sttclap-detector-de-doble-aplauso)). Es deliberadamente liviano y sin dependencias pesadas (nada de torch/pyaudio/ipc) para poder correr también standalone desde `stt_worker.py --test-clap`.
+
 ## Por qué Python 3.11/3.12 (no 3.13 de Microsoft Store, no 3.14)
 
 `PyAudio` (dependencia interna de `RealtimeSTT` para capturar el micrófono) todavía no publica wheel para Windows en Python 3.14. La versión de Python 3.13 de Microsoft Store además es poco confiable para proyectos con dependencias nativas (torch, onnxruntime) por cómo sandboxea las rutas.
@@ -46,6 +48,12 @@ workers/.venv/Scripts/pip install torchaudio==<version-de-torch> --index-url htt
 ```
 
 ## Debug manual de un worker
+
+`stt_worker.py` tiene además un par de flags CLI standalone (no pasan por el protocolo NDJSON) para calibrar en vivo, sin arrancar Rust:
+
+- `--list-devices`: lista los índices de PyAudio disponibles (para `stt.input_device_index`).
+- `--calibrate`: vúmetro en vivo para ajustar `stt.vad`/`stt.filters`.
+- `--test-clap [--device N] [--min-peak X] [--min-rise X] [--min-zcr X]`: calibra el detector de doble aplauso (`stt.clap`) imprimiendo dBFS/ZCR/fondo/umbral en vivo por frame, y avisando "CLAP!"/"¡DOBLE!" al detectar cada evento.
 
 Cada worker lee mensajes NDJSON por stdin y escribe NDJSON (+ bytes crudos de audio en el caso de TTS) por stdout. Se puede probar a mano:
 
