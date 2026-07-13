@@ -34,6 +34,20 @@ pub struct BargeInInit {
     pub vad_threshold_while_speaking: f32,
 }
 
+/// Espeja `ClapConfig` (src/config.rs, dentro de `SttConfig`) — parámetros
+/// del detector de doble aplauso del motor nativo (modo bienvenida).
+#[derive(Debug, Serialize)]
+pub struct ClapInit {
+    pub min_peak_dbfs: f32,
+    pub min_rise_db: f32,
+    pub decay_ms: u32,
+    pub max_vad_prob: f32,
+    pub min_zcr: f32,
+    pub double_min_gap_ms: u32,
+    pub double_max_gap_ms: u32,
+    pub refractory_ms: u32,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SttInMessage {
@@ -43,6 +57,7 @@ pub enum SttInMessage {
         vad: VadInit,
         filters: FiltersInit,
         barge_in: BargeInInit,
+        clap: ClapInit,
         language: String,
         model: String,
         device: String,
@@ -133,6 +148,8 @@ pub enum SttOutMessage {
         #[serde(default)]
         while_tts: bool,
     },
+    /// Doble aplauso confirmado (solo motor nativo). Ver `ClapInit`.
+    ClapDetected,
     Transcript {
         text: String,
         #[allow(dead_code)]

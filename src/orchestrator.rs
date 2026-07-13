@@ -15,7 +15,7 @@ use crate::agent::{
     confirm::{self, CodeDecision, ConfirmDecision},
     AgentTurnResult, PendingConfirmation, TurnContext,
 };
-use crate::audio::AudioPlayer;
+use crate::audio::{AudioPlayer, MusicPlayer};
 use crate::config::{BargeInConfig, BargeInMode, Config, SttEngineKind};
 use crate::echo_gate::EchoGate;
 use crate::errors::{Result, WorkerError};
@@ -69,6 +69,15 @@ pub struct Orchestrator {
     /// Cuántas veces se reinició el worker de STT en esta corrida, contra
     /// `config.workers.max_restarts`.
     stt_restarts: u32,
+    /// Música de fondo del modo bienvenida (ver `crate::audio::music`).
+    music: MusicPlayer,
+    /// Clon propio para que `run_welcome` pueda leer los recordatorios
+    /// activos sin competir con el que ya se movió a `reminders::run_poller`
+    /// (ver `new`).
+    reminder_store: Arc<ReminderStore>,
+    /// Último doble aplauso que disparó la escena de bienvenida (no el
+    /// toggle de apagar música), para el cooldown de `welcome.cooldown_secs`.
+    last_welcome: Option<Instant>,
     /// Hook de prueba temporal para la Fase 2 (cancelación sin barge-in de
     /// voz todavía): si la variable de entorno `JARVIS_TEST_CANCEL` está
     /// presente, un solo hilo de fondo (vive todo el proceso) lee líneas de
@@ -87,6 +96,7 @@ impl Orchestrator {
             config.audio.volume,
             config.audio.drain_timeout_secs,
         )?;
+        let music = MusicPlayer::new(&config.welcome);
 
         // Dos mensajes system: [0] el bloque estático (prompt base +
         // memorias, estable entre turnos para el prompt caching de los
@@ -98,6 +108,7 @@ impl Orchestrator {
         let gate = AttentionGate::new(config.wake.clone());
         let memory = Arc::new(MemoryStore::open(&config.agent.memory.db_path)?);
         let reminder_store = Arc::new(ReminderStore::open(&config.agent.reminders.db_path)?);
+        let reminder_store_for_welcome = reminder_store.clone();
         let scripted_store = Arc::new(ScriptedToolStore::open(
             &config.agent.scripted_tools.db_path,
         )?);
@@ -106,6 +117,11 @@ impl Orchestrator {
             memory.clone(),
             reminder_store.clone(),
             scripted_store,
+            if config.welcome.enabled {
+                Some(music.shared())
+            } else {
+                None
+            },
         )
         .await;
         let echo_gate = Arc::new(Mutex::new(EchoGate::new(
@@ -156,6 +172,9 @@ impl Orchestrator {
             system_static_cache: None,
             state: AgentState::Idle,
             stt_restarts: 0,
+            music,
+            reminder_store: reminder_store_for_welcome,
+            last_welcome: None,
             test_cancel_slot,
         })
     }
@@ -183,6 +202,9 @@ impl Orchestrator {
     /// mutear físicamente — así se puede detectar que el usuario habla
     /// encima. Si no, el comportamiento de siempre (mute real).
     async fn begin_speaking(&mut self) {
+        if self.music.is_playing() {
+            self.music.duck();
+        }
         if self.barge_in_supported() {
             if let Err(e) = self.stt.set_mode(SttMode::Speaking).await {
                 tracing::warn!(error = %e, "no se pudo poner el STT en modo speaking, sigo igual");
@@ -194,12 +216,104 @@ impl Orchestrator {
 
     /// Contraparte de `begin_speaking`: vuelve a escucha normal.
     async fn end_speaking(&mut self) {
+        if self.music.is_playing() {
+            self.music.unduck();
+        }
         if self.barge_in_supported() {
             if let Err(e) = self.stt.set_mode(SttMode::Listening).await {
                 tracing::warn!(error = %e, "no se pudo volver el STT a modo listening, sigo igual");
             }
         } else if let Err(e) = self.stt.unmute().await {
             tracing::warn!(error = %e, "no se pudo reactivar el micrófono");
+        }
+    }
+
+    /// Doble aplauso confirmado por el motor STT nativo (ver `ClapInit`).
+    /// Con música sonando es un toggle: la apaga y no dispara la escena. Si
+    /// no, dispara `run_welcome` solo si el modo está habilitado, Jarvis
+    /// está libre (`Idle`) y no está dentro del cooldown del último disparo.
+    async fn handle_clap(&mut self) {
+        tracing::info!("doble aplauso detectado");
+        if !self.config.welcome.enabled {
+            tracing::debug!("doble aplauso ignorado: welcome.enabled=false");
+            return;
+        }
+        if self.music.is_playing() {
+            tracing::info!("doble aplauso: música sonando, la apago (toggle)");
+            self.music.stop();
+            return;
+        }
+        if !matches!(self.state, AgentState::Idle) {
+            tracing::debug!("doble aplauso ignorado: hay un turno o confirmación en curso");
+            return;
+        }
+        if let Some(last) = self.last_welcome {
+            let cooldown = Duration::from_secs(self.config.welcome.cooldown_secs);
+            if last.elapsed() < cooldown {
+                tracing::debug!("doble aplauso ignorado: dentro del cooldown de bienvenida");
+                return;
+            }
+        }
+        tracing::info!("disparando escena de bienvenida");
+        self.last_welcome = Some(Instant::now());
+        self.run_welcome().await;
+    }
+
+    /// Escena de bienvenida: música + saludo + resumen de recordatorios
+    /// pendientes (o noticias del día si no hay ninguno).
+    async fn run_welcome(&mut self) {
+        let music_path = self.config.welcome.music_path.clone();
+        let output_device = self.config.audio.output_device.clone();
+        if let Err(e) = self.music.play_file(&music_path, output_device.as_deref()) {
+            tracing::warn!(error = %e, "no se pudo reproducir la música de bienvenida, sigo sin música");
+        }
+
+        self.begin_speaking().await;
+        agent::speak(
+            &self.tts,
+            &mut self.player,
+            &self.config.welcome.greeting_phrase,
+        )
+        .await;
+        self.end_speaking().await;
+
+        match self.reminder_store.list_active().await {
+            Ok(reminders) if !reminders.is_empty() => {
+                let listado = reminders
+                    .iter()
+                    .map(|r| format!("- {} ({})", r.text, r.trigger_at))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let prompt = format!(
+                    "[Evento del sistema: el usuario acaba de llegar a casa (modo bienvenida). \
+                     Ya lo saludaste recién, no repitas el saludo ni digas 'bienvenido' de \
+                     nuevo — andá directo al resumen. Recordatorios pendientes:\n{listado}\n\
+                     Resumíselos brevemente.]"
+                );
+                self.handle_utterance(prompt).await;
+            }
+            Ok(_) if self.config.welcome.news_when_no_reminders => {
+                let prompt = "[Evento del sistema: el usuario acaba de llegar a casa (modo \
+                    bienvenida) y no tiene recordatorios pendientes. Ya lo saludaste recién, no \
+                    repitas el saludo ni digas 'bienvenido' de nuevo. Contale brevemente las \
+                    noticias más relevantes de hoy usando web_search.]"
+                    .to_string();
+                self.handle_utterance(prompt).await;
+            }
+            Ok(_) => {
+                self.begin_speaking().await;
+                agent::speak(
+                    &self.tts,
+                    &mut self.player,
+                    "No tiene recordatorios pendientes, señor.",
+                )
+                .await;
+                self.finish_turn().await;
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "no se pudieron leer los recordatorios activos para el modo bienvenida");
+                self.finish_turn().await;
+            }
         }
     }
 
@@ -236,9 +350,19 @@ impl Orchestrator {
                 }
                 SttEvent::VadStart => {
                     tracing::debug!("VAD: inicio de voz detectado");
+                    // Red de seguridad: si el VAD dispara pero no llega a
+                    // generar un turno (el gate lo dropea/ignora), el
+                    // `unduck()` de contrapartida es el de VadEnd, no el de
+                    // `end_speaking` (que acá no se llama).
+                    if matches!(self.state, AgentState::Idle) && self.music.is_playing() {
+                        self.music.duck();
+                    }
                 }
                 SttEvent::VadEnd { speech_ms } => {
                     tracing::debug!(speech_ms = ?speech_ms, "VAD: fin de voz detectado");
+                    if matches!(self.state, AgentState::Idle) && self.music.is_playing() {
+                        self.music.unduck();
+                    }
                 }
                 SttEvent::SpeechConfirmed => {
                     // Fuera de un turno en curso esto no debería pasar (el
@@ -249,6 +373,7 @@ impl Orchestrator {
                 SttEvent::Discarded { reason } => {
                     tracing::debug!(reason = %reason, "audio descartado por el motor STT");
                 }
+                SttEvent::ClapDetected => self.handle_clap().await,
                 SttEvent::WorkerDied => {
                     self.restart_stt_or_die().await?;
                 }
@@ -333,7 +458,12 @@ impl Orchestrator {
             }
             GateDecision::Ignore => {
                 tracing::info!(text = %text, "ignorado: sin wake word y fuera de ventana");
-                self.gate.push_ambient(text);
+                // Con música sonando, lo que transcribe el motor suele ser
+                // letra de la canción: no envenenar el contexto ambiental
+                // con eso.
+                if !self.music.is_playing() {
+                    self.gate.push_ambient(text);
+                }
             }
             GateDecision::Respond => {
                 tracing::info!(text = %text, "usuario dijo");
@@ -846,6 +976,9 @@ fn evaluate_barge_in_event(
             tracing::debug!(reason = %reason, "audio descartado por el motor STT durante barge-in");
             None
         }
+        // v1: un doble aplauso a mitad de turno se ignora, no interrumpe la
+        // respuesta en curso ni dispara la escena de bienvenida encima.
+        SttEvent::ClapDetected => None,
         SttEvent::WorkerDied => None,
     }
 }

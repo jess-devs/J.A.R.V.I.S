@@ -11,6 +11,7 @@ pub mod files;
 pub mod input;
 pub mod media;
 pub mod memory;
+pub mod music;
 pub mod reminders;
 pub mod screen;
 pub mod scripted;
@@ -27,6 +28,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 
 use self::scripted_store::ScriptedToolStore;
+use crate::audio::MusicShared;
 use crate::config::{AgentConfig, ScriptedToolsConfig};
 use crate::errors::ToolError;
 use crate::llm::{ImageBlock, ToolSpec};
@@ -120,6 +122,7 @@ impl ToolRegistry {
         memory: Arc<MemoryStore>,
         reminder_store: Arc<ReminderStore>,
         scripted_store: Arc<ScriptedToolStore>,
+        music: Option<Arc<MusicShared>>,
     ) -> Self {
         let mut static_tools: Vec<Arc<dyn Tool>> = Vec::new();
         if cfg.enabled {
@@ -141,6 +144,11 @@ impl ToolRegistry {
             static_tools.push(Arc::new(memory::Forget::new(memory.clone())));
             static_tools.push(Arc::new(translate::Translate::new(&cfg.translate)));
             static_tools.push(Arc::new(media::MediaControl));
+            if let Some(shared) = &music {
+                static_tools.push(Arc::new(music::StopMusic {
+                    shared: shared.clone(),
+                }));
+            }
             static_tools.push(Arc::new(reminders::CreateReminder::new(
                 reminder_store.clone(),
                 &cfg.reminders,

@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use rodio::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapProd;
 use ringbuf::HeapRb;
@@ -30,7 +30,7 @@ pub struct AudioPlayer {
     producer: HeapProd<f32>,
     drain_timeout: Duration,
     stop_flag: Arc<AtomicBool>,
-    _stream: cpal::Stream,
+    _stream: rodio::cpal::Stream,
 }
 
 impl AudioPlayer {
@@ -39,31 +39,32 @@ impl AudioPlayer {
         volume: f32,
         drain_timeout_secs: u64,
     ) -> Result<Self, AudioError> {
-        let host = cpal::default_host();
+        let host = rodio::cpal::default_host();
         let device = match output_device {
             Some(name) => host
                 .output_devices()
                 .map_err(|e| AudioError::Backend(e.to_string()))?
-                .find(|d| d.to_string() == name)
+                .find(|d| d.name().map(|n| n == name).unwrap_or(false))
                 .ok_or(AudioError::NoOutputDevice)?,
             None => host
                 .default_output_device()
                 .ok_or(AudioError::NoOutputDevice)?,
         };
+        let device_name = device.name().unwrap_or_else(|_| "?".to_string());
 
         let supported = device
             .default_output_config()
             .map_err(|e| AudioError::Backend(e.to_string()))?;
 
-        if supported.sample_format() != cpal::SampleFormat::F32 {
+        if supported.sample_format() != rodio::cpal::SampleFormat::F32 {
             return Err(AudioError::Backend(format!(
-                "el dispositivo de salida '{device}' espera muestras en formato {:?}; \
+                "el dispositivo de salida '{device_name}' espera muestras en formato {:?}; \
                  por ahora Jarvis solo sabe reproducir en f32",
                 supported.sample_format()
             )));
         }
 
-        let output_sample_rate = supported.sample_rate();
+        let output_sample_rate = supported.sample_rate().0;
         let output_channels = supported.channels();
         let config = supported.config();
 
@@ -77,8 +78,8 @@ impl AudioPlayer {
 
         let stream = device
             .build_output_stream(
-                config,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                &config,
+                move |data: &mut [f32], _: &rodio::cpal::OutputCallbackInfo| {
                     if stop_flag_cb.swap(false, Ordering::AcqRel) {
                         let mut scratch = [0.0f32; 1024];
                         while consumer.pop_slice(&mut scratch) > 0 {}
@@ -98,7 +99,7 @@ impl AudioPlayer {
             .map_err(|e| AudioError::Backend(e.to_string()))?;
 
         tracing::info!(
-            device = %device,
+            device = %device_name,
             sample_rate = output_sample_rate,
             channels = output_channels,
             "dispositivo de audio de salida listo"

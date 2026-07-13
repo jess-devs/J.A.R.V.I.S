@@ -22,6 +22,7 @@ pub struct Config {
     pub audio: AudioConfig,
     pub pipeline: PipelineConfig,
     pub agent: AgentConfig,
+    pub welcome: WelcomeConfig,
     pub log_level: String,
 }
 
@@ -37,6 +38,7 @@ impl Default for Config {
             audio: AudioConfig::default(),
             pipeline: PipelineConfig::default(),
             agent: AgentConfig::default(),
+            welcome: WelcomeConfig::default(),
             log_level: "info".to_string(),
         }
     }
@@ -163,6 +165,37 @@ impl Default for SttFiltersConfig {
     }
 }
 
+/// Parámetros del detector de doble aplauso (modo bienvenida, solo motor
+/// nativo). Corre siempre sobre cada frame — `WelcomeConfig.enabled` es el
+/// que decide si Jarvis reacciona al evento, no esto.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ClapConfig {
+    pub min_peak_dbfs: f32,
+    pub min_rise_db: f32,
+    pub decay_ms: u32,
+    pub max_vad_prob: f32,
+    pub min_zcr: f32,
+    pub double_min_gap_ms: u32,
+    pub double_max_gap_ms: u32,
+    pub refractory_ms: u32,
+}
+
+impl Default for ClapConfig {
+    fn default() -> Self {
+        Self {
+            min_peak_dbfs: -30.0,
+            min_rise_db: 7.0,
+            decay_ms: 220,
+            max_vad_prob: 0.45,
+            min_zcr: 0.14,
+            double_min_gap_ms: 150,
+            double_max_gap_ms: 900,
+            refractory_ms: 1500,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct SttConfig {
@@ -170,6 +203,7 @@ pub struct SttConfig {
     pub engine: SttEngineKind,
     pub vad: VadConfig,
     pub filters: SttFiltersConfig,
+    pub clap: ClapConfig,
     pub language: String,
     /// "auto" | cuda | cpu — override manual de la detección automática de hardware.
     pub device: String,
@@ -218,6 +252,7 @@ impl Default for SttConfig {
             engine: SttEngineKind::default(),
             vad: VadConfig::default(),
             filters: SttFiltersConfig::default(),
+            clap: ClapConfig::default(),
             language: "es".to_string(),
             device: "auto".to_string(),
             whisper_model: "auto".to_string(),
@@ -899,6 +934,40 @@ impl Default for BargeInConfig {
             mode: BargeInMode::WakeWord,
             min_speech_ms: 400,
             echo_guard: EchoGuardConfig::default(),
+        }
+    }
+}
+
+/// Modo bienvenida (escena estilo Iron Man): doble aplauso -> música de
+/// fondo + saludo + resumen de recordatorios (o noticias del día si no hay).
+/// El detector de aplausos en sí vive en `SttConfig::clap` — esto solo
+/// controla si Jarvis reacciona al evento y con qué parámetros de escena.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct WelcomeConfig {
+    pub enabled: bool,
+    /// Mp3 local del usuario — nunca versionado (ver `assets/music/.gitkeep`).
+    pub music_path: PathBuf,
+    pub greeting_phrase: String,
+    pub music_volume: f32,
+    pub duck_volume: f32,
+    /// Ignora nuevos doble aplausos que disparen la escena mientras no haya
+    /// pasado este tiempo desde el último (no aplica al toggle de apagar la
+    /// música, que siempre responde al instante).
+    pub cooldown_secs: u64,
+    pub news_when_no_reminders: bool,
+}
+
+impl Default for WelcomeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            music_path: PathBuf::from("assets/music/welcome.mp3"),
+            greeting_phrase: "Bienvenido a casa, señor.".to_string(),
+            music_volume: 0.4,
+            duck_volume: 0.12,
+            cooldown_secs: 120,
+            news_when_no_reminders: true,
         }
     }
 }

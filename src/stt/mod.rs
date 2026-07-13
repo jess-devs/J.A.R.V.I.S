@@ -12,7 +12,7 @@ use crate::errors::WorkerError;
 use crate::ipc::{WorkerFrame, WorkerHandle};
 
 pub use protocol::{
-    BargeInInit, FiltersInit, SttInMessage, SttOutMessage, TranscriptMeta, VadInit,
+    BargeInInit, ClapInit, FiltersInit, SttInMessage, SttOutMessage, TranscriptMeta, VadInit,
 };
 
 pub enum SttEvent {
@@ -39,6 +39,8 @@ pub enum SttEvent {
     Discarded {
         reason: String,
     },
+    /// Doble aplauso confirmado (solo `engine: native`). Ver `ClapInit`.
+    ClapDetected,
     WorkerDied,
 }
 
@@ -106,6 +108,16 @@ impl SttWorker {
                 barge_in: BargeInInit {
                     min_speech_ms: barge_in.min_speech_ms,
                     vad_threshold_while_speaking: barge_in.echo_guard.vad_threshold_while_speaking,
+                },
+                clap: ClapInit {
+                    min_peak_dbfs: stt.clap.min_peak_dbfs,
+                    min_rise_db: stt.clap.min_rise_db,
+                    decay_ms: stt.clap.decay_ms,
+                    max_vad_prob: stt.clap.max_vad_prob,
+                    min_zcr: stt.clap.min_zcr,
+                    double_min_gap_ms: stt.clap.double_min_gap_ms,
+                    double_max_gap_ms: stt.clap.double_max_gap_ms,
+                    refractory_ms: stt.clap.refractory_ms,
                 },
                 language: stt.language.clone(),
                 model: stt.whisper_model.clone(),
@@ -212,6 +224,7 @@ impl SttWorker {
                         Ok(SttOutMessage::Discarded { reason, .. }) => {
                             return Some(SttEvent::Discarded { reason })
                         }
+                        Ok(SttOutMessage::ClapDetected) => return Some(SttEvent::ClapDetected),
                         Ok(SttOutMessage::Error { code, message, .. }) => {
                             tracing::warn!(code = %code, message = %message, "error de transcripción recuperable");
                             continue;

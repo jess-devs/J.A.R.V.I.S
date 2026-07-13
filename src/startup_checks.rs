@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use cpal::traits::HostTrait;
+use rodio::cpal::traits::HostTrait;
 use serde::Deserialize;
 
 use crate::config::{Config, LlmProviderKind, TtsProviderKind};
@@ -21,6 +21,10 @@ pub async fn run(config: &Config) -> Result<()> {
     }
 
     if let Err(e) = check_input_device_present(config) {
+        problems.push(e);
+    }
+
+    if let Err(e) = check_welcome_music(config) {
         problems.push(e);
     }
 
@@ -162,7 +166,7 @@ fn check_piper_voice_files(config: &Config) -> std::result::Result<(), String> {
 /// un mensaje accionable si el índice no existe para PyAudio); acá solo se
 /// deja una pista hacia `--list-devices` cuando hay un índice configurado.
 fn check_input_device_present(config: &Config) -> std::result::Result<(), String> {
-    let host = cpal::default_host();
+    let host = rodio::cpal::default_host();
     match host.input_devices() {
         Ok(mut devices) => {
             if devices.next().is_some() {
@@ -183,6 +187,21 @@ fn check_input_device_present(config: &Config) -> std::result::Result<(), String
         }
         Err(e) => Err(format!("no se pudo enumerar dispositivos de audio: {e}")),
     }
+}
+
+/// El mp3 del modo bienvenida es del usuario y nunca se versiona (ver
+/// `assets/music/.gitkeep` y `.gitignore`) — si `welcome.enabled` está
+/// prendido, tiene que haberlo puesto ahí a mano.
+fn check_welcome_music(config: &Config) -> std::result::Result<(), String> {
+    let welcome = &config.welcome;
+    if !welcome.enabled || welcome.music_path.exists() {
+        return Ok(());
+    }
+    Err(format!(
+        "welcome.enabled=true pero no se encontró '{}'. Colocá tu mp3 ahí (ver assets/music/.gitkeep) \
+         o desactivá welcome.enabled en config.yaml",
+        welcome.music_path.display()
+    ))
 }
 
 fn check_cloud_api_key(env_var: &str) -> std::result::Result<(), String> {

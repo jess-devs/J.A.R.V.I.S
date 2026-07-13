@@ -21,8 +21,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde-saphyr = "0.0.29"
 thiserror = "2.0"
-cpal = "0.18"
 ringbuf = "0.5"
+# `cpal` no se declara como dependencia directa: se usa el reexport
+# `rodio::cpal` en todo el proyecto (audio/player.rs, audio/music.rs,
+# startup_checks.rs) para que solo haya una copia de cpal en el árbol de
+# dependencias — dos copias con distinto `links = "alsa"` no resuelven.
+rodio = { version = "0.20", default-features = false, features = ["symphonia-mp3"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 async-trait = "0.1"
