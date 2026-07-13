@@ -72,7 +72,9 @@ def _cli_calibrate() -> None:
         input_device_index=int(info["index"]),
         frames_per_buffer=frame,
     )
-    print(f"Escuchando '{info['name']}' (índice {info['index']}) a {rate}Hz. Ctrl+C para salir.")
+    print(
+        f"Escuchando '{info['name']}' (índice {info['index']}) a {rate}Hz. Ctrl+C para salir."
+    )
     try:
         while True:
             raw = stream.read(frame, exception_on_overflow=False)
@@ -80,7 +82,11 @@ def _cli_calibrate() -> None:
             rms = float(np.sqrt(np.mean(audio**2)) + 1e-9)
             dbfs = 20 * np.log10(rms)
             bars = int(max(0.0, dbfs + 60))
-            print(f"\r{dbfs:6.1f} dBFS  " + "#" * bars + " " * max(0, 40 - bars), end="", flush=True)
+            print(
+                f"\r{dbfs:6.1f} dBFS  " + "#" * bars + " " * max(0, 40 - bars),
+                end="",
+                flush=True,
+            )
     except KeyboardInterrupt:
         print()
     finally:
@@ -99,7 +105,9 @@ if len(sys.argv) > 1 and sys.argv[1] in ("--list-devices", "--calibrate"):
 import ipc  # primer import "real": aplica la redireccion de stdout a nivel de fd
 
 
-def watchdog_loop(recorder, shutdown: threading.Event, stuck_state_timeout: float) -> None:
+def watchdog_loop(
+    recorder, shutdown: threading.Event, stuck_state_timeout: float
+) -> None:
     """Vigila el estado interno del recorder para recuperarse de dos fallas
     conocidas de RealtimeSTT que, sin esto, cuelgan el worker para siempre.
     Solo aplica al camino `engine: realtimestt` — el motor nativo tiene su
@@ -139,7 +147,10 @@ def watchdog_loop(recorder, shutdown: threading.Event, stuck_state_timeout: floa
             recorder.start_recording_on_voice_activity = True
             continue
 
-        if state != "listening" and time.monotonic() - last_state_change > stuck_state_timeout:
+        if (
+            state != "listening"
+            and time.monotonic() - last_state_change > stuck_state_timeout
+        ):
             ipc.send(
                 {
                     "type": "fatal_error",
@@ -184,7 +195,9 @@ def _run_native(init_msg: dict, profile: dict, shutdown: threading.Event) -> Non
     try:
         stt_engine.run(init_msg, profile, shutdown, mode_state)
     except Exception as exc:  # noqa: BLE001 - cualquier fallo de carga/apertura debe reportarse
-        ipc.send({"type": "fatal_error", "code": "model_load_failed", "message": str(exc)})
+        ipc.send(
+            {"type": "fatal_error", "code": "model_load_failed", "message": str(exc)}
+        )
         sys.exit(1)
 
     sys.exit(0)
@@ -202,17 +215,23 @@ def _run_realtimestt(init_msg: dict, profile: dict, shutdown: threading.Event) -
             input_device_index=init_msg.get("input_device_index"),
             silero_sensitivity=init_msg.get("silero_sensitivity", 0.4),
             webrtc_sensitivity=init_msg.get("webrtc_sensitivity", 3),
-            post_speech_silence_duration=init_msg.get("post_speech_silence_duration", 0.6),
+            post_speech_silence_duration=init_msg.get(
+                "post_speech_silence_duration", 0.6
+            ),
             min_length_of_recording=init_msg.get("min_length_of_recording", 1.0),
             min_gap_between_recordings=init_msg.get("min_gap_between_recordings", 1.0),
-            silero_deactivity_detection=init_msg.get("silero_deactivity_detection", True),
+            silero_deactivity_detection=init_msg.get(
+                "silero_deactivity_detection", True
+            ),
             beam_size=profile["beam_size"],
             initial_prompt=init_msg.get("initial_prompt") or None,
             early_transcription_on_silence=profile["early_transcription"],
             spinner=False,
         )
     except Exception as exc:  # noqa: BLE001 - cualquier fallo de carga debe reportarse, no crashear silencioso
-        ipc.send({"type": "fatal_error", "code": "model_load_failed", "message": str(exc)})
+        ipc.send(
+            {"type": "fatal_error", "code": "model_load_failed", "message": str(exc)}
+        )
         sys.exit(1)
 
     ipc.send(
@@ -268,7 +287,9 @@ def _run_realtimestt(init_msg: dict, profile: dict, shutdown: threading.Event) -
         if shutdown.is_set():
             break
         if text and text.strip():
-            ipc.send({"type": "transcript", "text": text.strip(), "timestamp": time.time()})
+            ipc.send(
+                {"type": "transcript", "text": text.strip(), "timestamp": time.time()}
+            )
 
     recorder.shutdown()
     sys.exit(0)

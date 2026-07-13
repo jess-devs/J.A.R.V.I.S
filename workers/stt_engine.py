@@ -82,7 +82,9 @@ class _Engine:
 
         self.max_no_speech_prob = float(filters_cfg.get("max_no_speech_prob", 0.6))
         self.min_avg_logprob = float(filters_cfg.get("min_avg_logprob", -1.0))
-        self.max_compression_ratio = float(filters_cfg.get("max_compression_ratio", 2.4))
+        self.max_compression_ratio = float(
+            filters_cfg.get("max_compression_ratio", 2.4)
+        )
 
         barge_in_cfg = init_msg.get("barge_in") or {}
         self.barge_in_min_speech_ms = int(barge_in_cfg.get("min_speech_ms", 400))
@@ -95,7 +97,9 @@ class _Engine:
         self.input_device_index = init_msg.get("input_device_index")
         self.beam_size = profile["beam_size"]
 
-        self.transcribe_queue: "queue.Queue[tuple[np.ndarray, dict] | None]" = queue.Queue()
+        self.transcribe_queue: "queue.Queue[tuple[np.ndarray, dict] | None]" = (
+            queue.Queue()
+        )
         self._heartbeats: dict[str, float] = {}
         self._heartbeat_lock = threading.Lock()
 
@@ -264,7 +268,9 @@ class _Engine:
 
             utterance_ms = (now - utterance_started_at) * 1000
             silence_needed_ms = (
-                self.silence_short_ms if utterance_ms > self.long_utterance_ms else self.silence_long_ms
+                self.silence_short_ms
+                if utterance_ms > self.long_utterance_ms
+                else self.silence_long_ms
             )
             silence_elapsed_ms = (now - last_voiced_at) * 1000
             if silence_elapsed_ms < silence_needed_ms:
@@ -286,7 +292,9 @@ class _Engine:
             ipc.send({"type": "discarded", "reason": "too_short", "meta": meta})
             return
         if meta["rms_dbfs"] < self.energy_floor_dbfs:
-            ipc.send({"type": "discarded", "reason": "below_energy_floor", "meta": meta})
+            ipc.send(
+                {"type": "discarded", "reason": "below_energy_floor", "meta": meta}
+            )
             return
 
         ipc.send({"type": "vad_end", "speech_ms": speech_ms, "while_tts": while_tts})
@@ -328,7 +336,13 @@ class _Engine:
 
             text = " ".join(s.text.strip() for s in segments).strip()
             if not segments or not text:
-                ipc.send({"type": "discarded", "reason": "empty", "meta": {**meta, "transcribe_ms": transcribe_ms}})
+                ipc.send(
+                    {
+                        "type": "discarded",
+                        "reason": "empty",
+                        "meta": {**meta, "transcribe_ms": transcribe_ms},
+                    }
+                )
                 continue
 
             no_speech_prob = max(s.no_speech_prob for s in segments)
@@ -342,11 +356,15 @@ class _Engine:
             }
 
             if no_speech_prob > self.max_no_speech_prob:
-                ipc.send({"type": "discarded", "reason": "no_speech_prob", "meta": meta})
+                ipc.send(
+                    {"type": "discarded", "reason": "no_speech_prob", "meta": meta}
+                )
             elif avg_logprob < self.min_avg_logprob:
                 ipc.send({"type": "discarded", "reason": "avg_logprob", "meta": meta})
             elif compression_ratio > self.max_compression_ratio:
-                ipc.send({"type": "discarded", "reason": "compression_ratio", "meta": meta})
+                ipc.send(
+                    {"type": "discarded", "reason": "compression_ratio", "meta": meta}
+                )
             else:
                 ipc.send(
                     {
@@ -358,7 +376,9 @@ class _Engine:
                     }
                 )
 
-    def watchdog_loop(self, shutdown: threading.Event, stuck_state_timeout: float) -> None:
+    def watchdog_loop(
+        self, shutdown: threading.Event, stuck_state_timeout: float
+    ) -> None:
         while not shutdown.is_set():
             time.sleep(0.25)
             stuck = self._stuck_threads(stuck_state_timeout)
@@ -382,7 +402,9 @@ class _Engine:
         self._pa.terminate()
 
 
-def run(init_msg: dict, profile: dict, shutdown: threading.Event, mode_state: ModeState) -> None:
+def run(
+    init_msg: dict, profile: dict, shutdown: threading.Event, mode_state: ModeState
+) -> None:
     """Construye el motor, manda `ready` y corre hasta que se dispare `shutdown`."""
     engine = _Engine(init_msg, profile)
 
@@ -403,8 +425,18 @@ def run(init_msg: dict, profile: dict, shutdown: threading.Event, mode_state: Mo
     )
 
     threads = [
-        threading.Thread(target=engine.audio_loop, args=(shutdown, mode_state), daemon=True, name="stt-audio"),
-        threading.Thread(target=engine.transcribe_loop, args=(shutdown,), daemon=True, name="stt-transcribe"),
+        threading.Thread(
+            target=engine.audio_loop,
+            args=(shutdown, mode_state),
+            daemon=True,
+            name="stt-audio",
+        ),
+        threading.Thread(
+            target=engine.transcribe_loop,
+            args=(shutdown,),
+            daemon=True,
+            name="stt-transcribe",
+        ),
         threading.Thread(
             target=engine.watchdog_loop,
             args=(shutdown, init_msg.get("stuck_state_timeout_secs", 30)),
