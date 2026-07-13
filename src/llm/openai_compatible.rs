@@ -28,6 +28,10 @@ pub struct OpenAiCompatibleProvider {
     base_url: String,
     model: String,
     api_key_env: Option<String>,
+    /// Si el backend real detrás de esta base_url acepta bloques `image_url`
+    /// en el content. DeepSeek comparte el formato de wire pero su API de
+    /// chat es texto-puro y rechaza ese campo con un 400.
+    supports_vision: bool,
 }
 
 impl OpenAiCompatibleProvider {
@@ -36,6 +40,7 @@ impl OpenAiCompatibleProvider {
         model: impl Into<String>,
         api_key_env: Option<String>,
         request_timeout_secs: u64,
+        supports_vision: bool,
     ) -> Result<Self, LlmError> {
         if let Some(env) = &api_key_env {
             if std::env::var(env).is_err() {
@@ -48,6 +53,7 @@ impl OpenAiCompatibleProvider {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             model: model.into(),
             api_key_env,
+            supports_vision,
         })
     }
 }
@@ -76,12 +82,19 @@ struct ChatCompletionMessage<'a> {
     tool_call_id: Option<&'a str>,
 }
 
-/// Bloque `image_url` en formato OpenAI (data URI inline). Lo usan DeepSeek
-/// y los proveedores locales (LM Studio) además de OpenAI mismo, todos
-/// compartiendo este cliente.
-fn image_content(content: &str, images: &[ImageBlock]) -> serde_json::Value {
+/// Bloque `image_url` en formato OpenAI (data URI inline). Solo se manda si
+/// el provider (`supports_vision`) lo acepta — DeepSeek comparte este
+/// cliente pero su API no soporta imágenes, así que ahí se degrada a texto
+/// con una nota, en vez de mandar un content que el backend rechaza.
+fn image_content(content: &str, images: &[ImageBlock], supports_vision: bool) -> serde_json::Value {
     if images.is_empty() {
         return serde_json::Value::String(content.to_string());
+    }
+    if !supports_vision {
+        return serde_json::Value::String(format!(
+            "{content} (nota: este proveedor de LLM no admite imágenes; no fue posible \
+             analizar el contenido visual adjunto.)"
+        ));
     }
     let mut blocks = vec![serde_json::json!({ "type": "text", "text": content })];
     blocks.extend(images.iter().map(|img| {
@@ -214,7 +227,7 @@ impl LlmProvider for OpenAiCompatibleProvider {
             .iter()
             .map(|m| ChatCompletionMessage {
                 role: role_str(m.role),
-                content: image_content(&m.content, &m.images),
+                content: image_content(&m.content, &m.images, self.supports_vision),
                 tool_calls: m
                     .tool_calls
                     .iter()

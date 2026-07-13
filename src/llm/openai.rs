@@ -21,6 +21,7 @@ impl OpenAiProvider {
             &config.model,
             Some(config.api_key_env.clone()),
             request_timeout_secs,
+            true,
         )?))
     }
 }

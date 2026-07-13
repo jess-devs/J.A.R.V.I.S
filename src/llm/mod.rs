@@ -44,8 +44,9 @@ pub struct ToolCallRequest {
 }
 
 /// Imagen adjunta a un mensaje (típicamente un resultado de `take_screenshot`).
-/// Solo lo renderizan Anthropic, DeepSeek y los proveedores locales (Ollama,
-/// LM Studio); el resto de los proveedores simplemente ignoran este campo.
+/// Solo lo renderizan Anthropic, OpenAI y los proveedores locales (Ollama,
+/// LM Studio); DeepSeek no soporta imágenes y degrada a una nota de texto
+/// (ver `openai_compatible::image_content`).
 #[derive(Debug, Clone)]
 pub struct ImageBlock {
     /// MIME type, ej. "image/png".

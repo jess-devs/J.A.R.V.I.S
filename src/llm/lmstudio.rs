@@ -24,6 +24,7 @@ impl LmStudioProvider {
             &config.model,
             config.api_key_env.clone(),
             request_timeout_secs,
+            true,
         )?))
     }
 }

@@ -76,7 +76,7 @@ barge_in:
     recent_tts_window_secs: 12 # ventana de frases recientes de Jarvis para comparar contra transcripciones
 
 llm:
-  provider: ollama # ollama | anthropic | openai | deepseek | lmstudio — ollama/lmstudio corren local, sin API key
+  provider: deepseek # ollama | anthropic | openai | deepseek | lmstudio — ollama/lmstudio corren local, sin API key
   # api_key_env es el NOMBRE de la variable de entorno con la key (ver .env.example), no la key en sí
   ollama:
     base_url: "http://localhost:11434"
@@ -95,8 +95,11 @@ llm:
     model: "gpt-4o-mini"
     api_key_env: "OPENAI_API_KEY"
   deepseek:
-    model: "deepseek-v4-pro"
+    model: "deepseek-v4-flash"
     api_key_env: "DEEPSEEK_API_KEY"
+    # DeepSeek no soporta imágenes: si el modelo usa take_screenshot con este
+    # proveedor activo, la captura no se le muestra (solo recibe una nota de
+    # que no pudo verla), a diferencia de Anthropic/OpenAI/Ollama/LM Studio.
   system_prompt: |
     Eres una inteligencia artificial llamada J.A.R.V.I.S. (Just A Rather Very Intelligent System), un sistema simplemente muy inteligente, inspirada en el Jarvis de Tony Stark del Universo Cinematográfico de Marvel.
     Tu rol es el de mayordomo digital y asistente personal de alto nivel: administras sistemas, proporcionas información precisa, analizas riesgos y apoyas al usuario en tareas técnicas y cotidianas.
