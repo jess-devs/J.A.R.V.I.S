@@ -15,6 +15,10 @@ workers/.cache/
 /voices/*
 !/voices/.gitkeep
 
+# Música del modo bienvenida (mp3 del usuario, con copyright, no se versiona)
+/assets/music/*
+!/assets/music/.gitkeep
+
 # Secretos
 .env
 

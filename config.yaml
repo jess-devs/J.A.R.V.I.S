@@ -28,6 +28,15 @@ stt:
     max_no_speech_prob: 0.6 # descarta si no_speech_prob lo superac
     min_avg_logprob: -1.0 # descarta si avg_logprob cae por debajo
     max_compression_ratio: 2.4 # descarta si compression_ratio lo supera (texto repetitivo)
+  clap: # detector de doble aplauso (engine: native), corre siempre; welcome.enabled decide si dispara la escena
+    min_peak_dbfs: -30.0 # dBFS mínimo del pico para considerar un posible aplauso
+    min_rise_db: 7.0 # subida mínima sobre el fondo (bg_db) para considerarlo onset
+    decay_ms: 220 # ventana en la que el onset debe volver a caer bajo su propio umbral para confirmarse
+    max_vad_prob: 0.45 # rechaza el onset si Silero cree que es voz sonora por encima de esto
+    min_zcr: 0.14 # tasa mínima de cruces por cero (timbre de banda ancha; filtra clics de teclado/trackpad)
+    double_min_gap_ms: 150 # gap mínimo entre los dos aplausos (evita contar la reverb del mismo golpe)
+    double_max_gap_ms: 900 # gap máximo entre los dos aplausos
+    refractory_ms: 1500 # tras confirmar el doble aplauso, ignora nuevos aplausos por este tiempo
   language: "es"
   device: auto # auto | cuda | cpu
   whisper_model: auto # auto | tiny | base | small | medium | large-v2 | large-v3-turbo
@@ -49,7 +58,7 @@ stt:
   stuck_state_timeout_secs: 30 # reinicia el worker si queda trabado más de esto
 
 wake:
-  enabled: true # false = sin gate, Jarvis responde a todo
+  enabled: false # false = sin gate, Jarvis responde a todo
   words: ["jarvis"] # normalizadas (sin tildes), tolerancia a 1 letra de error
   attention_window_secs: 25 # tras responder, sigue atento sin necesidad del nombre
   window_min_words: 2 # dentro de la ventana, ignora frases más cortas sin el nombre (1 = sin filtro)
@@ -80,7 +89,7 @@ llm:
   # api_key_env es el NOMBRE de la variable de entorno con la key (ver .env.example), no la key en sí
   ollama:
     base_url: "http://localhost:11434"
-    model: "auto" # auto | nombre fijo (ej. "qwen2.5:7b")
+    model: "qwen3.5:0.8b" # auto | nombre fijo (ej. "qwen2.5:7b")
     # "auto" detecta VRAM/RAM en cada arranque y elige un modelo qwen acorde;
     # si no está descargado, Jarvis avisa el "ollama pull" pero no lo baja solo.
     think: null # null = no envía el campo (qwen2.5 lo rechaza); false para qwen3/deepseek-r1
@@ -155,7 +164,7 @@ llm:
   request_timeout_secs: 180
 
 tts:
-  provider: piper # piper | elevenlabs | cartesia
+  provider: cartesia # piper | elevenlabs | cartesia
   piper:
     # voice_path: "voices/es_ES-sharvard-medium.onnx"
     # config_path: "voices/es_ES-sharvard-medium.onnx.json"
@@ -167,7 +176,7 @@ tts:
     length_scale: null # <1 más rápido, >1 más lento, null = ritmo original de la voz
     noise_w_scale: null # variación en duración de fonemas, null = default de la voz
   elevenlabs: # solo con provider: elevenlabs — requiere API key y consume créditos
-    voice_id: "15d0c2e2-8d29-44c3-be23-d585d5f154a1"
+    voice_id: "15d0c2e2-8d29-44c3-be23-d585d5f154a1" # 15d0c2e2-8d29-44c3-be23-d585d5f154a1
     model_id: "eleven_multilingual_v2"
     output_format: "pcm_22050"
     api_key_env: "ELEVENLABS_API_KEY"
@@ -237,4 +246,13 @@ agent:
     db_path: "data/memory.db"
     max_injected: 12 # memorias recientes inyectadas en el prompt de cada turno
 
-log_level: debug # trace | debug | info | warn | error — "debug" muestra telemetría de VAD/transcripción/barge-in
+welcome: # modo bienvenida (doble aplauso): música + saludo + recordatorios/noticias
+  enabled: true
+  music_path: "assets/music/welcome.mp3" # mp3 local, no versionado — ver assets/music/.gitkeep
+  greeting_phrase: "Bienvenido a casa, señor."
+  music_volume: 0.4
+  duck_volume: 0.12 # volumen de la música mientras Jarvis o el usuario hablan
+  cooldown_secs: 120 # ignora nuevos doble aplausos que disparen la escena durante este tiempo
+  news_when_no_reminders: true # si no hay recordatorios pendientes, cuenta las noticias del día
+
+log_level: info # trace | debug | info | warn | error — "debug" muestra telemetría de VAD/transcripción/barge-in
