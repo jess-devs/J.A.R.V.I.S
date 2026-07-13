@@ -237,4 +237,4 @@ agent:
     db_path: "data/memory.db"
     max_injected: 12 # memorias recientes inyectadas en el prompt de cada turno
 
-log_level: info # trace | debug | info | warn | error — "debug" muestra telemetría de VAD/transcripción/barge-in
+log_level: debug # trace | debug | info | warn | error — "debug" muestra telemetría de VAD/transcripción/barge-in
