@@ -25,7 +25,10 @@ use config::Config;
 use orchestrator::Orchestrator;
 
 #[derive(Parser)]
-#[command(name = "jarvis", about = "Asistente de voz conversacional en tiempo real")]
+#[command(
+    name = "jarvis",
+    about = "Asistente de voz conversacional en tiempo real"
+)]
 struct Cli {
     /// Ruta al archivo de configuración.
     #[arg(long, default_value = "config.yaml")]
@@ -63,7 +66,8 @@ async fn main() {
     }
 }
 
-async fn run(config: Config) -> errors::Result<()> {
+async fn run(mut config: Config) -> errors::Result<()> {
+    llm::model_select::resolve(&mut config).await;
     startup_checks::run(&config).await?;
 
     let mut assistant = Orchestrator::new(config).await?;

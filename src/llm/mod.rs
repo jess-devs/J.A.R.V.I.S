@@ -10,6 +10,7 @@ pub mod anthropic;
 mod decode;
 pub mod deepseek;
 pub mod lmstudio;
+pub mod model_select;
 pub mod ollama;
 pub mod openai;
 mod openai_compatible;
