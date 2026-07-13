@@ -172,15 +172,28 @@ arriba).
 | Clave | Qué hace |
 |---|---|
 | `enabled` | `false` = comportamiento clásico: mic físicamente muteado mientras Jarvis responde, sin interrupciones posibles. |
-| `mode` | **`wake_word`** (default): solo interrumpe si lo que dijiste mientras Jarvis hablaba contiene su nombre, fiable con parlantes, porque el eco de la propia voz de Jarvis rara vez incluye "Jarvis". **`any_voice`**: interrumpe con cualquier voz sostenida, sin exigir el nombre, más natural, pero **recomendado solo con auriculares**: con parlantes sin cancelación de eco, el propio audio de Jarvis puede autointerrumpirlo (mitigado, no eliminado, por `echo_guard`). |
+| `mode` | **`wake_word`** (default): solo interrumpe si lo que dijiste mientras Jarvis hablaba contiene su nombre, fiable con parlantes, porque el eco de la propia voz de Jarvis rara vez incluye "Jarvis". **`any_voice`**: no exige el nombre, más natural — ver abajo cómo decide si de verdad hay que cortar. |
 | `min_speech_ms` | Milisegundos de voz sostenida (medidos por el motor STT en modo "speaking") para confirmar que es una interrupción real y no un ruido puntual (una tos, un golpe). |
+| `relevance_timeout_secs` | Solo aplica a `mode: any_voice`. Cuánto esperar la respuesta del LLM sobre si la interrupción tiene sentido (ver abajo) antes de rendirse. Si se agota o falla, Jarvis sigue hablando en vez de cortarse a ciegas. |
 
-Cómo se dispara en cada modo: en `any_voice`, apenas se supera
-`min_speech_ms` el motor avisa (`speech_confirmed`) y Rust cancela **de
-inmediato**, sin esperar a que termine de transcribirse la frase, eso
-tarda cientos de milisegundos más. En `wake_word` se espera la
-transcripción completa y se busca el nombre ahí (con la misma tolerancia a
-errores que `wake.words`).
+Cómo se dispara en cada modo: en `wake_word` se espera la transcripción
+completa y se busca el nombre ahí (con la misma tolerancia a errores que
+`wake.words`) — si no aparece, Jarvis sigue hablando sin cortarse.
+
+En `any_voice`, apenas se supera `min_speech_ms` el motor avisa
+(`speech_confirmed`) y Jarvis **pausa** (deja de decir frases nuevas, sin
+cortar a mitad de palabra la que ya sonaba) mientras espera la
+transcripción, que tarda cientos de milisegundos a un par de segundos más.
+Si esa transcripción resulta ser eco propio (`echo_guard`) o el segmento se
+descarta, Jarvis reanuda exactamente donde había quedado, sin perder nada.
+Si no, antes de cortar de verdad se le pregunta al LLM configurado (una
+consulta mínima y aparte de la conversación real) si lo que se escuchó
+tiene sentido como algo dirigido a él o como continuación de lo que decía
+— así una charla con otra persona cerca del micrófono no lo interrumpe.
+Esto suma latencia real antes del corte (el tiempo de transcripción más el
+de esa consulta al LLM, acotado por `relevance_timeout_secs`): quien
+prefiera cero espera adicional y no le moleste tener que decir "Jarvis"
+para interrumpirlo, puede quedarse con `mode: wake_word`.
 
 ### `barge_in.echo_guard`
 

@@ -78,6 +78,7 @@ barge_in:
   # Solo aplica con stt.engine: native; con realtimestt siempre se usa mute real.
   mode: any_voice # wake_word (exige el nombre, fiable con altavoces) | any_voice (recomendado con auriculares)
   min_speech_ms: 400 # milisegundos de voz sostenida para confirmar interrupción real
+  relevance_timeout_secs: 3 # solo mode: any_voice — al llegar la transcripción, cuánto esperar la respuesta del LLM sobre si tiene sentido como algo dirigido a Jarvis antes de cortar; si tarda más o falla, sigue hablando (no corta)
   echo_guard: # evita que Jarvis se interrumpa a sí mismo por su propia voz en parlantes
     enabled: true # false = nunca descarta por eco (desaconsejado sin auriculares)
     similarity_threshold: 0.72 # fracción de tokens solapados con lo dicho por Jarvis para descartar como eco

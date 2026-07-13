@@ -8,6 +8,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent::{
@@ -16,7 +17,7 @@ use crate::agent::{
     AgentTurnResult, PendingConfirmation, TurnContext,
 };
 use crate::audio::{AudioPlayer, MusicPlayer};
-use crate::config::{BargeInConfig, BargeInMode, Config, SttEngineKind};
+use crate::config::{AgentConfig, BargeInConfig, BargeInMode, Config, SttEngineKind};
 use crate::echo_gate::EchoGate;
 use crate::errors::{Result, WorkerError};
 use crate::llm::{self, ChatMessage, LlmProvider, Role};
@@ -502,6 +503,8 @@ impl Orchestrator {
                 let result = if self.registry.is_empty() {
                     self.plain_speaking_turn(cancel).await
                 } else {
+                    // Sin carrera de STT en este camino (barge-in no soportado): nunca pausa.
+                    let (_pause_tx, pause_rx) = watch::channel(false);
                     let mut ctx = TurnContext {
                         llm: &self.llm,
                         tts: &self.tts,
@@ -510,6 +513,7 @@ impl Orchestrator {
                         config: &self.config,
                         cancel,
                         echo_gate: self.echo_gate.clone(),
+                        pause_rx,
                     };
                     agent::run_agentic_turn(&mut ctx, &mut self.history).await
                 };
@@ -543,6 +547,8 @@ impl Orchestrator {
     ) -> (crate::errors::Result<AgentTurnResult>, Option<String>) {
         let mut interrupt_text: Option<String> = None;
         let mut stt_died = false;
+        let mut paused = false;
+        let (pause_tx, pause_rx) = watch::channel(false);
 
         let turn_result = if self.registry.is_empty() {
             let out_result = {
@@ -555,6 +561,7 @@ impl Orchestrator {
                     &self.config.pipeline,
                     cancel.clone(),
                     self.echo_gate.clone(),
+                    pause_rx.clone(),
                 );
                 tokio::pin!(turn_future);
                 loop {
@@ -568,16 +575,19 @@ impl Orchestrator {
                             match event {
                                 Some(SttEvent::WorkerDied) | None => stt_died = true,
                                 Some(event) => {
-                                    let mut eg = self.echo_gate.lock().unwrap();
-                                    if let Some(text) = evaluate_barge_in_event(
-                                        &self.gate,
-                                        &mut eg,
-                                        &self.config.barge_in,
+                                    handle_barge_in_event(
                                         event,
+                                        &mut self.gate,
+                                        &self.echo_gate,
+                                        &self.config.barge_in,
+                                        &self.config.agent,
+                                        &self.llm,
                                         &cancel,
-                                    ) {
-                                        interrupt_text = Some(text);
-                                    }
+                                        &pause_tx,
+                                        &mut paused,
+                                        &mut interrupt_text,
+                                    )
+                                    .await;
                                 }
                             }
                         }
@@ -606,6 +616,7 @@ impl Orchestrator {
                 config: &self.config,
                 cancel: cancel.clone(),
                 echo_gate: self.echo_gate.clone(),
+                pause_rx: pause_rx.clone(),
             };
             let turn_future = agent::run_agentic_turn(&mut ctx, &mut self.history);
             tokio::pin!(turn_future);
@@ -620,16 +631,19 @@ impl Orchestrator {
                         match event {
                             Some(SttEvent::WorkerDied) | None => stt_died = true,
                             Some(event) => {
-                                let mut eg = self.echo_gate.lock().unwrap();
-                                if let Some(text) = evaluate_barge_in_event(
-                                    &self.gate,
-                                    &mut eg,
-                                    &self.config.barge_in,
+                                handle_barge_in_event(
                                     event,
+                                    &mut self.gate,
+                                    &self.echo_gate,
+                                    &self.config.barge_in,
+                                    &self.config.agent,
+                                    &self.llm,
                                     &cancel,
-                                ) {
-                                    interrupt_text = Some(text);
-                                }
+                                    &pause_tx,
+                                    &mut paused,
+                                    &mut interrupt_text,
+                                )
+                                .await;
                             }
                         }
                     }
@@ -651,6 +665,8 @@ impl Orchestrator {
         &mut self,
         cancel: CancellationToken,
     ) -> crate::errors::Result<AgentTurnResult> {
+        // Sin carrera de STT en este camino (barge-in no soportado): nunca pausa.
+        let (_pause_tx, pause_rx) = watch::channel(false);
         let out = pipeline::run_speaking_turn(
             self.llm.clone(),
             self.tts.clone(),
@@ -660,6 +676,7 @@ impl Orchestrator {
             &self.config.pipeline,
             cancel,
             self.echo_gate.clone(),
+            pause_rx,
         )
         .await?;
         if out.interrupted {
@@ -786,6 +803,9 @@ impl Orchestrator {
     async fn approve_pending(&mut self, pending: PendingConfirmation) {
         self.begin_speaking().await;
         let cancel = self.new_turn_cancellation();
+        // Fuera de una carrera contra el STT: este receptor nunca cambia,
+        // así que nunca pausa (ver doc de `TurnContext::pause_rx`).
+        let (_pause_tx, pause_rx) = watch::channel(false);
         let mut ctx = TurnContext {
             llm: &self.llm,
             tts: &self.tts,
@@ -794,6 +814,7 @@ impl Orchestrator {
             config: &self.config,
             cancel,
             echo_gate: self.echo_gate.clone(),
+            pause_rx,
         };
         let result = agent::resume_agentic_turn(&mut ctx, &mut self.history, pending).await;
         self.conclude_turn(result).await;
@@ -911,29 +932,48 @@ impl Orchestrator {
     }
 }
 
-/// Decide qué hacer con un evento de STT llegado MIENTRAS Jarvis está
-/// hablando (dentro de `Orchestrator::run_turn_racing_stt`). La política de
-/// a qué modo responder vive acá — el motor STT (Python) solo reporta.
-/// Devuelve `Some(texto)` si hay que despachar ese texto como el próximo
-/// turno una vez que el actual termine de desenrollarse; ya llamó
-/// `cancel.cancel()` si la interrupción quedó confirmada.
-fn evaluate_barge_in_event(
+/// Qué hacer con un evento de STT llegado MIENTRAS Jarvis está hablando,
+/// según `classify_barge_in_event` (síncrona, sin tocar el LLM todavía).
+enum BargeInAction {
+    /// Nada que hacer (evento de solo telemetría, o ya estaba resuelto).
+    Ignore,
+    /// Dejar de hablar frases nuevas sin cortar la que suena, mientras se
+    /// espera la transcripción para decidir si de verdad hay que cortar.
+    Pause,
+    /// Era eco propio, o el segmento se descartó, o no hacía falta pausar:
+    /// seguir hablando con normalidad.
+    Resume,
+    /// Interrupción confirmada sin necesidad de chequeo de relevancia
+    /// (modo `wake_word` con el nombre presente en la frase).
+    Confirmed(String),
+    /// Modo `any_voice`, no es eco: hace falta preguntarle al LLM si esto
+    /// tiene sentido como algo dirigido a Jarvis antes de decidir.
+    NeedsRelevanceCheck { text: String, was_saying: String },
+}
+
+/// Clasifica un evento de STT llegado durante un turno (dentro de
+/// `Orchestrator::run_turn_racing_stt`). Puro y síncrono a propósito: el
+/// chequeo de relevancia (que sí necesita `.await`-ear al LLM) se resuelve
+/// aparte, en `handle_barge_in_event`, para no mantener el `MutexGuard` de
+/// `echo_gate` atravesado por un `.await` (no es `Send`).
+fn classify_barge_in_event(
     gate: &AttentionGate,
     echo_gate: &mut EchoGate,
     barge_in: &BargeInConfig,
     event: SttEvent,
-    cancel: &CancellationToken,
-) -> Option<String> {
+    already_paused: bool,
+) -> BargeInAction {
     match event {
         SttEvent::SpeechConfirmed => {
-            // Solo en any_voice: cancela apenas hay voz sostenida, sin
-            // esperar la transcripción (llega cientos de ms después). En
-            // wake_word se ignora — se espera el Transcript con el nombre.
-            if barge_in.mode == BargeInMode::AnyVoice && !cancel.is_cancelled() {
-                tracing::info!("barge-in: voz sostenida detectada, cancelando la respuesta");
-                cancel.cancel();
+            // Solo any_voice pausa acá, sin esperar la transcripción (llega
+            // cientos de ms después). wake_word no toca nada todavía: espera
+            // el Transcript con el nombre.
+            if barge_in.mode == BargeInMode::AnyVoice {
+                tracing::info!("barge-in: voz sostenida detectada, pausando la respuesta");
+                BargeInAction::Pause
+            } else {
+                BargeInAction::Ignore
             }
-            None
         }
         SttEvent::Transcript { text, meta, .. } => {
             if let Some(meta) = &meta {
@@ -944,41 +984,107 @@ fn evaluate_barge_in_event(
                 );
             }
             if text.trim().is_empty() {
-                return None;
+                return BargeInAction::Ignore;
             }
             if echo_gate.is_echo(&text) {
                 tracing::debug!(text = %text, "barge-in: descartado por el echo gate (probable eco propio)");
-                return None;
+                return BargeInAction::Resume;
             }
-            let confirmed = match barge_in.mode {
-                BargeInMode::AnyVoice => true,
-                BargeInMode::WakeWord => gate.contains_wake_word(&text),
-            };
-            if !confirmed {
-                tracing::debug!(text = %text, "barge-in: sin wake word, se ignora (modo wake_word)");
-                return None;
+            match barge_in.mode {
+                BargeInMode::WakeWord => {
+                    if gate.contains_wake_word(&text) {
+                        tracing::info!(text = %text, "barge-in: interrupción confirmada (wake word)");
+                        BargeInAction::Confirmed(text)
+                    } else {
+                        tracing::debug!(text = %text, "barge-in: sin wake word, se ignora (modo wake_word)");
+                        BargeInAction::Ignore
+                    }
+                }
+                BargeInMode::AnyVoice => {
+                    let was_saying = echo_gate.recent_spoken_text();
+                    BargeInAction::NeedsRelevanceCheck { text, was_saying }
+                }
             }
-            if !cancel.is_cancelled() {
-                tracing::info!(text = %text, "barge-in: interrupción confirmada");
-                cancel.cancel();
-            }
-            Some(text)
         }
         SttEvent::VadStart => {
             tracing::debug!("VAD: inicio de voz detectado (posible barge-in)");
-            None
+            BargeInAction::Ignore
         }
         SttEvent::VadEnd { speech_ms } => {
             tracing::debug!(speech_ms = ?speech_ms, "VAD: fin de voz detectado");
-            None
+            BargeInAction::Ignore
         }
         SttEvent::Discarded { reason } => {
             tracing::debug!(reason = %reason, "audio descartado por el motor STT durante barge-in");
-            None
+            // Si se había pausado esperando este segmento y no dio texto,
+            // hay que reanudar: si no, Jarvis quedaría mudo para siempre.
+            if already_paused {
+                BargeInAction::Resume
+            } else {
+                BargeInAction::Ignore
+            }
         }
         // v1: un doble aplauso a mitad de turno se ignora, no interrumpe la
         // respuesta en curso ni dispara la escena de bienvenida encima.
-        SttEvent::ClapDetected => None,
-        SttEvent::WorkerDied => None,
+        SttEvent::ClapDetected => BargeInAction::Ignore,
+        SttEvent::WorkerDied => BargeInAction::Ignore,
+    }
+}
+
+/// Resuelve un evento de STT llegado durante un turno: clasifica (síncrono,
+/// bajo el lock de `echo_gate`) y, si hace falta, corre el chequeo de
+/// relevancia contra el LLM (fuera del lock) antes de pausar, reanudar o
+/// confirmar la interrupción de verdad.
+#[allow(clippy::too_many_arguments)]
+async fn handle_barge_in_event(
+    event: SttEvent,
+    gate: &mut AttentionGate,
+    echo_gate: &Arc<Mutex<EchoGate>>,
+    barge_in: &BargeInConfig,
+    agent_cfg: &AgentConfig,
+    llm: &Arc<dyn LlmProvider>,
+    cancel: &CancellationToken,
+    pause_tx: &watch::Sender<bool>,
+    paused: &mut bool,
+    interrupt_text: &mut Option<String>,
+) {
+    let action = {
+        let mut eg = echo_gate.lock().unwrap();
+        classify_barge_in_event(gate, &mut eg, barge_in, event, *paused)
+    };
+    match action {
+        BargeInAction::Ignore => {}
+        BargeInAction::Pause => {
+            *paused = true;
+            let _ = pause_tx.send(true);
+        }
+        BargeInAction::Resume => {
+            *paused = false;
+            let _ = pause_tx.send(false);
+        }
+        BargeInAction::Confirmed(text) => {
+            if !cancel.is_cancelled() {
+                cancel.cancel();
+            }
+            *interrupt_text = Some(text);
+        }
+        BargeInAction::NeedsRelevanceCheck { text, was_saying } => {
+            let timeout = Duration::from_secs(barge_in.relevance_timeout_secs);
+            let relevant =
+                agent::relevance::sounds_directed_at_jarvis(llm, &was_saying, &text, agent_cfg, timeout)
+                    .await;
+            if relevant {
+                tracing::info!(text = %text, "barge-in: interrupción confirmada tras chequeo de relevancia");
+                if !cancel.is_cancelled() {
+                    cancel.cancel();
+                }
+                *interrupt_text = Some(text);
+            } else {
+                tracing::debug!(text = %text, "barge-in: no parece dirigido a Jarvis, sigue hablando");
+                *paused = false;
+                let _ = pause_tx.send(false);
+                gate.push_ambient(text);
+            }
+        }
     }
 }

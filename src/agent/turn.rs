@@ -10,6 +10,7 @@
 use std::sync::{Arc, Mutex};
 
 use rand::seq::SliceRandom;
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::audio::AudioPlayer;
@@ -35,6 +36,12 @@ pub struct TurnContext<'a> {
     /// Registra las frases que Jarvis efectivamente dice, para descartar
     /// como eco propio transcripciones que lleguen mientras habla.
     pub echo_gate: Arc<Mutex<EchoGate>>,
+    /// Escalón intermedio antes de `cancel`: en `true`, el turno deja de
+    /// hablar frases nuevas (sin cortar la que suena) mientras el barge-in
+    /// evalúa si de verdad hay que interrumpir. Fuera de una carrera contra
+    /// el STT (ej. al retomar tras una confirmación) queda en `false` para
+    /// siempre — nunca pausa.
+    pub pause_rx: watch::Receiver<bool>,
 }
 
 /// Una herramienta esperando aprobación por voz del usuario.
@@ -117,6 +124,7 @@ async fn turn_loop(
             &ctx.config.pipeline,
             ctx.cancel.clone(),
             ctx.echo_gate.clone(),
+            ctx.pause_rx.clone(),
         )
         .await?;
         iterations += 1;
@@ -176,6 +184,7 @@ async fn turn_loop(
         &ctx.config.pipeline,
         ctx.cancel.clone(),
         ctx.echo_gate.clone(),
+        ctx.pause_rx.clone(),
     )
     .await?;
     if out.interrupted {

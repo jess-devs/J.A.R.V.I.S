@@ -18,7 +18,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::audio::AudioPlayer;
@@ -49,6 +49,7 @@ pub async fn run_speaking_turn(
     cfg: &PipelineConfig,
     cancel: CancellationToken,
     echo_gate: Arc<Mutex<EchoGate>>,
+    mut pause_rx: watch::Receiver<bool>,
 ) -> Result<TurnOutput, JarvisError> {
     let turn_start = Instant::now();
     let (event_tx, mut event_rx) = mpsc::channel::<Result<LlmEvent, LlmError>>(32);
@@ -112,17 +113,41 @@ pub async fn run_speaking_turn(
     // es rápido tanto si la interrupción llega entre frases como a mitad de
     // una. `player.play_chunk` es seguro de soltar a mitad de poll: lo que
     // ya se empujó al ring buffer queda ahí, y `player.stop()` lo descarta.
+    //
+    // `pause_rx` es un escalón intermedio antes de cancelar de verdad (ver
+    // barge-in en `orchestrator.rs`): mientras está en `true`, este loop deja
+    // de sacar frases nuevas de `audio_rx` (sin tocar `player` ni abortar las
+    // tareas), así que lo que ya sonaba termina de reproducirse con
+    // normalidad y el resto queda en pausa por backpressure. Si se reanuda
+    // (`false`), el turno sigue exactamente donde había quedado, sin perder
+    // nada; si en cambio se confirma la interrupción, `cancel` corta igual
+    // que siempre, pausado o no.
     let mut spoken_phrases: Vec<String> = Vec::new();
     let mut interrupted = false;
     let mut first_audio_at: Option<Instant> = None;
+    // Si el emisor de `pause_rx` se dropea (nunca pasa en el uso real: vive
+    // todo el turno en `orchestrator.rs`), el canal queda "cerrado" y
+    // `changed()` resuelve de inmediato para siempre — sin este guard, la
+    // rama ganaría el `select!` en cada vuelta y el loop no volvería a
+    // revisar `audio_rx` nunca más (busy-loop). Una vez cerrado, se deja de
+    // escuchar esa rama: el valor de `paused` queda fijo en lo último visto.
+    let mut pause_channel_closed = false;
     loop {
+        let paused = *pause_rx.borrow();
         tokio::select! {
             biased;
             _ = cancel.cancelled() => {
                 interrupted = true;
                 break;
             }
-            maybe_chunk = audio_rx.recv() => {
+            changed = pause_rx.changed(), if !pause_channel_closed => {
+                if changed.is_err() {
+                    pause_channel_closed = true;
+                }
+                // Solo hace falta despertar el loop para releer `paused`.
+                continue;
+            }
+            maybe_chunk = audio_rx.recv(), if !paused => {
                 match maybe_chunk {
                     Some((phrase, chunk)) => {
                         first_audio_at.get_or_insert_with(Instant::now);
@@ -264,6 +289,7 @@ mod tests {
         });
 
         let echo_gate = Arc::new(Mutex::new(EchoGate::new(EchoGuardConfig::default())));
+        let (_pause_tx, pause_rx) = watch::channel(false);
 
         let start = Instant::now();
         let out = run_speaking_turn(
@@ -275,6 +301,7 @@ mod tests {
             &cfg,
             cancel,
             echo_gate,
+            pause_rx,
         )
         .await
         .expect("no debería fallar, solo cancelarse");
@@ -288,6 +315,136 @@ mod tests {
         assert!(
             !out.spoken_text.trim().is_empty(),
             "para esta prueba debería haber alcanzado a sonar al menos una frase antes de cancelar"
+        );
+    }
+
+    /// Emite un número fijo de frases separadas por `delay`, para controlar
+    /// con precisión cuándo pausar/reanudar en los tests de barge-in.
+    struct CountedFakeLlm {
+        phrases: usize,
+        delay: Duration,
+    }
+
+    #[async_trait]
+    impl LlmProvider for CountedFakeLlm {
+        async fn stream_chat(
+            &self,
+            _history: &[ChatMessage],
+            _tools: &[ToolSpec],
+            tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
+        ) -> Result<(), LlmError> {
+            for i in 0..self.phrases {
+                if tx
+                    .send(Ok(LlmEvent::TextDelta(format!("frase numero {i}. "))))
+                    .await
+                    .is_err()
+                {
+                    return Ok(());
+                }
+                tokio::time::sleep(self.delay).await;
+            }
+            let _ = tx.send(Ok(LlmEvent::Done)).await;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn pausar_y_reanudar_no_pierde_texto() {
+        let mut player = AudioPlayer::new(None, 0.0, 5)
+            .expect("esta prueba necesita un dispositivo de salida de audio real");
+
+        let llm: Arc<dyn LlmProvider> = Arc::new(CountedFakeLlm {
+            phrases: 5,
+            delay: Duration::from_millis(60),
+        });
+        let tts: Arc<dyn TtsProvider> = Arc::new(FakeTts);
+        let cancel = CancellationToken::new();
+        let cfg = PipelineConfig::default();
+        let history = vec![ChatMessage::user("hola")];
+        let echo_gate = Arc::new(Mutex::new(EchoGate::new(EchoGuardConfig::default())));
+
+        let (pause_tx, pause_rx) = watch::channel(false);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            let _ = pause_tx.send(true);
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let _ = pause_tx.send(false);
+            // `pause_tx` sigue vivo hasta acá a propósito: en el uso real
+            // (orchestrator.rs) vive todo el turno, nunca se dropea a mitad.
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        });
+
+        let out = run_speaking_turn(
+            llm,
+            tts,
+            &mut player,
+            &history,
+            Arc::new(Vec::new()),
+            &cfg,
+            cancel,
+            echo_gate,
+            pause_rx,
+        )
+        .await
+        .expect("no debería fallar");
+
+        assert!(
+            !out.interrupted,
+            "no debería reportarse interrumpido: solo se pausó y se reanudó"
+        );
+        for i in 0..5 {
+            assert!(
+                out.spoken_text.contains(&format!("frase numero {i}")),
+                "faltó la frase {i} en la respuesta final: {}",
+                out.spoken_text
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelar_mientras_esta_pausado_sigue_cortando_rapido() {
+        let mut player = AudioPlayer::new(None, 0.0, 5)
+            .expect("esta prueba necesita un dispositivo de salida de audio real");
+
+        let llm: Arc<dyn LlmProvider> = Arc::new(SlowFakeLlm);
+        let tts: Arc<dyn TtsProvider> = Arc::new(FakeTts);
+        let cancel = CancellationToken::new();
+        let cfg = PipelineConfig::default();
+        let history = vec![ChatMessage::user("hola")];
+        let echo_gate = Arc::new(Mutex::new(EchoGate::new(EchoGuardConfig::default())));
+
+        let (pause_tx, pause_rx) = watch::channel(false);
+        let cancel_trigger = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let _ = pause_tx.send(true);
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            cancel_trigger.cancel();
+        });
+
+        let start = Instant::now();
+        let out = run_speaking_turn(
+            llm,
+            tts,
+            &mut player,
+            &history,
+            Arc::new(Vec::new()),
+            &cfg,
+            cancel,
+            echo_gate,
+            pause_rx,
+        )
+        .await
+        .expect("no debería fallar, solo cancelarse");
+        let elapsed = start.elapsed();
+
+        assert!(
+            out.interrupted,
+            "debería reportarse interrumpido tras cancelar, aunque estuviera pausado"
+        );
+        assert!(
+            elapsed < Duration::from_millis(1000),
+            "tardó {elapsed:?} en cortar tras cancelar estando pausado — el corte no fue rápido"
         );
     }
 }

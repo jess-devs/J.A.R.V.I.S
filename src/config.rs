@@ -960,6 +960,12 @@ pub struct BargeInConfig {
     /// para confirmar una interrupción real y no un ruido puntual.
     pub min_speech_ms: u32,
     pub echo_guard: EchoGuardConfig,
+    /// Solo aplica con `mode: any_voice`. Al llegar la transcripción de lo
+    /// que interrumpió a Jarvis (y no ser eco propio), se le pregunta al LLM
+    /// si tiene sentido como algo dirigido a él antes de cortar de verdad.
+    /// Si la consulta tarda más que esto o falla, se resuelve como "no
+    /// dirigido a Jarvis": sigue hablando en vez de cortarse a ciegas.
+    pub relevance_timeout_secs: u64,
 }
 
 impl Default for BargeInConfig {
@@ -969,6 +975,7 @@ impl Default for BargeInConfig {
             mode: BargeInMode::WakeWord,
             min_speech_ms: 400,
             echo_guard: EchoGuardConfig::default(),
+            relevance_timeout_secs: 3,
         }
     }
 }

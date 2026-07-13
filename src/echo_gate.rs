@@ -62,6 +62,20 @@ impl EchoGate {
         similarity >= self.config.similarity_threshold
     }
 
+    /// Frases dichas recientemente (dentro de `recent_tts_window_secs`), en
+    /// orden, para dar contexto a un chequeo de relevancia de barge-in (ver
+    /// `agent::relevance`). Reutiliza la misma ventana que el eco.
+    pub fn recent_spoken_text(&self) -> String {
+        let window = Duration::from_secs(self.config.recent_tts_window_secs);
+        let now = Instant::now();
+        self.recent
+            .iter()
+            .filter(|(at, _)| now.duration_since(*at) <= window)
+            .map(|(_, phrase)| phrase.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     fn prune(&mut self) {
         let window = Duration::from_secs(self.config.recent_tts_window_secs);
         let now = Instant::now();
@@ -119,6 +133,14 @@ mod tests {
         });
         g.note_spoken("El clima de hoy es soleado con veinte grados");
         assert!(!g.is_echo("el clima de hoy es soleado con veinte grados"));
+    }
+
+    #[test]
+    fn recent_spoken_text_junta_las_frases_en_orden() {
+        let mut g = gate();
+        g.note_spoken("Hola");
+        g.note_spoken("¿cómo estás?");
+        assert_eq!(g.recent_spoken_text(), "Hola ¿cómo estás?");
     }
 
     #[test]
