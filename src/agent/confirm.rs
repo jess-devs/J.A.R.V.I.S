@@ -1,6 +1,5 @@
-//! Interpretación de las respuestas de confirmación por voz: sí/no por
-//! palabras clave normalizadas (sin LLM — latencia cero y determinista) y el
-//! código de aceptación de riesgos hablado en dígitos o en palabras.
+//! Interpretación de las respuestas de confirmación por voz: sí/no por voz
+//! palabras clave normalizadas (sin LLM — menor latencia)
 
 use crate::config::AgentConfig;
 
@@ -8,24 +7,17 @@ use crate::config::AgentConfig;
 pub enum ConfirmDecision {
     Yes,
     No,
-    /// La frase no parece una respuesta a la pregunta: se cancela la acción
-    /// y se procesa como una petición nueva.
     Unrelated,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CodeDecision {
     Correct,
-    /// Dijo algo con dígitos pero no coincide: un solo intento, se cancela.
     Wrong,
-    /// Pidió cancelar explícitamente.
     Cancelled,
-    /// Sin dígitos y frase larga: parece una petición nueva.
     Unrelated,
 }
 
-/// Minúsculas, sin tildes, solo letras/dígitos/espacios — "¡Sí, señor!" →
-/// "si señor". A diferencia del normalizador del wake word, conserva dígitos.
 fn normalize(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.to_lowercase().chars() {
@@ -49,14 +41,11 @@ fn matches_any(normalized: &str, phrases: &[String]) -> bool {
         if phrase.is_empty() {
             return false;
         }
-        // Frase completa exacta, o palabra suelta presente como token.
         normalized == phrase || (!phrase.contains(' ') && words.contains(&phrase.as_str()))
     })
 }
 
-/// Interpreta la respuesta a un "¿Confirma, señor?". El "no" tiene prioridad
-/// sobre el "sí" ("no, no lo hagas" contiene tokens de ambos tipos en listas
-/// laxas). Frases largas sin match se tratan como una petición nueva.
+/// Interpreta la respuesta a un "¿Confirma, señor?". El "no" tiene prioridad sobre el "sí"
 pub fn interpret(text: &str, cfg: &AgentConfig) -> ConfirmDecision {
     let normalized = normalize(text);
     if normalized.is_empty() {
@@ -72,9 +61,9 @@ pub fn interpret(text: &str, cfg: &AgentConfig) -> ConfirmDecision {
     ConfirmDecision::Unrelated
 }
 
-/// Dígito hablado en español → carácter. Whisper suele transcribir códigos
+/// Whisper suele transcribir códigos
 /// como dígitos ("0201", "02 01") pero a veces como palabras ("cero dos
-/// cero uno"); se aceptan ambas formas mezcladas.
+/// cero uno") se aceptan ambas formas mezcladas.
 fn word_to_digit(word: &str) -> Option<char> {
     Some(match word {
         "cero" => '0',
@@ -99,13 +88,11 @@ fn extract_digits(normalized: &str) -> String {
         } else if let Some(d) = word_to_digit(token) {
             digits.push(d);
         }
-        // Otras palabras ("el código es...") se ignoran.
     }
     digits
 }
 
 /// Interpreta la respuesta a la petición del código de aceptación de riesgos.
-/// La comparación ocurre acá, en Rust — el código jamás pasa por el LLM.
 pub fn interpret_code(text: &str, cfg: &AgentConfig) -> CodeDecision {
     let normalized = normalize(text);
     if normalized.is_empty() {
@@ -116,8 +103,6 @@ pub fn interpret_code(text: &str, cfg: &AgentConfig) -> CodeDecision {
     }
     let digits = extract_digits(&normalized);
     if digits.is_empty() {
-        // Sin dígitos: frase larga = petición nueva; corta = respuesta
-        // fallida al desafío (p.ej. "sí" no basta en nivel Code).
         return if normalized.split(' ').count() > 4 {
             CodeDecision::Unrelated
         } else {
@@ -137,7 +122,7 @@ mod tests {
     use crate::config::AgentConfig;
 
     fn cfg() -> AgentConfig {
-        AgentConfig::default() // risk_code = "0201"
+        AgentConfig::default() // risk_code = "0201" <-- ejemplo
     }
 
     #[test]
@@ -171,7 +156,10 @@ mod tests {
     fn codigo_en_digitos() {
         assert_eq!(interpret_code("0201", &cfg()), CodeDecision::Correct);
         assert_eq!(interpret_code("02 01", &cfg()), CodeDecision::Correct);
-        assert_eq!(interpret_code("el código es 0201", &cfg()), CodeDecision::Correct);
+        assert_eq!(
+            interpret_code("el código es 0201", &cfg()),
+            CodeDecision::Correct
+        );
     }
 
     #[test]
@@ -190,7 +178,10 @@ mod tests {
 
     #[test]
     fn codigo_cancelado() {
-        assert_eq!(interpret_code("no, cancela", &cfg()), CodeDecision::Cancelled);
+        assert_eq!(
+            interpret_code("no, cancela", &cfg()),
+            CodeDecision::Cancelled
+        );
     }
 
     #[test]
@@ -199,7 +190,6 @@ mod tests {
             interpret_code("mejor cuéntame un chiste sobre gatos por favor", &cfg()),
             CodeDecision::Unrelated
         );
-        // Un "sí" a secas no basta en nivel Code.
         assert_eq!(interpret_code("sí", &cfg()), CodeDecision::Wrong);
     }
 }

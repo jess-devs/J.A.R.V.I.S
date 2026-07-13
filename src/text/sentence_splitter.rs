@@ -34,8 +34,6 @@ impl SentenceChunker {
         while let Some(boundary) = self.find_boundary_from(search_from) {
             let candidate_len = self.buffer[..boundary].trim().len();
             if candidate_len < self.min_len {
-                // Frase muy corta todavía: seguimos buscando una frontera más
-                // adelante para juntarla con lo que sigue, sin perder progreso.
                 search_from = boundary;
                 continue;
             }
@@ -159,10 +157,7 @@ mod tests {
     fn no_corta_abreviaturas() {
         let mut chunker = SentenceChunker::new(220, 3);
         let phrases = chunker.push("El Dr. García llegó temprano. Saludó a todos.");
-        assert_eq!(
-            phrases,
-            vec!["El Dr. García llegó temprano.".to_string()]
-        );
+        assert_eq!(phrases, vec!["El Dr. García llegó temprano.".to_string()]);
     }
 
     #[test]
@@ -175,9 +170,6 @@ mod tests {
 
     #[test]
     fn fallback_no_panickea_en_frontera_multibyte() {
-        // El carácter multibyte '｜' (3 bytes, U+FF5C) debe caer justo en o
-        // cerca del offset de corte (max_len) para reproducir el panic
-        // original: "end byte index N is not a char boundary".
         let mut chunker = SentenceChunker::new(20, 3);
         let texto = "una oracion larga｜sin puntuacion que sigue y sigue";
         let phrases = chunker.push(texto);

@@ -133,10 +133,11 @@ impl PiperWorkerProvider {
                                     tracing::error!(code = %code, message = %message, "error fatal del worker TTS");
                                     let mut guard = pending.lock().await;
                                     if let Some((_, tx)) = guard.take() {
-                                        let _ = tx.send(Err(TtsError::Worker(WorkerError::Fatal {
-                                            code,
-                                            message,
-                                        })));
+                                        let _ =
+                                            tx.send(Err(TtsError::Worker(WorkerError::Fatal {
+                                                code,
+                                                message,
+                                            })));
                                     }
                                 }
                                 _ => {}
@@ -176,7 +177,10 @@ async fn resolve_pending(
         // Mismatch esperado cuando se cancela un turno (Piper no tiene
         // mensaje de cancelación: sigue sintetizando la frase abortada
         // mientras el turno siguiente ya pidió la suya) — no es un bug.
-        tracing::debug!(request_id, "respuesta TTS con request_id inesperado, se ignora");
+        tracing::debug!(
+            request_id,
+            "respuesta TTS con request_id inesperado, se ignora"
+        );
     }
 }
 

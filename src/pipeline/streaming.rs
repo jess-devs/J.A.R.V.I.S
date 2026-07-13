@@ -202,7 +202,9 @@ mod tests {
         ) -> Result<(), LlmError> {
             for _ in 0..50 {
                 if tx
-                    .send(Ok(LlmEvent::TextDelta("hola caluroso saludo. ".to_string())))
+                    .send(Ok(LlmEvent::TextDelta(
+                        "hola caluroso saludo. ".to_string(),
+                    )))
                     .await
                     .is_err()
                 {

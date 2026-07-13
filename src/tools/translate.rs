@@ -100,12 +100,10 @@ impl Tool for Translate {
                 response.status()
             )));
         }
-        let body: Value = response
-            .json()
-            .await
-            .map_err(|e| ToolError::Execution(format!("respuesta inesperada del traductor: {e}")))?;
+        let body: Value = response.json().await.map_err(|e| {
+            ToolError::Execution(format!("respuesta inesperada del traductor: {e}"))
+        })?;
 
-        // Formato: [[[ "traducido", "original", null, null, ...], ...], ...]
         let translated: String = body
             .get(0)
             .and_then(Value::as_array)

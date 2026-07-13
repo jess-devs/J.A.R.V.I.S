@@ -51,14 +51,19 @@ impl Tool for TakeScreenshot {
                 .find(|m| m.is_primary().unwrap_or(false))
                 .or_else(|| xcap::Monitor::all().ok().and_then(|m| m.into_iter().next()))
                 .ok_or_else(|| ToolError::Execution("no se encontró ningún monitor".to_string()))?;
-            let image = monitor
-                .capture_image()
-                .map_err(|e| ToolError::Execution(format!("no se pudo capturar la pantalla: {e}")))?;
+            let image = monitor.capture_image().map_err(|e| {
+                ToolError::Execution(format!("no se pudo capturar la pantalla: {e}"))
+            })?;
             let (width, height) = (image.width(), image.height());
             let mut png_bytes: Vec<u8> = Vec::new();
             image::DynamicImage::ImageRgba8(image)
-                .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-                .map_err(|e| ToolError::Execution(format!("no se pudo codificar la imagen: {e}")))?;
+                .write_to(
+                    &mut std::io::Cursor::new(&mut png_bytes),
+                    image::ImageFormat::Png,
+                )
+                .map_err(|e| {
+                    ToolError::Execution(format!("no se pudo codificar la imagen: {e}"))
+                })?;
             Ok((width, height, png_bytes))
         })
         .await
@@ -208,7 +213,9 @@ impl Tool for ClickAt {
         let button = button_from_args(&args)?;
         move_cursor(x, y).await?;
         click_mouse(button).await?;
-        Ok(ToolOutput::text(format!("Click ({button:?}) en ({x}, {y}) realizado.")))
+        Ok(ToolOutput::text(format!(
+            "Click ({button:?}) en ({x}, {y}) realizado."
+        )))
     }
 }
 

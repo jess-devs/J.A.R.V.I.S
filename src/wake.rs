@@ -235,7 +235,10 @@ mod tests {
     fn responde_con_el_nombre_en_cualquier_posicion() {
         let g = default_gate();
         assert_eq!(g.decide("Oye Jarvis qué hora es"), GateDecision::Respond);
-        assert_eq!(g.decide("qué opinas de esto, Jarvis?"), GateDecision::Respond);
+        assert_eq!(
+            g.decide("qué opinas de esto, Jarvis?"),
+            GateDecision::Respond
+        );
         assert_eq!(g.decide("Jarvis."), GateDecision::Respond);
     }
 

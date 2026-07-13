@@ -25,11 +25,34 @@ use super::shell::run_powershell_command;
 use super::{required_str, RiskLevel, Tool, ToolOutput};
 
 pub const BUILTIN_NAMES: &[&str] = &[
-    "get_datetime", "system_status", "list_processes", "open_app", "open_url", "close_app",
-    "find_files", "open_file", "run_powershell", "get_volume", "set_volume", "web_search",
-    "fetch_page", "remember", "recall", "forget", "translate", "media_control",
-    "create_reminder", "list_reminders", "cancel_reminder", "take_screenshot", "mouse_move",
-    "mouse_click", "click_at", "create_tool", "list_custom_tools", "delete_custom_tool",
+    "get_datetime",
+    "system_status",
+    "list_processes",
+    "open_app",
+    "open_url",
+    "close_app",
+    "find_files",
+    "open_file",
+    "run_powershell",
+    "get_volume",
+    "set_volume",
+    "web_search",
+    "fetch_page",
+    "remember",
+    "recall",
+    "forget",
+    "translate",
+    "media_control",
+    "create_reminder",
+    "list_reminders",
+    "cancel_reminder",
+    "take_screenshot",
+    "mouse_move",
+    "mouse_click",
+    "click_at",
+    "create_tool",
+    "list_custom_tools",
+    "delete_custom_tool",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,7 +166,9 @@ impl Tool for ScriptedTool {
                 let url = substitute(url_template, &args)?;
                 self.check_host_allowed(&url)?;
                 let method = reqwest::Method::from_bytes(method.to_uppercase().as_bytes())
-                    .map_err(|_| ToolError::InvalidArgs(format!("método HTTP inválido: {method}")))?;
+                    .map_err(|_| {
+                        ToolError::InvalidArgs(format!("método HTTP inválido: {method}"))
+                    })?;
                 let mut request = self.http_client.request(method, &url);
                 if let Some(body_template) = body_template {
                     let body = substitute(body_template, &args)?;
@@ -154,10 +179,9 @@ impl Tool for ScriptedTool {
                     .await
                     .map_err(|e| ToolError::Execution(format!("error de red: {e}")))?;
                 let status = response.status();
-                let text = response
-                    .text()
-                    .await
-                    .map_err(|e| ToolError::Execution(format!("error leyendo la respuesta: {e}")))?;
+                let text = response.text().await.map_err(|e| {
+                    ToolError::Execution(format!("error leyendo la respuesta: {e}"))
+                })?;
                 Ok(ToolOutput::text(format!("HTTP {status}: {text}")))
             }
         }

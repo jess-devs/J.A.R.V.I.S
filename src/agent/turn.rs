@@ -2,10 +2,10 @@
 //!
 //! Cada iteración: una pasada de streaming por el LLM (cuyo texto ya se
 //! habla en vivo) que puede pedir tool calls. Las herramientas `Safe` se
-//! ejecutan directo; las que requieren aprobación interrumpen el loop
-//! devolviendo `NeedsConfirmation` — el orquestador pregunta por voz y
+//! ejecutan directo. Las que requieren aprobación interrumpen el loop
+//! devolviendo `NeedsConfirmation`. El orquestador pregunta por voz y
 //! retoma con `resume_agentic_turn`. El micrófono permanece muteado durante
-//! todo el loop; solo el orquestador lo reabre.
+//! todo el loop, solo el orquestador lo reabre.
 
 use std::sync::{Arc, Mutex};
 
@@ -23,15 +23,14 @@ use crate::tts::TtsProvider;
 
 use super::speak;
 
-/// Referencias que necesita el loop; se reconstruye barato en cada llamada.
+/// Referencias que necesita el loop, se reconstruye  en cada llamada.
 pub struct TurnContext<'a> {
     pub llm: &'a Arc<dyn LlmProvider>,
     pub tts: &'a Arc<dyn TtsProvider>,
     pub player: &'a mut AudioPlayer,
     pub registry: &'a ToolRegistry,
     pub config: &'a Config,
-    /// Se dispara para cortar el turno a mitad de respuesta (barge-in, o el
-    /// hook de prueba `JARVIS_TEST_CANCEL`). Un token nuevo por turno.
+    /// Se dispara para cortar el turno a mitad de respuesta
     pub cancel: CancellationToken,
     /// Registra las frases que Jarvis efectivamente dice, para descartar
     /// como eco propio transcripciones que lleguen mientras habla.
@@ -55,14 +54,15 @@ pub struct PendingConfirmation {
 
 #[derive(Debug)]
 pub enum AgentTurnResult {
-    /// El turno terminó y la respuesta final ya fue hablada y agregada al
-    /// historial.
-    Completed { final_text: String },
+    /// El turno terminó y la respuesta final ya fue hablada y agregada al historial.
+    Completed {
+        final_text: String,
+    },
     NeedsConfirmation(PendingConfirmation),
-    /// Se canceló a mitad de respuesta (barge-in, o `JARVIS_TEST_CANCEL`).
-    /// `spoken_so_far` es solo lo que alcanzó a sonar; el orquestador es
-    /// quien decide qué guardar en el historial.
-    Interrupted { spoken_so_far: String },
+    /// Se canceló a mitad de respuesta
+    Interrupted {
+        spoken_so_far: String,
+    },
 }
 
 pub async fn run_agentic_turn(
@@ -80,7 +80,13 @@ pub async fn resume_agentic_turn(
     pending: PendingConfirmation,
 ) -> Result<AgentTurnResult, JarvisError> {
     execute_and_record(ctx.registry, ctx.config, history, &pending.call).await;
-    turn_loop(ctx, history, pending.iterations_used, pending.remaining_calls).await
+    turn_loop(
+        ctx,
+        history,
+        pending.iterations_used,
+        pending.remaining_calls,
+    )
+    .await
 }
 
 async fn turn_loop(
@@ -116,11 +122,6 @@ async fn turn_loop(
         iterations += 1;
 
         if out.interrupted {
-            // No se empuja nada al historial por esta pasada: si el modelo
-            // ya había pedido herramientas en una pasada ANTERIOR de este
-            // mismo turno, esas ya quedaron completas (assistant_with_tools
-            // + sus tool_result) antes de llegar acá. Esta pasada, la que
-            // se cortó, no llegó a pedir nada todavía.
             return Ok(AgentTurnResult::Interrupted {
                 spoken_so_far: out.spoken_text,
             });
@@ -143,9 +144,8 @@ async fn turn_loop(
             out.tool_calls.clone(),
         ));
 
-        // Si el modelo pidió herramientas sin decir nada en su primera
-        // pasada, Jarvis avisa con una frase enlatada para no dejar un
-        // silencio muerto mientras ejecuta.
+        // Si el modelo pidió herramientas sin decir nada en su primera pasada,
+        // Jarvis avisa con una frase enlatada para no dejar un silencio muerto mientras ejecuta.
         if iterations == 1 && out.spoken_text.trim().is_empty() {
             let filler = ctx
                 .config
@@ -204,7 +204,10 @@ async fn process_queue(
             history.push(ChatMessage::tool_result(
                 &call.id,
                 &call.name,
-                format!("Error: no existe ninguna herramienta llamada '{}'.", call.name),
+                format!(
+                    "Error: no existe ninguna herramienta llamada '{}'.",
+                    call.name
+                ),
             ));
             continue;
         };
@@ -218,7 +221,7 @@ async fn process_queue(
                 let requires_code = risk == RiskLevel::Code;
                 let spoken_question = if requires_code {
                     format!(
-                        "Señor, la acción de {action} es de alto riesgo. Diga el código de \
+                        "Señor, la acción de {action} necesita aprobacion. Diga el código de \
                          aceptación de riesgos para proceder, o diga no para cancelar."
                     )
                 } else {
@@ -249,13 +252,19 @@ pub async fn execute_and_record(
     let mut succeeded = false;
     let (result, images) = match registry.get(&call.name) {
         None => (
-            format!("Error: no existe ninguna herramienta llamada '{}'.", call.name),
+            format!(
+                "Error: no existe ninguna herramienta llamada '{}'.",
+                call.name
+            ),
             Vec::new(),
         ),
         Some(tool) => {
             let fut = tool.execute(call.arguments.clone());
             match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), fut).await {
-                Err(_) => (format!("Error: {}", ToolError::Timeout(timeout_secs)), Vec::new()),
+                Err(_) => (
+                    format!("Error: {}", ToolError::Timeout(timeout_secs)),
+                    Vec::new(),
+                ),
                 Ok(Err(e)) => (format!("Error: {e}"), Vec::new()),
                 Ok(Ok(output)) => {
                     succeeded = true;

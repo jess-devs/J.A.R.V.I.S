@@ -54,9 +54,18 @@ impl WorkerHandle {
                 source,
             })?;
 
-        let stdin = child.stdin.take().expect("stdin fue pedido con Stdio::piped()");
-        let stdout = child.stdout.take().expect("stdout fue pedido con Stdio::piped()");
-        let stderr = child.stderr.take().expect("stderr fue pedido con Stdio::piped()");
+        let stdin = child
+            .stdin
+            .take()
+            .expect("stdin fue pedido con Stdio::piped()");
+        let stdout = child
+            .stdout
+            .take()
+            .expect("stdout fue pedido con Stdio::piped()");
+        let stderr = child
+            .stderr
+            .take()
+            .expect("stderr fue pedido con Stdio::piped()");
 
         let (frame_tx, frame_rx) = mpsc::channel::<WorkerFrame>(64);
         let died = Arc::new(AtomicBool::new(false));

@@ -54,7 +54,10 @@ pub async fn run_powershell_command(command: &str) -> Result<String, ToolError> 
         result = if output.status.success() {
             "Comando ejecutado sin salida.".to_string()
         } else {
-            format!("El comando falló (código {:?}) sin salida.", output.status.code())
+            format!(
+                "El comando falló (código {:?}) sin salida.",
+                output.status.code()
+            )
         };
     }
     Ok(result)

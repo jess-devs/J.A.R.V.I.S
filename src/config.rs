@@ -656,8 +656,18 @@ impl Default for AgentConfig {
             ],
             disabled_tools: Vec::new(),
             confirm_yes: [
-                "sí", "si", "claro", "adelante", "hazlo", "confirmo", "dale", "por supuesto",
-                "sí señor", "procede", "afirmativo", "correcto",
+                "sí",
+                "si",
+                "claro",
+                "adelante",
+                "hazlo",
+                "confirmo",
+                "dale",
+                "por supuesto",
+                "sí señor",
+                "procede",
+                "afirmativo",
+                "correcto",
             ]
             .map(String::from)
             .to_vec(),

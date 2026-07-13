@@ -204,8 +204,7 @@ impl Tool for WebSearch {
         let query = required_str(&args, "query")?;
         let max = self.cfg.max_results;
 
-        let encoded: String =
-            url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
+        let encoded: String = url::form_urlencoded::byte_serialize(query.as_bytes()).collect();
         let html_url = format!("https://html.duckduckgo.com/html/?q={encoded}");
         let body = self.get_body(&html_url).await?;
         let hits = parse_ddg_html(&body, max);

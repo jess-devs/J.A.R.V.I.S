@@ -66,7 +66,9 @@ pub enum SttInMessage {
     /// Solo lo entiende el motor nativo (ver `crate::stt::SttMode`); el
     /// camino `realtimestt` lo ignora silenciosamente si llegara a mandarse
     /// (Rust no lo hace: ver `Orchestrator::begin_speaking`/`end_speaking`).
-    SetMode { mode: String },
+    SetMode {
+        mode: String,
+    },
     Shutdown,
 }
 

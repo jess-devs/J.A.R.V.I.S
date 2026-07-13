@@ -26,12 +26,12 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use serde_json::Value;
 
+use self::scripted_store::ScriptedToolStore;
 use crate::config::{AgentConfig, ScriptedToolsConfig};
 use crate::errors::ToolError;
 use crate::llm::{ImageBlock, ToolSpec};
 use crate::memory::MemoryStore;
 use crate::reminders::ReminderStore;
-use self::scripted_store::ScriptedToolStore;
 
 /// Cuánto peligro implica ejecutar una herramienta con ciertos argumentos.
 /// Se evalúa de forma determinista en Rust — nunca lo decide el LLM.
@@ -145,8 +145,12 @@ impl ToolRegistry {
                 reminder_store.clone(),
                 &cfg.reminders,
             )));
-            static_tools.push(Arc::new(reminders::ListReminders::new(reminder_store.clone())));
-            static_tools.push(Arc::new(reminders::CancelReminder::new(reminder_store.clone())));
+            static_tools.push(Arc::new(reminders::ListReminders::new(
+                reminder_store.clone(),
+            )));
+            static_tools.push(Arc::new(reminders::CancelReminder::new(
+                reminder_store.clone(),
+            )));
             static_tools.push(Arc::new(screen::TakeScreenshot));
             static_tools.push(Arc::new(screen::MouseMove));
             static_tools.push(Arc::new(screen::MouseClick));
@@ -155,15 +159,23 @@ impl ToolRegistry {
                 scripted_store.clone(),
                 &cfg.scripted_tools,
             )));
-            static_tools.push(Arc::new(scripted::ListCustomTools::new(scripted_store.clone())));
-            static_tools.push(Arc::new(scripted::DeleteCustomTool::new(scripted_store.clone())));
+            static_tools.push(Arc::new(scripted::ListCustomTools::new(
+                scripted_store.clone(),
+            )));
+            static_tools.push(Arc::new(scripted::DeleteCustomTool::new(
+                scripted_store.clone(),
+            )));
         }
 
         let registry = Self {
             tools: RwLock::new(Vec::new()),
             specs: RwLock::new(Arc::new(Vec::new())),
             static_tools,
-            scripted_store: if cfg.enabled { Some(scripted_store) } else { None },
+            scripted_store: if cfg.enabled {
+                Some(scripted_store)
+            } else {
+                None
+            },
             scripted_cfg: cfg.scripted_tools.clone(),
             disabled_tools: cfg.disabled_tools.clone(),
             max_result_chars: cfg.max_tool_result_chars,
@@ -183,7 +195,10 @@ impl ToolRegistry {
         let mut tools = self.static_tools.clone();
         if let Some(store) = &self.scripted_store {
             for def in store.list().await? {
-                tools.push(Arc::new(scripted::ScriptedTool::new(def, &self.scripted_cfg)));
+                tools.push(Arc::new(scripted::ScriptedTool::new(
+                    def,
+                    &self.scripted_cfg,
+                )));
             }
         }
         tools.retain(|t| !self.disabled_tools.iter().any(|d| d == t.name()));
@@ -207,7 +222,12 @@ impl ToolRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.read().unwrap().iter().find(|t| t.name() == name).cloned()
+        self.tools
+            .read()
+            .unwrap()
+            .iter()
+            .find(|t| t.name() == name)
+            .cloned()
     }
 
     pub fn is_empty(&self) -> bool {

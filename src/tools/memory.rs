@@ -125,7 +125,10 @@ impl Tool for Recall {
                 .as_deref()
                 .map(|c| format!(" [{c}]"))
                 .unwrap_or_default();
-            out.push_str(&format!("- {}{cat} (guardado: {})\n", m.content, m.created_at));
+            out.push_str(&format!(
+                "- {}{cat} (guardado: {})\n",
+                m.content, m.created_at
+            ));
         }
         Ok(ToolOutput::text(out))
     }

@@ -1,18 +1,13 @@
-//! Reproducción de audio no bloqueante: un ring buffer SPSC (`ringbuf`) hace
-//! de puente entre las tareas async que producen audio (el pipeline de
-//! streaming) y el callback en tiempo real de `cpal`, que corre en su propio
-//! hilo dedicado y nunca debe bloquearse esperando al runtime de tokio.
-//!
-//! El stream de salida se construye una sola vez, al arrancar, usando la
-//! configuración *nativa* que reporta el dispositivo (`default_output_config`)
-//! — no la del audio de Piper. En Windows, WASAPI en modo compartido no
-//! resamplea ni remezcla canales por vos: dispositivos comunes (salidas
-//! virtuales de auriculares gaming, HDMI, etc.) exigen un sample rate y una
-//! cantidad de canales específicos (ej. 96 kHz / 8 canales), y pedir un
-//! stream mono a 22050 Hz ahí falla con "Stream configuration is not
-//! supported in shared mode". Por eso cada chunk se resamplea (interpolación
-//! lineal) y se remezcla (mono -> N canales) al formato del dispositivo antes
-//! de empujarlo al ring buffer.
+// El audio se reproduce sin bloquear la interfaz.
+// Hay dos mundos separados: las tareas que generan el sonido (asíncronas)
+// y el sistema de audio del dispositivo (que no puede esperar).
+// Se comunican a través de un "tubo" (ringbuf) que permite pasar los datos sin detener a ninguno.
+
+// Al iniciar el programa se abre el dispositivo de audio con su configuración original (la que el propio Windows da por defecto).
+// No se usa la del audio de Piper, porque en Windows WASAPI compartido no convierte formatos por ti:
+// si el dispositivo pide 96 kHz y 8 canales, tienes que darle justo eso.
+// Por eso, antes de enviar el sonido por el tubo, se ajusta la frecuencia (remuestreo)
+// y se duplican los canales (de mono a los que necesite el dispositivo).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -26,8 +21,6 @@ use ringbuf::HeapRb;
 use crate::errors::AudioError;
 use crate::tts::AudioChunk;
 
-/// ~2s de margen al sample rate/canales de salida — de sobra para el patrón
-/// de uso (frases cortas sintetizadas y reproducidas casi de inmediato).
 const RING_BUFFER_SECONDS: usize = 2;
 
 pub struct AudioPlayer {
@@ -36,10 +29,6 @@ pub struct AudioPlayer {
     output_channels: u16,
     producer: HeapProd<f32>,
     drain_timeout: Duration,
-    /// Compartido con el callback de cpal: `stop()` la arma, y el callback
-    /// (en su próxima invocación, unos pocos milisegundos después) descarta
-    /// todo lo que quede en el ring buffer. No hay locks en el hilo de
-    /// tiempo real — solo esta bandera atómica.
     stop_flag: Arc<AtomicBool>,
     _stream: cpal::Stream,
 }
@@ -91,10 +80,6 @@ impl AudioPlayer {
                 config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     if stop_flag_cb.swap(false, Ordering::AcqRel) {
-                        // Interrupción: descarta todo el audio que ya
-                        // estaba encolado (hasta RING_BUFFER_SECONDS), para
-                        // que el corte se escuche de inmediato en vez de
-                        // seguir hablando con lo que ya estaba en el buffer.
                         let mut scratch = [0.0f32; 1024];
                         while consumer.pop_slice(&mut scratch) > 0 {}
                     }
@@ -139,12 +124,12 @@ impl AudioPlayer {
     }
 
     /// Resamplea/remezcla el chunk al formato nativo del dispositivo y lo
-    /// empuja al ring buffer. No bloquea esperando a que termine de sonar —
+    /// empuja al ring buffer. No bloquea esperando a que termine de sonar
     /// solo espera si el buffer está lleno (backpressure).
     ///
     /// Lleva un `timeout`: sin él, un dispositivo de salida colgado (stream
     /// suspendido por el SO, driver caído) dejaría este loop esperando para
-    /// siempre justo antes de reactivar el micrófono — el callback de error
+    /// siempre justo antes de reactivar el micrófono, el callback de error
     /// de `cpal` (línea de `build_output_stream` arriba) solo loguea, no
     /// desbloquea nada.
     pub async fn play_chunk(&mut self, chunk: &AudioChunk) -> Result<(), AudioError> {
@@ -178,11 +163,6 @@ impl AudioPlayer {
     /// de reproducirse, con un margen residual de la latencia física de la
     /// tarjeta de sonido). Ver nota de timeout en `play_chunk`.
     pub async fn wait_until_drained(&self) -> Result<(), AudioError> {
-        // Poll de 10ms en vez de notificación desde el callback de cpal:
-        // `Notify::notify_one` toma un lock de waiters y puede invocar el
-        // waker de tokio, y el callback de audio (hilo de tiempo real) no
-        // debe bloquearse esperando al runtime. El desperdicio medio es
-        // ~5ms una vez por turno, con coste de CPU despreciable.
         let drain = async {
             while !self.producer.is_empty() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -212,7 +192,7 @@ fn pcm_i16_to_mono_f32(pcm: &[u8], channels: u16, volume: f32) -> Vec<f32> {
         .collect()
 }
 
-/// Resampling por interpolación lineal. Suficiente para voz a esta escala —
+/// Resampling por interpolación lineal. Suficiente para voz a esta escala,
 /// un resampler con banda limitada (ej. crate `rubato`) sería mejor
 /// fidelidad, pero es una dependencia extra que no hace falta para el MVP.
 fn resample_linear(input: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f32> {

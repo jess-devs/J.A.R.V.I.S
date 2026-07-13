@@ -98,7 +98,9 @@ impl Orchestrator {
         let gate = AttentionGate::new(config.wake.clone());
         let memory = Arc::new(MemoryStore::open(&config.agent.memory.db_path)?);
         let reminder_store = Arc::new(ReminderStore::open(&config.agent.reminders.db_path)?);
-        let scripted_store = Arc::new(ScriptedToolStore::open(&config.agent.scripted_tools.db_path)?);
+        let scripted_store = Arc::new(ScriptedToolStore::open(
+            &config.agent.scripted_tools.db_path,
+        )?);
         let registry = ToolRegistry::build(
             &config.agent,
             memory.clone(),
@@ -106,7 +108,9 @@ impl Orchestrator {
             scripted_store,
         )
         .await;
-        let echo_gate = Arc::new(Mutex::new(EchoGate::new(config.barge_in.echo_guard.clone())));
+        let echo_gate = Arc::new(Mutex::new(EchoGate::new(
+            config.barge_in.echo_guard.clone(),
+        )));
 
         let (reminder_tx, reminder_rx) = tokio::sync::mpsc::channel(16);
         tokio::spawn(reminders::run_poller(
@@ -268,7 +272,12 @@ impl Orchestrator {
     async fn speak_reminder(&mut self, due: &DueReminder) {
         tracing::info!(id = due.id, text = %due.text, "recordatorio vencido");
         self.begin_speaking().await;
-        agent::speak(&self.tts, &mut self.player, &format!("Recordatorio, señor: {}", due.text)).await;
+        agent::speak(
+            &self.tts,
+            &mut self.player,
+            &format!("Recordatorio, señor: {}", due.text),
+        )
+        .await;
         self.end_speaking().await;
     }
 
@@ -291,9 +300,12 @@ impl Orchestrator {
             maximo = self.config.workers.max_restarts,
             "el worker de STT se cayó o quedó colgado; reiniciándolo"
         );
-        self.stt =
-            SttWorker::spawn(&self.config.workers, &self.config.stt, &self.config.barge_in)
-                .await?;
+        self.stt = SttWorker::spawn(
+            &self.config.workers,
+            &self.config.stt,
+            &self.config.barge_in,
+        )
+        .await?;
         tracing::info!("worker de STT reiniciado, Jarvis sigue escuchando");
         Ok(())
     }
@@ -448,7 +460,8 @@ impl Orchestrator {
                         spoken_so_far: out.spoken_text,
                     }
                 } else {
-                    self.history.push(ChatMessage::assistant(out.spoken_text.clone()));
+                    self.history
+                        .push(ChatMessage::assistant(out.spoken_text.clone()));
                     AgentTurnResult::Completed {
                         final_text: out.spoken_text,
                     }
@@ -524,7 +537,8 @@ impl Orchestrator {
                 spoken_so_far: out.spoken_text,
             });
         }
-        self.history.push(ChatMessage::assistant(out.spoken_text.clone()));
+        self.history
+            .push(ChatMessage::assistant(out.spoken_text.clone()));
         Ok(AgentTurnResult::Completed {
             final_text: out.spoken_text,
         })
@@ -576,7 +590,10 @@ impl Orchestrator {
     ) {
         if Instant::now() > deadline {
             tracing::info!("la confirmación expiró; se cancela la acción pendiente");
-            self.cancel_pending(pending, "El usuario no respondió a tiempo; la acción fue cancelada.");
+            self.cancel_pending(
+                pending,
+                "El usuario no respondió a tiempo; la acción fue cancelada.",
+            );
             // La frase que llegó tarde se procesa como una petición normal.
             self.dispatch_by_gate(text).await;
             return;
@@ -606,7 +623,10 @@ impl Orchestrator {
                     self.cancel_and_acknowledge(pending).await;
                 }
                 CodeDecision::Unrelated => {
-                    self.cancel_pending(pending, "El usuario cambió de tema; la acción fue cancelada.");
+                    self.cancel_pending(
+                        pending,
+                        "El usuario cambió de tema; la acción fue cancelada.",
+                    );
                     self.handle_utterance(text).await;
                 }
             }
@@ -620,7 +640,10 @@ impl Orchestrator {
                     self.cancel_and_acknowledge(pending).await;
                 }
                 ConfirmDecision::Unrelated => {
-                    self.cancel_pending(pending, "El usuario cambió de tema; la acción fue cancelada.");
+                    self.cancel_pending(
+                        pending,
+                        "El usuario cambió de tema; la acción fue cancelada.",
+                    );
                     self.handle_utterance(text).await;
                 }
             }
@@ -720,9 +743,8 @@ impl Orchestrator {
                     content.push_str(&format!("\n- {}", m.content));
                 }
                 if memories.len() >= max {
-                    content.push_str(
-                        "\n(Si necesitas algo más antiguo, usa la herramienta recall.)",
-                    );
+                    content
+                        .push_str("\n(Si necesitas algo más antiguo, usa la herramienta recall.)");
                 }
             }
             Ok(_) => {}

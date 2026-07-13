@@ -176,7 +176,9 @@ fn check_input_device_present(config: &Config) -> std::result::Result<(), String
                     ),
                     None => String::new(),
                 };
-                Err(format!("no se detectó ningún micrófono en el sistema{hint}"))
+                Err(format!(
+                    "no se detectó ningún micrófono en el sistema{hint}"
+                ))
             }
         }
         Err(e) => Err(format!("no se pudo enumerar dispositivos de audio: {e}")),

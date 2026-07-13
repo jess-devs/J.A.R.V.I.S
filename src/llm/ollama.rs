@@ -153,7 +153,11 @@ impl LlmProvider for OllamaProvider {
                     })
                     .collect(),
                 tool_name: m.tool_name.as_deref(),
-                images: m.images.iter().map(|img| img.base64_data.as_str()).collect(),
+                images: m
+                    .images
+                    .iter()
+                    .map(|img| img.base64_data.as_str())
+                    .collect(),
             })
             .collect();
         let body = OllamaChatRequest {
@@ -223,7 +227,9 @@ impl LlmProvider for OllamaProvider {
                 let parsed: OllamaChatChunk = match serde_json::from_str(&line) {
                     Ok(p) => p,
                     Err(e) => {
-                        let _ = tx.send(Err(LlmError::UnexpectedResponse(e.to_string()))).await;
+                        let _ = tx
+                            .send(Err(LlmError::UnexpectedResponse(e.to_string())))
+                            .await;
                         continue;
                     }
                 };

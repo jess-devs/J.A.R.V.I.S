@@ -59,11 +59,7 @@ impl MemoryStore {
         self.generation.load(Ordering::Relaxed)
     }
 
-    pub async fn remember(
-        &self,
-        content: &str,
-        category: Option<&str>,
-    ) -> Result<i64, ToolError> {
+    pub async fn remember(&self, content: &str, category: Option<&str>) -> Result<i64, ToolError> {
         let conn = self.conn.lock().await;
         conn.execute(
             "INSERT INTO memories (content, category) VALUES (?1, ?2)",
@@ -173,9 +169,12 @@ mod tests {
     #[tokio::test]
     async fn guarda_y_recupera() {
         let s = store().await;
-        s.remember("el cumpleaños del usuario es el 3 de marzo", Some("personal"))
-            .await
-            .unwrap();
+        s.remember(
+            "el cumpleaños del usuario es el 3 de marzo",
+            Some("personal"),
+        )
+        .await
+        .unwrap();
         let found = s.recall("cumpleaños marzo", 10).await.unwrap();
         assert_eq!(found.len(), 1);
         assert!(found[0].content.contains("3 de marzo"));
@@ -184,7 +183,9 @@ mod tests {
     #[tokio::test]
     async fn recall_sin_match() {
         let s = store().await;
-        s.remember("le gusta el café sin azúcar", None).await.unwrap();
+        s.remember("le gusta el café sin azúcar", None)
+            .await
+            .unwrap();
         assert!(s.recall("mascota perro", 10).await.unwrap().is_empty());
     }
 

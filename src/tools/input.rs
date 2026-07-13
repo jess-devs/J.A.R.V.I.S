@@ -36,19 +36,20 @@ pub async fn click_mouse(button: MouseButton) -> Result<(), ToolError> {
             MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP),
         };
 
-        let mk_input = |flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS| INPUT {
-            r#type: INPUT_MOUSE,
-            Anonymous: INPUT_0 {
-                mi: MOUSEINPUT {
-                    dx: 0,
-                    dy: 0,
-                    mouseData: 0,
-                    dwFlags: flags,
-                    time: 0,
-                    dwExtraInfo: 0,
+        let mk_input =
+            |flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS| INPUT {
+                r#type: INPUT_MOUSE,
+                Anonymous: INPUT_0 {
+                    mi: MOUSEINPUT {
+                        dx: 0,
+                        dy: 0,
+                        mouseData: 0,
+                        dwFlags: flags,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
                 },
-            },
-        };
+            };
         let inputs = [mk_input(down_flag), mk_input(up_flag)];
         let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
         if sent as usize != inputs.len() {

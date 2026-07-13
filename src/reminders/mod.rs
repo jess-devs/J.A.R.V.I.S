@@ -57,7 +57,12 @@ impl ReminderStore {
         })
     }
 
-    pub async fn create(&self, text: &str, trigger_at: &str, max_active: usize) -> Result<i64, ToolError> {
+    pub async fn create(
+        &self,
+        text: &str,
+        trigger_at: &str,
+        max_active: usize,
+    ) -> Result<i64, ToolError> {
         let conn = self.conn.lock().await;
         let active: i64 = conn
             .query_row(
@@ -150,7 +155,11 @@ impl ReminderStore {
 /// Tarea en segundo plano: cada `poll_interval` revisa recordatorios
 /// vencidos, los marca como disparados y los envía por `tx`. Si el receptor
 /// se cerró (el orquestador terminó), la tarea simplemente termina.
-pub async fn run_poller(store: Arc<ReminderStore>, tx: mpsc::Sender<DueReminder>, poll_interval: Duration) {
+pub async fn run_poller(
+    store: Arc<ReminderStore>,
+    tx: mpsc::Sender<DueReminder>,
+    poll_interval: Duration,
+) {
     let mut interval = tokio::time::interval(poll_interval);
     loop {
         interval.tick().await;

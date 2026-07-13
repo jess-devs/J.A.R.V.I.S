@@ -45,8 +45,6 @@ impl OpenAiCompatibleProvider {
         let client = crate::http::client(Duration::from_secs(request_timeout_secs));
         Ok(Self {
             client,
-            // Tolera un base_url con "/" final (común al copiarlo de la UI
-            // de LM Studio) para no generar "//chat/completions".
             base_url: base_url.into().trim_end_matches('/').to_string(),
             model: model.into(),
             api_key_env,
@@ -57,7 +55,6 @@ impl OpenAiCompatibleProvider {
 #[derive(Serialize)]
 struct RequestFunctionCall {
     name: String,
-    /// OpenAI espera los arguments como string JSON, no como objeto.
     arguments: String,
 }
 
@@ -72,8 +69,6 @@ struct RequestToolCall {
 #[derive(Serialize)]
 struct ChatCompletionMessage<'a> {
     role: &'a str,
-    /// Texto plano en el caso común; array de bloques `text`/`image_url`
-    /// (formato OpenAI) cuando el mensaje trae imágenes adjuntas.
     content: serde_json::Value,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tool_calls: Vec<RequestToolCall>,
@@ -209,9 +204,9 @@ impl LlmProvider for OpenAiCompatibleProvider {
         tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
     ) -> Result<(), LlmError> {
         let api_key = match &self.api_key_env {
-            Some(env) => Some(
-                std::env::var(env).map_err(|_| LlmError::MissingApiKey(env.clone()))?,
-            ),
+            Some(env) => {
+                Some(std::env::var(env).map_err(|_| LlmError::MissingApiKey(env.clone()))?)
+            }
             None => None,
         };
 
@@ -275,8 +270,6 @@ impl LlmProvider for OpenAiCompatibleProvider {
         let mut decoder = Utf8StreamDecoder::new();
         let mut partial_calls: BTreeMap<u32, PartialCall> = BTreeMap::new();
 
-        // Emite los tool calls acumulados y el Done final. Se llama al ver
-        // `[DONE]` (o al agotarse el stream, por robustez).
         async fn finish(
             partials: BTreeMap<u32, PartialCall>,
             tx: &mpsc::Sender<Result<LlmEvent, LlmError>>,

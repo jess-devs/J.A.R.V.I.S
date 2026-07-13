@@ -205,8 +205,9 @@ impl CartesiaProvider {
             language,
         };
 
-        let req_json = serde_json::to_string(&req)
-            .map_err(|e| TtsError::UnexpectedResponse(format!("error serializando request: {e}")))?;
+        let req_json = serde_json::to_string(&req).map_err(|e| {
+            TtsError::UnexpectedResponse(format!("error serializando request: {e}"))
+        })?;
 
         write
             .send(Message::Text(req_json.into()))
@@ -216,17 +217,13 @@ impl CartesiaProvider {
         let mut audio_bytes = Vec::new();
 
         while let Some(msg) = read.next().await {
-            let msg = msg.map_err(|e| {
-                TtsError::UnexpectedResponse(format!("error recibiendo WS: {e}"))
-            })?;
+            let msg =
+                msg.map_err(|e| TtsError::UnexpectedResponse(format!("error recibiendo WS: {e}")))?;
             match msg {
                 Message::Text(text) => {
-                    let parsed: WsChunkMessage = serde_json::from_str(&text)
-                        .map_err(|e| {
-                            TtsError::UnexpectedResponse(format!(
-                                "mensaje WS inesperado: {e}: {text}"
-                            ))
-                        })?;
+                    let parsed: WsChunkMessage = serde_json::from_str(&text).map_err(|e| {
+                        TtsError::UnexpectedResponse(format!("mensaje WS inesperado: {e}: {text}"))
+                    })?;
 
                     match parsed.msg_type.as_str() {
                         "chunk" => {

@@ -21,13 +21,14 @@ where
 {
     tokio::task::spawn_blocking(move || {
         use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
-        use windows::Win32::Media::Audio::{eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator};
+        use windows::Win32::Media::Audio::{
+            eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator,
+        };
         use windows::Win32::System::Com::{
             CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED,
         };
 
         unsafe {
-            // Puede devolver S_FALSE si el hilo ya estaba inicializado; da igual.
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let enumerator: IMMDeviceEnumerator =
                 CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
@@ -115,7 +116,6 @@ impl Tool for SetVolume {
     }
 
     fn assess_risk(&self, _args: &Value) -> RiskLevel {
-        // Reversible al instante: no vale la pena una confirmación.
         RiskLevel::Safe
     }
 

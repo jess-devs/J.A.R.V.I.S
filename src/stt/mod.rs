@@ -11,7 +11,9 @@ use crate::config::{BargeInConfig, SttConfig, WorkersConfig};
 use crate::errors::WorkerError;
 use crate::ipc::{WorkerFrame, WorkerHandle};
 
-pub use protocol::{BargeInInit, FiltersInit, SttInMessage, SttOutMessage, TranscriptMeta, VadInit};
+pub use protocol::{
+    BargeInInit, FiltersInit, SttInMessage, SttOutMessage, TranscriptMeta, VadInit,
+};
 
 pub enum SttEvent {
     Transcript {
@@ -27,12 +29,16 @@ pub enum SttEvent {
     /// Solo con `engine: native`. En esta fase no dispara ninguna acción.
     VadStart,
     /// Solo con `engine: native`. En esta fase no dispara ninguna acción.
-    VadEnd { speech_ms: Option<u32> },
+    VadEnd {
+        speech_ms: Option<u32>,
+    },
     /// Voz sostenida durante `barge_in.min_speech_ms` mientras Jarvis habla
     /// (solo `engine: native`, solo si `barge_in.enabled`).
     SpeechConfirmed,
     /// Solo con `engine: native`: audio descartado antes o después de transcribir.
-    Discarded { reason: String },
+    Discarded {
+        reason: String,
+    },
     WorkerDied,
 }
 

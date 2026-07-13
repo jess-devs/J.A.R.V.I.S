@@ -4,7 +4,9 @@
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt,
+};
 
 /// Lee una línea NDJSON y la parsea como `T`. `Ok(None)` significa EOF (el
 /// worker cerró stdout, típicamente porque el proceso terminó).

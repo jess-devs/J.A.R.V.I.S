@@ -14,9 +14,7 @@ use std::sync::Arc;
 use crate::audio::AudioPlayer;
 use crate::tts::TtsProvider;
 
-/// Sintetiza y reproduce una frase fuera del pipeline de streaming (fillers,
-/// preguntas de confirmación, acuses). Best-effort: un fallo de TTS se
-/// loguea pero no aborta el turno.
+/// Sintetiza y reproduce una frase fuera del pipeline de streaming (fillers, preguntas de confirmación).
 pub async fn speak(tts: &Arc<dyn TtsProvider>, player: &mut AudioPlayer, text: &str) {
     match tts.synthesize(text).await {
         Ok(chunk) => {
