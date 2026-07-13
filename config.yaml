@@ -47,7 +47,7 @@ stt:
   beam_size: null # null = automático (5 en GPU / calibración en CPU)
   cpu_threads: null # null = automático (~núcleos físicos)
   initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis." # ayuda a Whisper con el nombre
-  recalibrate: true # true = ignora el caché y vuelve a medir en este arranque
+  recalibrate: false # true = ignora el caché y vuelve a medir en este arranque
   # Claves siguientes solo para engine: realtimestt (native usa stt.vad/stt.filters)
   silero_sensitivity: 0.4 # sensibilidad VAD Silero (0-1)
   webrtc_sensitivity: 3 # sensibilidad VAD WebRTC (0-3)
@@ -58,7 +58,7 @@ stt:
   stuck_state_timeout_secs: 30 # reinicia el worker si queda trabado más de esto
 
 wake:
-  enabled: false # false = sin gate, Jarvis responde a todo
+  enabled: true # false = sin gate, Jarvis responde a todo
   words: ["jarvis"] # normalizadas (sin tildes), tolerancia a 1 letra de error
   attention_window_secs: 25 # tras responder, sigue atento sin necesidad del nombre
   window_min_words: 2 # dentro de la ventana, ignora frases más cortas sin el nombre (1 = sin filtro)
@@ -90,7 +90,7 @@ llm:
   # api_key_env es el NOMBRE de la variable de entorno con la key (ver .env.example), no la key en sí
   ollama:
     base_url: "http://localhost:11434"
-    model: "qwen3.5:0.8b" # auto | nombre fijo (ej. "qwen2.5:7b")
+    model: "qwen3.5:4b" # auto | nombre fijo (ej. "qwen2.5:7b")
     # "auto" detecta VRAM/RAM en cada arranque y elige un modelo qwen acorde;
     # si no está descargado, Jarvis avisa el "ollama pull" pero no lo baja solo.
     think: null # null = no envía el campo (qwen2.5 lo rechaza); false para qwen3/deepseek-r1
