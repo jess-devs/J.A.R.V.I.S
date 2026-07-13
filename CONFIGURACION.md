@@ -297,6 +297,7 @@ señor?"), o código de aceptación para acciones de riesgo extremo.
 | `max_iterations` | Máximo de pasadas LLM↔herramientas por turno; al agotarse, Jarvis responde igual con lo que ya tenga en vez de seguir encadenando llamadas. |
 | `tool_timeout_secs` | Si una herramienta tarda más que esto, se cancela y el LLM recibe un error como resultado (para que se disculpe o reintente). |
 | `confirm_timeout_secs` | Tiempo para responder sí/no (o el código) antes de que la acción pendiente se cancele sola. |
+| `confirm_mode` | `always` (default) = pide confirmación de voz para cada acción de riesgo `Confirm` | `free` = mano libre, las ejecuta directo sin preguntar. Las acciones de riesgo `Code` (extremo) **siempre** piden el código de aceptación, en cualquier modo — no se puede desactivar por config. |
 | `max_tool_result_chars` | Truncado del resultado de cada herramienta antes de pasarlo al LLM, evita gastar contexto en salidas larguísimas (listados de procesos, páginas web enteras). |
 | `filler_phrases` | Se dice una al azar mientras ejecuta una herramienta, solo si el modelo no dijo nada en su primera pasada, para no dejar un silencio muerto. |
 | `disabled_tools` | Nombres de herramientas a excluir por completo, ej. `["run_powershell"]`. |

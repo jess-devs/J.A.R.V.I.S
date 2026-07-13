@@ -174,6 +174,8 @@ Cuando `agent.enabled: true` (el default), Jarvis dispone de un conjunto de herr
 - **Confirmación**: acciones que modifican el sistema. Jarvis pregunta "¿Confirma, señor?" y espera un sí/no por voz.
 - **Código**: acciones de riesgo extremo (borrado recursivo, apagado, cambios en el registro, crear una tool personalizada nueva, etc.). Jarvis describe el riesgo y exige que **pronuncies el código de aceptación** (`agent.risk_code`, por defecto `0201`,cámbialo). El código se verifica en Rust y nunca se pasa al LLM, así que el modelo no puede auto-confirmarse ni revelarlo. Un intento; si es incorrecto, se cancela.
 
+Con `agent.confirm_mode: free` ("mano libre"), las acciones de riesgo **Confirmación** se ejecutan directo, sin preguntar. Las de riesgo **Código** siempre piden el código de aceptación, en cualquier modo — es la red de seguridad final y no se puede desactivar por config.
+
 La memoria persistente vive en `data/memory.db`. Las memorias recientes se inyectan en el prompt de cada turno, así que Jarvis "recuerda" sin necesitar `recall` para lo habitual. Ejemplo: decile "recuerda que mi cumpleaños es el 3 de marzo", reiniciá Jarvis, y preguntá "¿cuándo es mi cumpleaños?".
 
 Para búsqueda de archivos instantánea sobre todo el disco, instalá [Everything](https://www.voidtools.com/) y apuntá `agent.files.everything_cli` a `es.exe`; si no, se usa un recorrido acotado de las carpetas en `agent.files.search_roots`.

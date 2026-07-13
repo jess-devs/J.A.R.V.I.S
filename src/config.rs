@@ -637,6 +637,22 @@ impl Default for AudioConfig {
     }
 }
 
+/// Cuánta confirmación por voz exige Jarvis para las acciones de riesgo
+/// `Confirm` (las de riesgo `Code` piden el código de aceptación siempre,
+/// en ambos modos: es la red de seguridad final y no se puede desactivar).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmMode {
+    /// Pide un "sí"/"no" por voz para cada acción de riesgo `Confirm`
+    /// (cerrar apps, capturas de pantalla, clicks, borrar recordatorios o
+    /// memorias, etc.). Comportamiento clásico.
+    #[default]
+    Always,
+    /// "Mano libre": las acciones de riesgo `Confirm` se ejecutan directo,
+    /// sin preguntar, igual que las de riesgo `Safe`.
+    Free,
+}
+
 /// Capa agéntica: herramientas que Jarvis puede ejecutar (consultar el
 /// sistema, controlar la PC, etc.) con confirmación por voz para acciones
 /// riesgosas.
@@ -651,6 +667,10 @@ pub struct AgentConfig {
     /// Segundos que Jarvis espera un "sí"/"no" (o el código) tras pedir
     /// confirmación antes de cancelar la acción.
     pub confirm_timeout_secs: u64,
+    /// `always` = pide confirmación de voz para acciones de riesgo
+    /// `Confirm` (default) | `free` = las ejecuta sin preguntar. Las de
+    /// riesgo `Code` (extremo) siempre piden el código, en cualquier modo.
+    pub confirm_mode: ConfirmMode,
     /// Truncado de cada resultado de herramienta antes de dárselo al LLM.
     pub max_tool_result_chars: usize,
     /// Frases enlatadas que Jarvis dice mientras ejecuta herramientas si el
@@ -683,6 +703,7 @@ impl Default for AgentConfig {
             max_iterations: 6,
             tool_timeout_secs: 20,
             confirm_timeout_secs: 30,
+            confirm_mode: ConfirmMode::default(),
             max_tool_result_chars: 3000,
             filler_phrases: vec![
                 "Déjame revisar, señor.".to_string(),

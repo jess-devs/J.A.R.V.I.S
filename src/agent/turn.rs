@@ -13,7 +13,7 @@ use rand::seq::SliceRandom;
 use tokio_util::sync::CancellationToken;
 
 use crate::audio::AudioPlayer;
-use crate::config::Config;
+use crate::config::{Config, ConfirmMode};
 use crate::echo_gate::EchoGate;
 use crate::errors::{JarvisError, ToolError};
 use crate::llm::{ChatMessage, LlmProvider, ToolCallRequest};
@@ -214,6 +214,12 @@ async fn process_queue(
 
         match tool.assess_risk(&call.arguments) {
             RiskLevel::Safe => {
+                execute_and_record(ctx.registry, ctx.config, history, &call).await;
+            }
+            RiskLevel::Confirm if ctx.config.agent.confirm_mode == ConfirmMode::Free => {
+                // Mano libre: riesgo `Confirm` se ejecuta directo. `Code`
+                // (riesgo extremo) nunca entra por acá, sigue pidiendo
+                // siempre el código de aceptación.
                 execute_and_record(ctx.registry, ctx.config, history, &call).await;
             }
             risk => {

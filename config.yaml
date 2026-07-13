@@ -209,6 +209,7 @@ agent:
   max_iterations: 6 # máximo de pasadas LLM->herramientas por turno
   tool_timeout_secs: 20 # cancela la herramienta y devuelve error al LLM si tarda más
   confirm_timeout_secs: 30 # tiempo para responder sí/no antes de cancelar
+  confirm_mode: always # always = pide confirmación de voz para acciones de riesgo normal (cerrar apps, capturas, clicks, borrar recordatorio/memoria...) | free = mano libre, las ejecuta sin preguntar. Las de riesgo extremo (borrado recursivo, apagado, registro) SIEMPRE piden el código de aceptación, en cualquier modo
   max_tool_result_chars: 3000 # truncado de cada resultado antes de pasarlo al LLM
   filler_phrases: # se dice una al azar mientras ejecuta, si el modelo no dijo nada antes
     - "Déjame revisar."
