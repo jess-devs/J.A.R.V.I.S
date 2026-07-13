@@ -16,6 +16,7 @@
 //! ejecute — este módulo no ejecuta nada.
 
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -49,6 +50,7 @@ pub async fn run_speaking_turn(
     cancel: CancellationToken,
     echo_gate: Arc<Mutex<EchoGate>>,
 ) -> Result<TurnOutput, JarvisError> {
+    let turn_start = Instant::now();
     let (event_tx, mut event_rx) = mpsc::channel::<Result<LlmEvent, LlmError>>(32);
     let (phrase_tx, mut phrase_rx) = mpsc::channel::<String>(8);
     let (audio_tx, mut audio_rx) = mpsc::channel::<(String, AudioChunk)>(4);
@@ -112,6 +114,7 @@ pub async fn run_speaking_turn(
     // ya se empujó al ring buffer queda ahí, y `player.stop()` lo descarta.
     let mut spoken_phrases: Vec<String> = Vec::new();
     let mut interrupted = false;
+    let mut first_audio_at: Option<Instant> = None;
     loop {
         tokio::select! {
             biased;
@@ -122,6 +125,7 @@ pub async fn run_speaking_turn(
             maybe_chunk = audio_rx.recv() => {
                 match maybe_chunk {
                     Some((phrase, chunk)) => {
+                        first_audio_at.get_or_insert_with(Instant::now);
                         tokio::select! {
                             biased;
                             _ = cancel.cancelled() => {
@@ -158,6 +162,14 @@ pub async fn run_speaking_turn(
     }
 
     player.wait_until_drained().await?;
+
+    if let Some(first_audio_at) = first_audio_at {
+        tracing::info!(
+            "Jarvis respondió en {:.2}s, audio reproducido en {:.2}s",
+            (first_audio_at - turn_start).as_secs_f64(),
+            first_audio_at.elapsed().as_secs_f64()
+        );
+    }
 
     let (spoken_text, tool_calls) = chunker_task
         .await
