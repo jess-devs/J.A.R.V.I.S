@@ -724,11 +724,25 @@ impl Default for AgentConfig {
                 "procede",
                 "afirmativo",
                 "correcto",
+                "vale",
+                "ok",
+                "va",
+                "de una",
+                "está bien",
             ]
             .map(String::from)
             .to_vec(),
             confirm_no: [
-                "no", "cancela", "cancelar", "espera", "mejor no", "detente", "para", "negativo",
+                "no",
+                "cancela",
+                "cancelar",
+                "espera",
+                "mejor no",
+                "detente",
+                "para",
+                "negativo",
+                "no gracias",
+                "todavía no",
             ]
             .map(String::from)
             .to_vec(),

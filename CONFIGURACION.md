@@ -301,7 +301,7 @@ señor?"), o código de aceptación para acciones de riesgo extremo.
 | `max_tool_result_chars` | Truncado del resultado de cada herramienta antes de pasarlo al LLM, evita gastar contexto en salidas larguísimas (listados de procesos, páginas web enteras). |
 | `filler_phrases` | Se dice una al azar mientras ejecuta una herramienta, solo si el modelo no dijo nada en su primera pasada, para no dejar un silencio muerto. |
 | `disabled_tools` | Nombres de herramientas a excluir por completo, ej. `["run_powershell"]`. |
-| `confirm_yes` / `confirm_no` | Palabras que Rust interpreta como sí/no al confirmar una acción riesgosa. Esta interpretación **nunca la hace el LLM**, es una comparación literal en Rust, para que el modelo no pueda auto-confirmarse. |
+| `confirm_yes` / `confirm_no` | Palabras/frases que Rust interpreta como sí/no al confirmar una acción riesgosa. Esta interpretación **nunca la hace el LLM**: Rust busca si alguna de estas frases aparece dentro de tu respuesta (no hace falta que sea la respuesta completa, p.ej. "sí, ciérralo ya" matchea igual), para que el modelo no pueda auto-confirmarse. |
 | `risk_code` | Código de aceptación para acciones de riesgo extremo (borrado recursivo, apagado, cambios de registro). Se verifica en Rust y nunca se le pasa al LLM. **Cambialo por uno propio.** |
 | `high_risk_patterns` | Regex adicionales (se suman a los defaults del código) que elevan un comando de PowerShell a nivel "código". |
 

@@ -34,16 +34,43 @@ fn normalize(text: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn matches_any(normalized: &str, phrases: &[String]) -> bool {
-    let words: Vec<&str> = normalized.split(' ').collect();
-    phrases.iter().any(|phrase| {
-        let phrase = normalize(phrase);
-        if phrase.is_empty() {
-            return false;
-        }
-        normalized == phrase || (!phrase.contains(' ') && words.contains(&phrase.as_str()))
-    })
+/// Busca `phrase` (posiblemente varias palabras) como bloque contiguo en
+/// cualquier posición de `words`, no solo si ocupa la respuesta entera.
+/// Devuelve cuántas palabras ocupa el match, para que el llamador pueda
+/// medir cuánto texto "de sobra" quedó fuera de la frase reconocida.
+fn phrase_match_len(words: &[&str], phrase: &str) -> Option<usize> {
+    let phrase = normalize(phrase);
+    if phrase.is_empty() {
+        return None;
+    }
+    let phrase_words: Vec<&str> = phrase.split(' ').collect();
+    if phrase_words.len() > words.len() {
+        return None;
+    }
+    words
+        .windows(phrase_words.len())
+        .any(|w| w == phrase_words.as_slice())
+        .then_some(phrase_words.len())
 }
+
+/// Longitud (en palabras) de la frase más larga de `phrases` que aparece en
+/// `normalized`, si alguna aparece.
+fn longest_match_len(normalized: &str, phrases: &[String]) -> Option<usize> {
+    let words: Vec<&str> = normalized.split(' ').collect();
+    phrases
+        .iter()
+        .filter_map(|phrase| phrase_match_len(&words, phrase))
+        .max()
+}
+
+fn matches_any(normalized: &str, phrases: &[String]) -> bool {
+    longest_match_len(normalized, phrases).is_some()
+}
+
+/// Palabras de sobra toleradas fuera de la frase de "sí" reconocida, para
+/// aceptar confirmaciones naturales ("sí, ciérralo ya, jarvis") sin aceptar
+/// una frase larga y ajena que de casualidad contiene un "sí" suelto.
+const MAX_EXTRA_WORDS_FOR_YES: usize = 4;
 
 /// Interpreta la respuesta a un "¿Confirma, señor?". El "no" tiene prioridad sobre el "sí"
 pub fn interpret(text: &str, cfg: &AgentConfig) -> ConfirmDecision {
@@ -51,12 +78,14 @@ pub fn interpret(text: &str, cfg: &AgentConfig) -> ConfirmDecision {
     if normalized.is_empty() {
         return ConfirmDecision::Unrelated;
     }
-    let word_count = normalized.split(' ').count();
     if matches_any(&normalized, &cfg.confirm_no) {
         return ConfirmDecision::No;
     }
-    if word_count <= 4 && matches_any(&normalized, &cfg.confirm_yes) {
-        return ConfirmDecision::Yes;
+    if let Some(matched_len) = longest_match_len(&normalized, &cfg.confirm_yes) {
+        let word_count = normalized.split(' ').count();
+        if word_count - matched_len <= MAX_EXTRA_WORDS_FOR_YES {
+            return ConfirmDecision::Yes;
+        }
     }
     ConfirmDecision::Unrelated
 }
@@ -149,6 +178,43 @@ mod tests {
         assert_eq!(
             interpret("mejor dime qué hora es en este momento", &cfg()),
             ConfirmDecision::Unrelated
+        );
+    }
+
+    #[test]
+    fn confirmacion_natural_con_palabras_de_sobra() {
+        for frase in [
+            "sí, ciérralo ya, jarvis",
+            "sí, adelante, hazlo ya",
+            "dale, ciérralo nomás",
+        ] {
+            assert_eq!(interpret(frase, &cfg()), ConfirmDecision::Yes, "{frase}");
+        }
+    }
+
+    #[test]
+    fn negacion_natural_con_palabras_de_sobra() {
+        assert_eq!(
+            interpret("no, mejor cancelalo todo", &cfg()),
+            ConfirmDecision::No
+        );
+    }
+
+    #[test]
+    fn frase_larga_ajena_con_si_suelto_sigue_siendo_unrelated() {
+        assert_eq!(
+            interpret("sí, pero antes decime qué hora es", &cfg()),
+            ConfirmDecision::Unrelated
+        );
+    }
+
+    #[test]
+    fn frase_multipalabra_matchea_con_texto_alrededor() {
+        // "sí señor" está en confirm_yes como frase de dos palabras; debe
+        // matchear aunque no sea la respuesta completa.
+        assert_eq!(
+            interpret("sí señor, adelante", &cfg()),
+            ConfirmDecision::Yes
         );
     }
 

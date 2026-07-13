@@ -225,9 +225,29 @@ agent:
       "confirmo",
       "dale",
       "procede",
-    ] # palabras que Rust interpreta como "sí" al confirmar (nunca lo decide el LLM)
+      "por supuesto",
+      "sí señor",
+      "afirmativo",
+      "correcto",
+      "vale",
+      "ok",
+      "va",
+      "de una",
+      "está bien",
+    ] # palabras/frases que Rust interpreta como "sí" al confirmar (nunca lo decide el LLM); reconoce cualquiera de estas dentro de una respuesta más larga, no hace falta que sea la frase completa
   confirm_no:
-    ["no", "cancela", "cancelar", "espera", "mejor no", "detente", "para"]
+    [
+      "no",
+      "cancela",
+      "cancelar",
+      "espera",
+      "mejor no",
+      "detente",
+      "para",
+      "negativo",
+      "no gracias",
+      "todavía no",
+    ]
   risk_code: "0911" # código de aceptación de riesgos, verificado en Rust — cambialo por uno propio
   high_risk_patterns: [] # regex extra que se suman a los defaults para elevar un comando a nivel código
   files:
