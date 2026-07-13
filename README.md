@@ -24,7 +24,27 @@ Ver [`workers/README.md`](workers/README.md) para detalle del protocolo entre Ru
 
 ## Instalación
 
-### 1. Entorno Python de los workers
+### Automática (recomendada)
+
+Con Rust, Python 3.12 y Ollama ya instalados (ver [Requisitos](#requisitos)), un solo script deja todo listo: crea el venv de los workers, detecta tu hardware (RAM/GPU) para recomendarte y descargar un modelo de Ollama acorde, baja la voz de Piper que usa `config.yaml` y crea el `.env`.
+
+```powershell
+# Windows (PowerShell)
+.\scripts\setup.ps1
+```
+
+```bash
+# Linux/Mac
+./scripts/setup.sh
+```
+
+El script solo verifica que Rust/Python/Ollama estén instalados (no los instala por vos: requieren privilegios y/o reiniciar la shell) — si falta alguno, te va a decir exactamente cuál y dónde conseguirlo. Es seguro volver a correrlo: cada paso se saltea si ya está hecho.
+
+Si preferís entender o ajustar cada paso a mano (por ejemplo, para usar otra voz o otro modelo desde el vamos), seguí la sección de abajo — es exactamente lo que hace el script por dentro.
+
+### Manual, paso a paso
+
+#### 1. Entorno Python de los workers
 
 ```powershell
 # Windows (PowerShell)
@@ -44,16 +64,26 @@ Si tenés GPU NVIDIA y querés aceleración CUDA para Whisper, instalá `torch` 
 workers\.venv\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
 
-### 2. Ollama y el modelo
+**Si ves un error como `library cublas64_12.dll ... not found or cannot be
+loaded`**: tenés el driver de NVIDIA pero no el runtime de cómputo CUDA
+(cuBLAS/cuDNN) que `ctranslate2` necesita para transcribir en GPU — no
+alcanza con el driver solo, hace falta el CUDA Toolkit (o los paquetes
+redistribuibles de cuBLAS/cuDNN) en la versión que espera `ctranslate2`.
+Jarvis detecta este caso automáticamente al arrancar y cae solo a CPU, así
+que el error debería desaparecer en el siguiente arranque sin que hagas
+nada; si igual querés aceleración por GPU, instalá el runtime CUDA
+correspondiente.
+
+#### 2. Ollama y el modelo
 
 ```bash
-ollama serve            # si no corre ya como servicio
-ollama pull qwen2.5:7b  # modelo default en config.yaml
+ollama serve                    # si no corre ya como servicio
+ollama pull qwen2.5:3b-instruct # modelo default en config.yaml
 ```
 
-El modo agéntico necesita un modelo que soporte **tool calling**. `qwen2.5:7b` (el default) funciona, aunque a veces olvida llamar una herramienta o alucina argumentos. Para mejores resultados con herramientas se recomienda `qwen3:8b` (`ollama pull qwen3:8b`) o `llama3.1:8b`; con `qwen3` poné `llm.ollama.think: false` en `config.yaml` para que los tokens de razonamiento no se hablen en voz alta. Si preferís chat puro sin herramientas, poné `agent.enabled: false`.
+El modo agéntico necesita un modelo que soporte **tool calling**. El default (`qwen2.5:3b-instruct`) está pensado para hardware sin GPU con 4-8GB de RAM libres. Con más RAM o GPU disponible convienen `qwen2.5:7b` o `qwen3:8b` (mejor tool calling; con `qwen3` poné además `llm.ollama.think: false` en `config.yaml` para que los tokens de razonamiento no se hablen en voz alta) — `scripts/setup.ps1`/`.sh` eligen entre estas opciones automáticamente según tu RAM/VRAM. Si preferís chat puro sin herramientas, poné `agent.enabled: false`.
 
-### 3. Voz de Piper
+#### 3. Voz de Piper
 
 ```powershell
 workers\.venv\Scripts\python.exe -m piper.download_voices es_ES-davefx-medium
@@ -65,9 +95,9 @@ El comando descarga los archivos a la carpeta actual — moveló a `voices/`:
 Move-Item es_ES-davefx-medium.onnx*, voices/
 ```
 
-`config.yaml` ya apunta por defecto a `voices/es_ES-davefx-medium.onnx` (voz masculina, acento de España). Si preferís acento mexicano, probá `es_MX-ald-medium` con el mismo procedimiento y cambiá `voice_path`/`config_path` en `config.yaml`. Otras voces en español disponibles: buscá `es_MX` o `es_ES` en el catálogo de [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/es).
+`config.yaml` ya apunta por defecto a `voices/es_MX-ald-medium.onnx`. Otras voces en español disponibles: buscá `es_MX` o `es_ES` en el catálogo de [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/es) y cambiá `voice_path`/`config_path` en `config.yaml` si preferís otra.
 
-### 4. Compilar y correr
+#### 4. Compilar y correr
 
 ```bash
 cargo build --release
@@ -148,6 +178,8 @@ Otras palancas que se ajustan solas (y se pueden fijar a mano en `config.yaml`):
 - **`initial_prompt`**: contexto en español para el decoder de Whisper, mejora la precisión de transcripción.
 
 Cualquier override manual (`device`, `whisper_model` ≠ `auto`) salta la calibración por completo. El log de arranque muestra el perfil elegido: `STT worker listo device=cpu whisper_model=base beam_size=3 cpu_threads=4 rtf=0.59 perfil_cacheado=true`.
+
+`llm.ollama.model: auto` (el default cuando `llm.provider: ollama`) hace lo mismo para el modelo de lenguaje: en cada arranque detecta VRAM (GPU NVIDIA) o RAM total (sin GPU) y elige un modelo de la familia qwen acorde — sin benchmark, por tiers, ya que acá lo que varía es cuánto modelo entra en memoria, no la velocidad. Si el modelo elegido no está descargado, Jarvis lo indica al arrancar con el `ollama pull` correspondiente en vez de bajarlo solo. Un nombre fijo en vez de `auto` sigue funcionando igual que siempre.
 
 ## Modo local vs. modo nube
 
