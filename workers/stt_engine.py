@@ -32,6 +32,7 @@ import pyaudio
 import torch
 
 import ipc
+from clap_detector import ClapDetector
 
 FRAME_SAMPLES = 512  # tamaño de frame que exige Silero VAD a 16kHz (32 ms)
 SAMPLE_RATE = 16000
@@ -91,6 +92,9 @@ class _Engine:
         self.vad_threshold_while_speaking = float(
             barge_in_cfg.get("vad_threshold_while_speaking", 0.75)
         )
+
+        clap_cfg = init_msg.get("clap") or {}
+        self.clap_detector = ClapDetector(clap_cfg)
 
         self.language = init_msg.get("language", "es")
         self.initial_prompt = init_msg.get("initial_prompt") or None
@@ -218,12 +222,16 @@ class _Engine:
 
             mode = mode_state.get()
             if mode == ModeState.SUPPRESSED:
+                if self.clap_detector.process(frame, prob=None):
+                    ipc.send({"type": "clap_detected"})
                 pre_roll.clear()
                 recording_state = "listening"
                 recording = []
                 continue
 
             prob = float(self.vad_model(torch.from_numpy(frame), SAMPLE_RATE).item())
+            if self.clap_detector.process(frame, prob=prob):
+                ipc.send({"type": "clap_detected"})
             now = time.monotonic()
 
             if recording_state == "listening":

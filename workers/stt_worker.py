@@ -23,6 +23,7 @@ importar `ipc`, que redirige stdout a nivel de fd, para que estos comandos
 impriman donde el usuario los puede ver):
   python stt_worker.py --list-devices          enumera dispositivos de entrada de PyAudio
   python stt_worker.py --calibrate [--device N] vúmetro en vivo del RMS del dispositivo
+  python stt_worker.py --test-clap [--device N] RMS/ZCR en vivo + aviso de aplauso/doble aplauso
 """
 
 import os
@@ -95,11 +96,133 @@ def _cli_calibrate() -> None:
         pa.terminate()
 
 
-if len(sys.argv) > 1 and sys.argv[1] in ("--list-devices", "--calibrate"):
+def _cli_arg(flag: str) -> str | None:
+    if flag in sys.argv:
+        idx = sys.argv.index(flag)
+        if idx + 1 < len(sys.argv):
+            return sys.argv[idx + 1]
+    return None
+
+
+def _cli_test_clap() -> None:
+    import numpy as np
+    import pyaudio
+
+    from clap_detector import ClapDetector
+
+    device_index = None
+    if "--device" in sys.argv:
+        device_index = int(sys.argv[sys.argv.index("--device") + 1])
+
+    # No lee config.yaml (el worker Python nunca lo parsea directo, solo
+    # recibe config vía el mensaje "init" que le manda Rust) — para iterar
+    # rápido sin editar archivos, los umbrales se pueden pisar acá:
+    #   --test-clap --min-peak -20 --min-rise 10 --min-zcr 0.08
+    overrides: dict = {}
+    if _cli_arg("--min-peak") is not None:
+        overrides["min_peak_dbfs"] = float(_cli_arg("--min-peak"))
+    if _cli_arg("--min-rise") is not None:
+        overrides["min_rise_db"] = float(_cli_arg("--min-rise"))
+    if _cli_arg("--min-zcr") is not None:
+        overrides["min_zcr"] = float(_cli_arg("--min-zcr"))
+    if overrides:
+        print(f"Umbrales pisados por CLI: {overrides}")
+
+    sample_rate = 16000
+    frame_samples = 512
+
+    pa = pyaudio.PyAudio()
+    info = (
+        pa.get_device_info_by_index(device_index)
+        if device_index is not None
+        else pa.get_default_input_device_info()
+    )
+    resolved_index = int(info["index"])
+    native_rate = int(info.get("defaultSampleRate", sample_rate))
+    # Mismo criterio que _Engine._resolve_device() en stt_engine.py: si el
+    # dispositivo no soporta 16kHz nativo, se lee a su rate nativo y se
+    # remuestrea — igual que en producción. Si esto se salteara, los
+    # umbrales que se afinen acá no valdrían para lo que corre `cargo run`.
+    try:
+        pa.is_format_supported(
+            sample_rate,
+            input_device=resolved_index,
+            input_channels=1,
+            input_format=pyaudio.paInt16,
+        )
+        rate = sample_rate
+    except ValueError:
+        rate = native_rate
+    decimate = rate != sample_rate
+    frame_native = (
+        frame_samples
+        if not decimate
+        else max(1, round(frame_samples * rate / sample_rate))
+    )
+
+    stream = pa.open(
+        format=pyaudio.paInt16,
+        channels=1,
+        rate=rate,
+        input=True,
+        input_device_index=resolved_index,
+        frames_per_buffer=frame_native,
+    )
+    detector = ClapDetector(overrides)
+    nota_remuestreo = " (remuestreado a 16kHz, igual que en producción)" if decimate else ""
+    print(
+        f"Escuchando '{info['name']}' (índice {resolved_index}) a {rate}Hz{nota_remuestreo}. "
+        "Aplaudí dos veces seguidas. Ctrl+C para salir."
+    )
+    try:
+        while True:
+            raw = stream.read(frame_native, exception_on_overflow=False)
+            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            if decimate:
+                from scipy.signal import resample
+
+                audio = resample(audio, frame_samples).astype(np.float32)
+            rms = float(np.sqrt(np.mean(audio**2)) + 1e-9)
+            dbfs = 20 * np.log10(rms)
+            signs = np.signbit(audio)
+            zcr = float(np.mean(signs[1:] != signs[:-1]))
+
+            was_decaying = detector._decaying_since is not None
+            had_first_clap = detector._first_clap_at is not None
+            prev_lockout = detector._lockout_until
+            umbral = max(detector.min_peak_dbfs, detector._bg_db + detector.min_rise_db)
+
+            double_confirmed = detector.process(audio, prob=None)
+
+            print(
+                f"\r{dbfs:6.1f} dBFS  zcr={zcr:.2f}  fondo={detector._bg_db:6.1f}  "
+                f"umbral={umbral:6.1f}   ",
+                end="",
+                flush=True,
+            )
+            if not was_decaying and detector._decaying_since is not None:
+                print("\n  -> onset detectado, esperando decaimiento...")
+            if detector._lockout_until > prev_lockout:
+                print("\n  -> rechazado: la energía se sostuvo demasiado (¿voz, no aplauso?)")
+            if double_confirmed:
+                print("\n¡DOBLE!")
+            elif not had_first_clap and detector._first_clap_at is not None:
+                print("\nCLAP!")
+    except KeyboardInterrupt:
+        print()
+    finally:
+        stream.stop_stream()
+        stream.close()
+        pa.terminate()
+
+
+if len(sys.argv) > 1 and sys.argv[1] in ("--list-devices", "--calibrate", "--test-clap"):
     if sys.argv[1] == "--list-devices":
         _cli_list_devices()
-    else:
+    elif sys.argv[1] == "--calibrate":
         _cli_calibrate()
+    else:
+        _cli_test_clap()
     sys.exit(0)
 
 import ipc  # primer import "real": aplica la redireccion de stdout a nivel de fd
