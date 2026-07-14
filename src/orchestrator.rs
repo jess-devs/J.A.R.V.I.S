@@ -5,6 +5,7 @@
 //! siguiente transcripción se interpreta como sí/no (o como el código de
 //! aceptación de riesgos, verificado acá en Rust — nunca por el LLM).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -85,6 +86,12 @@ pub struct Orchestrator {
     /// stdin y cancela el token del turno vigente en este slot. La Fase 3 lo
     /// reemplaza por el disparo real desde el motor de STT.
     test_cancel_slot: Option<Arc<Mutex<Option<CancellationToken>>>>,
+    /// Puesto en `true` por la tool `enter_silence_mode` (corre dentro del
+    /// loop agéntico, sin acceso a `self`). `finish_turn` lo revisa y
+    /// consume: si está en `true`, cierra la ventana de atención en vez de
+    /// reabrirla, dejando a Jarvis exigiendo la wake word hasta que lo
+    /// llamen de nuevo.
+    silence_requested: Arc<AtomicBool>,
 }
 
 impl Orchestrator {
@@ -113,6 +120,7 @@ impl Orchestrator {
         let scripted_store = Arc::new(ScriptedToolStore::open(
             &config.agent.scripted_tools.db_path,
         )?);
+        let silence_requested = Arc::new(AtomicBool::new(false));
         let registry = ToolRegistry::build(
             &config.agent,
             memory.clone(),
@@ -123,6 +131,7 @@ impl Orchestrator {
             } else {
                 None
             },
+            silence_requested.clone(),
         )
         .await;
         let echo_gate = Arc::new(Mutex::new(EchoGate::new(
@@ -177,6 +186,7 @@ impl Orchestrator {
             reminder_store: reminder_store_for_welcome,
             last_welcome: None,
             test_cancel_slot,
+            silence_requested,
         })
     }
 
@@ -854,9 +864,15 @@ impl Orchestrator {
     async fn finish_turn(&mut self) {
         self.state = AgentState::Idle;
 
-        // Incluso si el pipeline falló: el usuario querrá reintentar sin
-        // repetir el nombre.
-        self.gate.open_window();
+        // Modo silencio: `enter_silence_mode` corrió en este turno, así que
+        // en vez de reabrir la ventana (como siempre, incluso si el
+        // pipeline falló, para que el usuario pueda reintentar sin repetir
+        // el nombre) se cierra de inmediato y se deja cerrada.
+        if self.silence_requested.swap(false, Ordering::SeqCst) {
+            self.gate.close_window();
+        } else {
+            self.gate.open_window();
+        }
 
         self.end_speaking().await;
 

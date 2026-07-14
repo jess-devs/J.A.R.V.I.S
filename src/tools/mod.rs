@@ -17,11 +17,13 @@ pub mod screen;
 pub mod scripted;
 pub mod scripted_store;
 pub mod shell;
+pub mod silence;
 pub mod system_info;
 pub mod translate;
 pub mod volume;
 pub mod web;
 
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -123,6 +125,7 @@ impl ToolRegistry {
         reminder_store: Arc<ReminderStore>,
         scripted_store: Arc<ScriptedToolStore>,
         music: Option<Arc<MusicShared>>,
+        silence_flag: Arc<AtomicBool>,
     ) -> Self {
         let mut static_tools: Vec<Arc<dyn Tool>> = Vec::new();
         if cfg.enabled {
@@ -173,6 +176,9 @@ impl ToolRegistry {
             static_tools.push(Arc::new(scripted::DeleteCustomTool::new(
                 scripted_store.clone(),
             )));
+            static_tools.push(Arc::new(silence::EnterSilenceMode {
+                flag: silence_flag,
+            }));
         }
 
         let registry = Self {

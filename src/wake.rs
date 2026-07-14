@@ -108,6 +108,14 @@ impl AttentionGate {
             Some(Instant::now() + Duration::from_secs(self.config.attention_window_secs));
     }
 
+    /// Cierra la ventana de inmediato, sin esperar a que expire el deadline
+    /// vigente. Usado por el modo silencio: a diferencia de `open_window`,
+    /// que se llama siempre al terminar un turno, este método deja a Jarvis
+    /// exigiendo la wake word hasta la próxima vez que lo llamen por nombre.
+    pub fn close_window(&mut self) {
+        self.window_deadline = None;
+    }
+
     pub fn push_ambient(&mut self, text: String) {
         if !self.config.ambient_context {
             return;
@@ -337,6 +345,15 @@ mod tests {
             ..WakeConfig::default()
         });
         g.open_window();
+        assert_eq!(g.decide("y a qué hora cierra"), GateDecision::Ignore);
+    }
+
+    #[test]
+    fn close_window_fuerza_ignorar_de_inmediato() {
+        let mut g = default_gate();
+        g.open_window();
+        assert_eq!(g.decide("y a qué hora cierra"), GateDecision::Respond);
+        g.close_window();
         assert_eq!(g.decide("y a qué hora cierra"), GateDecision::Ignore);
     }
 
