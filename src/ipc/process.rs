@@ -54,6 +54,10 @@ impl WorkerHandle {
                 source,
             })?;
 
+        if let Some(pid) = child.id() {
+            crate::ipc::watchdog::register_worker_pid(pid);
+        }
+
         let stdin = child
             .stdin
             .take()

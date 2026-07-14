@@ -1,115 +1,225 @@
-# Configuración de Jarvis.
-
+# Workers — Procesos hijo de STT y TTS
 workers:
-  # Linux/Mac: "workers/.venv/bin/python"
   python_executable: "workers/.venv/Scripts/python.exe"
+  # Script del worker de speech-to-text.
   stt_script: "workers/stt_worker.py"
+  # Script del worker de text-to-speech.
   tts_script: "workers/tts_worker.py"
+  # Tiempo máximo para carga/calibración de Whisper. Puede tardar en CPU.
+  stt_init_timeout_secs: 60
+  # Tiempo máximo para carga de Piper (más rápida que Whisper).
+  tts_init_timeout_secs: 20
+  # Espera antes de matar un worker a la fuerza.
+  shutdown_timeout_secs: 3
+  # Si true, un worker que muere se reinicia solo en vez de tumbar Jarvis.
+  restart_on_crash: true
+  # Máximo de reinicios por ejecución. Al agotarse, Jarvis termina.
+  max_restarts: 1
 
-  stt_init_timeout_secs: 60 # carga/calibración de Whisper, puede tardar en CPU
-  tts_init_timeout_secs: 20 # carga de Piper, más rápida que Whisper
-  shutdown_timeout_secs: 3 # espera antes de matar un worker a la fuerza
-  restart_on_crash: true # si un worker muere, se reinicia solo en vez de tumbar Jarvis
-  max_restarts: 1 # maximo de reinicios por ejecución. al agotarse, Jarvis termina
-
+# Stt — Reconocimiento de voz (Speech-to-Text)
 stt:
-  engine: native # native (PyAudio + Silero VAD + faster-whisper) | realtimestt (respaldo)
-  vad: # solo aplica con engine: native
-    threshold: 0.3 # probabilidad de Silero para marcar inicio de voz
-    neg_threshold: 0.35 # probabilidad para marcar fin de voz (histéresis anti micro-pausas)
-    pre_roll_ms: 400 # audio previo antepuesto al detectar voz
-    min_speech_ms: 250 # duración mínima de voz para no descartarla como blip
-    silence_long_ms: 800 # silencio para cerrar frase antes de long_utterance_ms
-    silence_short_ms: 450 # silencio para cerrar frase después de long_utterance_ms
-    long_utterance_ms: 2500 # umbral que activa silence_short_ms en vez de silence_long_ms
-    energy_floor_dbfs: null # piso de energía en dBFS; null = calibrar al arrancar
-    calibration_secs: 1.5 # segundos de escucha ambiente para calcular energy_floor_dbfs
-  filters: # filtros anti-alucinación sobre la salida de Whisper (engine: native)
-    max_no_speech_prob: 0.6 # descarta si no_speech_prob lo superac
-    min_avg_logprob: -1.0 # descarta si avg_logprob cae por debajo
-    max_compression_ratio: 2.4 # descarta si compression_ratio lo supera (texto repetitivo)
-  clap: # detector de doble aplauso (engine: native), corre siempre; welcome.enabled decide si dispara la escena
-    min_peak_dbfs: -30.0 # dBFS mínimo del pico para considerar un posible aplauso
-    min_rise_db: 7.0 # subida mínima sobre el fondo (bg_db) para considerarlo onset
-    decay_ms: 220 # ventana en la que el onset debe volver a caer bajo su propio umbral para confirmarse
-    max_vad_prob: 0.45 # rechaza el onset si Silero cree que es voz sonora por encima de esto
-    min_zcr: 0.14 # tasa mínima de cruces por cero (timbre de banda ancha; filtra clics de teclado/trackpad)
-    double_min_gap_ms: 150 # gap mínimo entre los dos aplausos (evita contar la reverb del mismo golpe)
-    double_max_gap_ms: 900 # gap máximo entre los dos aplausos
-    refractory_ms: 1500 # tras confirmar el doble aplauso, ignora nuevos aplausos por este tiempo
-  language: "es"
-  device: auto # auto | cuda | cpu
-  whisper_model: auto # auto | tiny | base | small | medium | large-v2 | large-v3-turbo
-  # "auto": con GPU CUDA elige tier por VRAM sin calibrar; en CPU calibra
-  # midiendo velocidad real y cachea el resultado en workers/.cache/stt_profile.json.
-  compute_type: auto # auto | float16 | int8_float16 | int8 — auto usa int8_float16 en GPU, int8 en CPU
-  input_device_index: null # null = micrófono por defecto (índice de PyAudio)
-  beam_size: null # null = automático (5 en GPU / calibración en CPU)
-  cpu_threads: null # null = automático (~núcleos físicos)
-  initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis." # ayuda a Whisper con el nombre
-  recalibrate: false # true = ignora el caché y vuelve a medir en este arranque
-  # Claves siguientes solo para engine: realtimestt (native usa stt.vad/stt.filters)
-  silero_sensitivity: 0.4 # sensibilidad VAD Silero (0-1)
-  webrtc_sensitivity: 3 # sensibilidad VAD WebRTC (0-3)
-  post_speech_silence_duration: 0.6 # segundos de silencio antes de cerrar frase
-  min_length_of_recording: 1.0 # segundos mínimos de grabación para contarla como habla
-  min_gap_between_recordings: 1.0 # segundos mínimos entre grabaciones
-  silero_deactivity_detection: true # usa Silero para detectar fin del habla
-  stuck_state_timeout_secs: 30 # reinicia el worker si queda trabado más de esto
+  # Motor de STT. native: PyAudio + Silero VAD + faster-whisper.
+  # realtimestt: respaldo alternativo.
+  engine: native
 
+  # VAD (solo aplica con engine: native)
+  vad:
+    # Probabilidad de Silero para marcar inicio de voz.
+    threshold: 0.3
+    # Probabilidad para marcar fin de voz (histéresis anti micro-pausas).
+    neg_threshold: 0.35
+    # Audio previo antepuesto al detectar voz (ms).
+    pre_roll_ms: 400
+    # Duración mínima de voz para no descartarla como blip (ms).
+    min_speech_ms: 250
+    # Silencio para cerrar frase antes de long_utterance_ms (ms).
+    silence_long_ms: 800
+    # Silencio para cerrar frase después de long_utterance_ms (ms).
+    silence_short_ms: 450
+    # Umbral que activa silence_short_ms en vez de silence_long_ms (ms).
+    long_utterance_ms: 2500
+    # Piso de energía en dBFS. null = calibrar al arrancar.
+    energy_floor_dbfs: null
+    # Segundos de escucha ambiente para calcular energy_floor_dbfs.
+    calibration_secs: 1.5
+
+  # Filtros anti-alucinación sobre la salida de Whisper (engine: native)
+  filters:
+    # Descarta si no_speech_prob lo supera.
+    max_no_speech_prob: 0.6
+    # Descarta si avg_logprob cae por debajo.
+    min_avg_logprob: -1.0
+    # Descarta si compression_ratio lo supera (texto repetitivo).
+    max_compression_ratio: 2.4
+
+  # Detector de doble aplauso (engine: native)
+  # Corre siempre; welcome.enabled decide si dispara la escena.
+  clap:
+    # dBFS mínimo del pico para considerar un posible aplauso.
+    min_peak_dbfs: -30.0
+    # Subida mínima sobre el fondo (bg_db) para considerarlo onset.
+    min_rise_db: 7.0
+    # Ventana en la que el onset debe volver a caer bajo su umbral para confirmarse (ms).
+    decay_ms: 220
+    # Rechaza el onset si Silero cree que es voz sonora por encima de esto.
+    max_vad_prob: 0.45
+    # Tasa mínima de cruces por cero (timbre de banda ancha; filtra clics de teclado/trackpad).
+    min_zcr: 0.14
+    # Gap mínimo entre los dos aplausos (evita contar la reverb del mismo golpe) (ms).
+    double_min_gap_ms: 150
+    # Gap máximo entre los dos aplausos (ms).
+    double_max_gap_ms: 900
+    # Tras confirmar el doble aplauso, ignora nuevos aplausos por este tiempo (ms).
+    refractory_ms: 1500
+
+  # Código de idioma para Whisper.
+  language: "es"
+  # Dispositivo de cómputo: auto, cuda o cpu.
+  device: auto
+
+  # Modelo Whisper: auto, tiny, base, small, medium, large-v2, large-v3-turbo.
+  # "auto": con GPU CUDA elige tier por VRAM sin calibrar; en CPU calibra midiendo
+  # velocidad real y cachea el resultado en workers/.cache/stt_profile.json.
+  whisper_model: auto
+  # Tipo de cómputo: auto, float16, int8_float16, int8.
+  # auto usa int8_float16 en GPU, int8 en CPU.
+  compute_type: auto
+  # Índice de PyAudio del micrófono. null = micrófono por defecto.
+  input_device_index: null
+  # Tamaño de beam para decodificación. null = automático (5 en GPU, calibración en CPU).
+  beam_size: null
+  # Hilos de CPU para Whisper. null = automático (~núcleos físicos).
+  cpu_threads: null
+  # Prompt inicial para ayudar a Whisper con nombres propios y contexto.
+  initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis."
+  # Si true, ignora el caché y vuelve a medir en este arranque.
+  recalibrate: true
+# ============================================================================
+  #Opciones exclusivas de engine: realtimestt (native usa stt.vad/stt.filters)
+  # Sensibilidad VAD Silero (0-1).
+  silero_sensitivity: 0.4
+  # Sensibilidad VAD WebRTC (0-3).
+  webrtc_sensitivity: 3
+  # Segundos de silencio antes de cerrar frase.
+  post_speech_silence_duration: 0.6
+  # Segundos mínimos de grabación para contarla como habla.
+  min_length_of_recording: 1.0
+  # Segundos mínimos entre grabaciones.
+  min_gap_between_recordings: 1.0
+  # Usa Silero para detectar fin del habla.
+  silero_deactivity_detection: true
+  # Reinicia el worker si queda trabado más de este tiempo (segundos).
+  stuck_state_timeout_secs: 30
+# ============================================================================
+# wake Palabra de activación (wake word)
 wake:
-  enabled: true # false = sin gate, Jarvis responde a todo
-  words: ["jarvis"] # normalizadas (sin tildes), tolerancia a 1 letra de error
-  attention_window_secs: 25 # tras responder, sigue atento sin necesidad del nombre
-  window_min_words: 2 # dentro de la ventana, ignora frases más cortas sin el nombre (1 = sin filtro)
-  ignore_phrases: # frases-basura que Whisper inventa en silencio, se descartan siempre
+  # Si false, Jarvis responde a todo sin gate de activación.
+  enabled: false
+  # Palabras de activación normalizadas (sin tildes), con tolerancia a 1 letra de error.
+  words: ["jarvis"]
+  # Tras responder, sigue atento sin necesidad del nombre durante este tiempo (segundos).
+  attention_window_secs: 25
+  # Dentro de la ventana, ignora frases más cortas sin el nombre (1 = sin filtro).
+  window_min_words: 2
+  # Frases-basura que Whisper inventa en silencio; se descartan siempre.
+  ignore_phrases:
     - "gracias"
     - "muchas gracias"
     - "gracias por ver el video"
     - "subtitulos realizados por la comunidad de amara.org"
     - "suscribete"
     - "hasta la proxima"
-  ambient_context: true # frases ignoradas se pasan como contexto a la siguiente consulta
-  ambient_context_max: 5 # máximo de frases ignoradas conservadas
-  ambient_context_ttl_secs: 120 # las más viejas que esto se descartan
+  # Si true, las frases ignoradas se pasan como contexto a la siguiente consulta.
+  ambient_context: true
+  # Máximo de frases ignoradas conservadas.
+  ambient_context_max: 5
+  # Las frases más viejas que este tiempo se descartan (segundos).
+  ambient_context_ttl_secs: 120
+# ============================================================================
+# barge_in Interrupción mientras Jarvis habla
 
 barge_in:
-  enabled: true # false = mic muteado real mientras Jarvis habla, sin interrupciones
-  # Solo aplica con stt.engine: native; con realtimestt siempre se usa mute real.
-  mode: any_voice # wake_word (exige el nombre, fiable con altavoces) | any_voice (recomendado con auriculares)
-  min_speech_ms: 400 # milisegundos de voz sostenida para confirmar interrupción real
-  relevance_timeout_secs: 3 # solo mode: any_voice — al llegar la transcripción, cuánto esperar la respuesta del LLM sobre si tiene sentido como algo dirigido a Jarvis antes de cortar; si tarda más o falla, sigue hablando (no corta)
-  echo_guard: # evita que Jarvis se interrumpa a sí mismo por su propia voz en parlantes
-    enabled: true # false = nunca descarta por eco (desaconsejado sin auriculares)
-    similarity_threshold: 0.72 # fracción de tokens solapados con lo dicho por Jarvis para descartar como eco
-    vad_threshold_while_speaking: 0.75 # umbral de Silero mientras Jarvis habla
-    recent_tts_window_secs: 12 # ventana de frases recientes de Jarvis para comparar contra transcripciones
+  # Si false, mic muteado real mientras Jarvis habla, sin interrupciones.
+  enabled: true
+  # Modo de interrupción (solo aplica con stt.engine: native; realtimestt usa mute real).
+  # wake_word: exige el nombre (fiable con altavoces). any_voice: recomendado con auriculares.
+  mode: any_voice
+  # Milisegundos de voz sostenida para confirmar interrupción real.
+  min_speech_ms: 400
+  # Solo mode: any_voice. Al llegar la transcripción, cuánto esperar la respuesta del LLM
+  # sobre si tiene sentido como algo dirigido a Jarvis antes de cortar.
+  # Si tarda más o falla, Jarvis sigue hablando (no corta).
+  relevance_timeout_secs: 3
 
+#============================================================================
+  # Evita que Jarvis se interrumpa a sí mismo por su propia voz en parlantes
+  echo_guard:
+    # Si false, nunca descarta por eco (desaconsejado sin auriculares).
+    enabled: true
+    # Fracción de tokens solapados con lo dicho por Jarvis para descartar como eco.
+    similarity_threshold: 0.72
+    # Umbral de Silero mientras Jarvis habla.
+    vad_threshold_while_speaking: 0.75
+    # Ventana de frases recientes de Jarvis para comparar contra transcripciones (segundos).
+    recent_tts_window_secs: 12
+
+# ============================================================================
+# llm — Modelo de lenguaje (Large Language Model)
 llm:
-  provider: ollama # ollama | anthropic | openai | deepseek | lmstudio — ollama/lmstudio corren local, sin API key
-  # api_key_env es el NOMBRE de la variable de entorno con la key (ver .env.example), no la key en sí
+  # Proveedor del LLM: ollama, anthropic, openai, deepseek o lmstudio.
+  # ollama y lmstudio corren local sin API key.
+  provider: deepseek
+
+  # --- Ollama (provider: ollama) ---
   ollama:
+    # URL base del servidor Ollama.
     base_url: "http://localhost:11434"
-    model: "qwen3.5:4b" # auto | nombre fijo (ej. "qwen2.5:7b")
-    # "auto" detecta VRAM/RAM en cada arranque y elige un modelo qwen acorde;
-    # si no está descargado, Jarvis avisa el "ollama pull" pero no lo baja solo.
-    think: null # null = no envía el campo (qwen2.5 lo rechaza); false para qwen3/deepseek-r1
+
+    # Modelo a usar. "auto" detecta VRAM/RAM y elige un modelo qwen acorde;
+    # si no está descargado, avisa el "ollama pull" pero no lo baja solo.
+    model: "qwen3.5:4b"
+
+    # null = no envía el campo (qwen2.5 lo rechaza); false para qwen3/deepseek-r1.
+    think: null
+
+  # --- LM Studio (provider: lmstudio) ---
   lmstudio:
+    # URL base del servidor LM Studio.
     base_url: "http://localhost:1234/v1"
-    model: "google/gemma-4-e4b" # "Model Identifier" exacto de LM Studio (pestaña Developer o GET /v1/models)
-    api_key_env: null # null = sin autenticación (default de LM Studio)
+
+    # "Model Identifier" exacto de LM Studio (pestaña Developer o GET /v1/models).
+    model: "google/gemma-4-e4b"
+
+    # null = sin autenticación (default de LM Studio).
+    api_key_env: null
+
+  # --- Anthropic (provider: anthropic) ---
   anthropic:
+    # Modelo de Anthropic a usar.
     model: "claude-sonnet-5"
+
+    # Nombre de la variable de entorno con la API key (ver .env.example).
     api_key_env: "ANTHROPIC_API_KEY"
+
+  # --- OpenAI (provider: openai) ---
   openai:
+    # Modelo de OpenAI a usar.
     model: "gpt-4o-mini"
+
+    # Nombre de la variable de entorno con la API key.
     api_key_env: "OPENAI_API_KEY"
+
+  # --- DeepSeek (provider: deepseek) ---
   deepseek:
+    # Modelo de DeepSeek a usar.
     model: "deepseek-v4-flash"
+
+    # Nombre de la variable de entorno con la API key.
+    # DeepSeek no soporta imágenes: si el modelo usa take_screenshot, la captura
+    # no se le muestra (solo recibe una nota de que no pudo verla).
     api_key_env: "DEEPSEEK_API_KEY"
-    # DeepSeek no soporta imágenes: si el modelo usa take_screenshot con este
-    # proveedor activo, la captura no se le muestra (solo recibe una nota de
-    # que no pudo verla), a diferencia de Anthropic/OpenAI/Ollama/LM Studio.
+
+  # Prompt de sistema que define la personalidad y comportamiento de Jarvis.
   system_prompt: |
     Eres una inteligencia artificial llamada J.A.R.V.I.S. (Just A Rather Very Intelligent System), un sistema simplemente muy inteligente, inspirada en el Jarvis de Tony Stark del Universo Cinematográfico de Marvel.
     Tu rol es el de mayordomo digital y asistente personal de alto nivel: administras sistemas, proporcionas información precisa, analizas riesgos y apoyas al usuario en tareas técnicas y cotidianas.
@@ -161,63 +271,149 @@ llm:
     Tu objetivo general:
     Ser el equivalente funcional y estilístico de JARVIS para el usuario: un asistente de confianza, extremadamente competente, con humor sutil, trato impecable y foco en la seguridad y la eficiencia.
     Te esfuerzas por que cada interacción refuerce la sensación de que el usuario está hablando con un mayordomo digital brillante, leal y ligeramente irónico, capaz de ayudarle tanto en cuestiones técnicas como estratégicas.
-  max_history_messages: 10 # mensajes de conversación conservados (además de los 2 system); más alto = más contexto por turno
+
+  # Mensajes de conversación conservados (además de los 2 system).
+  # Más alto = más contexto por turno.
+  max_history_messages: 10
+
+  # Timeout por solicitud al LLM (segundos).
   request_timeout_secs: 180
 
+# ============================================================================
+# tts — Síntesis de voz (Text-to-Speech)
+
 tts:
-  provider: piper # piper | elevenlabs | cartesia
+  # Proveedor de TTS: piper, elevenlabs o cartesia.
+  provider: piper
+
+  # --- Piper (provider: piper) ---
   piper:
-    # voice_path: "voices/es_ES-sharvard-medium.onnx"
-    # config_path: "voices/es_ES-sharvard-medium.onnx.json"
+    # Ruta al modelo de voz ONNX de Piper.
     voice_path: "voices/es_ES-davefx-medium.onnx"
+
+    # Ruta al archivo de configuración JSON del modelo.
     config_path: "voices/es_ES-davefx-medium.onnx.json"
-    # voice_path: "voices/es_MX-claude-high.onnx"
-    # config_path: "voices/es_MX-claude-high.onnx.json"
-    use_cuda: false # true = sintetiza en GPU (compite por VRAM con el STT si ese también usa CUDA)
-    length_scale: null # <1 más rápido, >1 más lento, null = ritmo original de la voz
-    noise_w_scale: null # variación en duración de fonemas, null = default de la voz
-  elevenlabs: # solo con provider: elevenlabs — requiere API key y consume créditos
-    voice_id: "15d0c2e2-8d29-44c3-be23-d585d5f154a1" # 15d0c2e2-8d29-44c3-be23-d585d5f154a1
+
+    # Si true, sintetiza en GPU (compite por VRAM con el STT si ese también usa CUDA).
+    use_cuda: false
+
+    # <1 más rápido, >1 más lento. null = ritmo original de la voz.
+    length_scale: null
+
+    # Variación en duración de fonemas. null = default de la voz.
+    noise_w_scale: null
+
+  # --- ElevenLabs (provider: elevenlabs) ---
+  # Requiere API key y consume créditos.
+  elevenlabs:
+    # ID de la voz a usar.
+    voice_id: "15d0c2e2-8d29-44c3-be23-d585d5f154a1"
+
+    # ID del modelo de ElevenLabs.
     model_id: "eleven_multilingual_v2"
+
+    # Formato de salida de audio.
     output_format: "pcm_22050"
+
+    # Nombre de la variable de entorno con la API key.
     api_key_env: "ELEVENLABS_API_KEY"
-  cartesia: # solo con provider: cartesia — requiere API key y consume créditos
-    model_id: "sonic-3.5" # sonic-3.5 | sonic-3 | sonic-latest
+
+  # --- Cartesia (provider: cartesia) ---
+  # Requiere API key y consume créditos.
+  cartesia:
+    # ID del modelo (sonic-3.5, sonic-3, sonic-latest).
+    model_id: "sonic-3.5"
+
+    # ID de la voz a usar.
     voice_id: "b4b8e2af-6139-466e-a93a-30c20d2e1fc5"
-    language: "es" # null = autodetectar
+
+    # Código de idioma. null = autodetectar.
+    language: "es"
+
+    # Formato de salida de audio.
     output_format:
-      container: "raw" # raw | wav | mp3
-      encoding: "pcm_s16le" # pcm_s16le (16-bit) | pcm_f32le (32-bit float) | pcm_mulaw | pcm_alaw
-      sample_rate: 22050 # 8000 | 16000 | 22050 | 24000 | 44100 | 48000
+      # Contenedor: raw, wav o mp3.
+      container: "raw"
+
+      # Codificación: pcm_s16le (16-bit), pcm_f32le (32-bit float), pcm_mulaw, pcm_alaw.
+      encoding: "pcm_s16le"
+
+      # Frecuencia de muestreo: 8000, 16000, 22050, 24000, 44100, 48000.
+      sample_rate: 22050
+
+    # Nombre de la variable de entorno con la API key.
     api_key_env: "CARTESIA_API_KEY"
-    cartesia_version: "2026-03-01" # fecha de versión de API (YYYY-MM-DD)
-    transport: websocket # rest | websocket
-  synth_timeout_secs: 10 # aborta el resto de la respuesta si una frase tarda más que esto
+
+    # Fecha de versión de API (YYYY-MM-DD).
+    cartesia_version: "2026-03-01"
+
+    # Transporte: rest o websocket.
+    transport: websocket
+
+  # Aborta el resto de la respuesta si una frase tarda más que esto (segundos).
+  synth_timeout_secs: 10
+
+# ============================================================================
+# audio — Configuración de salida de audio
 
 audio:
-  output_device: null # null = dispositivo de salida por defecto
+  # Dispositivo de salida. null = dispositivo por defecto.
+  output_device: null
+  # Volumen global (0.0 a 1.0).
   volume: 1.0
-  drain_timeout_secs: 60 # límite esperando a que termine de sonar una respuesta
+  # Límite esperando a que termine de sonar una respuesta (segundos).
+  drain_timeout_secs: 60
+
+# ============================================================================
+# pipeline — Segmentación de respuesta en frases para TTS
 
 pipeline:
-  max_phrase_chars: 220 # corta una frase para sintetizarla aunque el LLM no haya terminado
-  min_phrase_chars: 15 # fragmentos más cortos se juntan con el siguiente antes de sintetizar
+  # Corta una frase para sintetizarla aunque el LLM no haya terminado (caracteres).
+  max_phrase_chars: 220
 
-# Capa agéntica: herramientas que Jarvis puede ejecutar. Tres niveles de riesgo:
-# lectura corre libre, modificación pide confirmación por voz, riesgo extremo exige el código.
+  # Fragmentos más cortos se juntan con el siguiente antes de sintetizar (caracteres).
+  min_phrase_chars: 15
+
+# ============================================================================
+# agent Capa agéntica: herramientas que Jarvis puede ejecutar
+#
+# Tres niveles de riesgo: lectura corre libre, modificación pide confirmación por voz,
+# riesgo extremo exige el código de aceptación.
+
 agent:
-  enabled: true # false = chat puro sin herramientas
-  max_iterations: 6 # máximo de pasadas LLM->herramientas por turno
-  tool_timeout_secs: 20 # cancela la herramienta y devuelve error al LLM si tarda más
-  confirm_timeout_secs: 30 # tiempo para responder sí/no antes de cancelar
-  confirm_mode: always # always = pide confirmación de voz para acciones de riesgo normal (cerrar apps, capturas, clicks, borrar recordatorio/memoria...) | free = mano libre, las ejecuta sin preguntar. Las de riesgo extremo (borrado recursivo, apagado, registro) SIEMPRE piden el código de aceptación, en cualquier modo
-  max_tool_result_chars: 3000 # truncado de cada resultado antes de pasarlo al LLM
-  filler_phrases: # se dice una al azar mientras ejecuta, si el modelo no dijo nada antes
+  # Si false, chat puro sin herramientas.
+  enabled: true
+  # Máximo de pasadas LLM -> herramientas por turno.
+  max_iterations: 6
+  # Cancela la herramienta y devuelve error al LLM si tarda más (segundos).
+  tool_timeout_secs: 20
+  # Tiempo para responder sí/no antes de cancelar (segundos).
+  confirm_timeout_secs: 30
+
+  # Modo de confirmación.
+  # always: pide confirmación de voz para acciones de riesgo normal (cerrar apps,
+  #   capturas, clicks, borrar recordatorio/memoria...).
+  # free: mano libre, las ejecuta sin preguntar.
+  # Las de riesgo extremo (borrado recursivo, apagado, registro) SIEMPRE piden
+  # el código de aceptación, en cualquier modo.
+  confirm_mode: always
+
+  # Truncado de cada resultado antes de pasarlo al LLM (caracteres).
+  max_tool_result_chars: 3000
+
+  # Frases que se dicen al azar mientras ejecuta, si el modelo no dijo nada antes.
+  filler_phrases:
     - "Déjame revisar."
     - "Un momento, señor."
     - "Enseguida lo compruebo."
-  disabled_tools: [] # nombres de herramientas a excluir, ej. ["run_powershell"]
-  confirm_yes: [
+
+  # Nombres de herramientas a excluir (ej. ["run_powershell"]).
+  disabled_tools: []
+
+  # Palabras/frases que Rust interpreta como "sí" al confirmar (nunca lo decide el LLM).
+  # Reconoce cualquiera de estas dentro de una respuesta más larga.
+  confirm_yes:
+    [
       "sí",
       "si",
       "claro",
@@ -235,7 +431,9 @@ agent:
       "va",
       "de una",
       "está bien",
-    ] # palabras/frases que Rust interpreta como "sí" al confirmar (nunca lo decide el LLM); reconoce cualquiera de estas dentro de una respuesta más larga, no hace falta que sea la frase completa
+    ]
+
+  # Palabras/frases que Rust interpreta como "no".
   confirm_no:
     [
       "no",
@@ -249,32 +447,67 @@ agent:
       "no gracias",
       "todavía no",
     ]
-  risk_code: "0911" # código de aceptación de riesgos, verificado en Rust — cambialo por uno propio
-  high_risk_patterns: [] # regex extra que se suman a los defaults para elevar un comando a nivel código
+
+  # Código de aceptación de riesgos, verificado en Rust. Cámbialo por uno propio.
+  risk_code: "0911"
+
+  # Regex extra que se suman a los defaults para elevar un comando a nivel código.
+  high_risk_patterns: []
+
+  # --- Búsqueda de archivos ---
   files:
-    # search_roots: ["C:/Users/jesus/Documents"] # carpetas donde busca find_files (default: perfil del usuario)
-    max_results: 20 # tope de resultados de find_files
-    everything_cli: null # ruta a es.exe (Everything); null = recorrido acotado con walkdir
+    # Tope de resultados de find_files.
+    max_results: 20
+
+    # Ruta a es.exe (Everything). null = recorrido acotado con walkdir.
+    everything_cli: null
+
+  # --- Apertura de aplicaciones ---
   apps:
-    aliases: # alias hablado -> ejecutable real
+    # Alias hablado -> ejecutable real.
+    aliases:
       navegador: "brave"
       bloc de notas: "notepad"
       calculadora: "calc"
-    # extra_search_roots: ["C:/PortableApps"] # carpetas extra donde open_app busca accesos directos/ejecutables
+
+  # --- Búsqueda web ---
   web:
-    max_page_chars: 4000 # tope de caracteres de página pasados al LLM en fetch_page
-    max_results: 5 # tope de resultados de web_search
+    # Tope de caracteres de página pasados al LLM en fetch_page.
+    max_page_chars: 4000
+    # Tope de resultados de web_search.
+    max_results: 5
+
+  # --- Memoria persistente ---
   memory:
+    # Ruta a la base de datos SQLite de memoria.
     db_path: "data/memory.db"
-    max_injected: 12 # memorias recientes inyectadas en el prompt de cada turno
+    # Memorias recientes inyectadas en el prompt de cada turno.
+    max_injected: 12
 
-welcome: # modo bienvenida (doble aplauso): música + saludo + recordatorios/noticias
+# ============================================================================
+# welcome Modo bienvenida por doble aplauso
+#
+# Música + saludo + recordatorios/noticias.
+
+welcome:
+  # Si true, activa la escena de bienvenida al detectar doble aplauso.
   enabled: true
-  music_path: "assets/music/welcome.mp3" # mp3 local, no versionado — ver assets/music/.gitkeep
+  # Ruta a archivo MP3 local. No versionado (ver assets/music/.gitkeep).
+  music_path: "assets/music/welcome.mp3"
+  # Frase de saludo inicial.
   greeting_phrase: "Bienvenido a casa, señor."
+  # Volumen de la música (0.0 a 1.0).
   music_volume: 0.4
-  duck_volume: 0.12 # volumen de la música mientras Jarvis o el usuario hablan
-  cooldown_secs: 120 # ignora nuevos doble aplausos que disparen la escena durante este tiempo
-  news_when_no_reminders: true # si no hay recordatorios pendientes, cuenta las noticias del día
+  # Volumen de la música mientras Jarvis o el usuario hablan (0.0 a 1.0).
+  duck_volume: 0.12
+  # Ignora nuevos doble aplausos que disparen la escena durante este tiempo (segundos).
+  cooldown_secs: 120
+  # Si true y no hay recordatorios pendientes, cuenta las noticias del día.
+  news_when_no_reminders: true
 
-log_level: info # trace | debug | info | warn | error — "debug" muestra telemetría de VAD/transcripción/barge-in
+# ============================================================================
+# log_level — Nivel de logging
+
+# Nivel de detalle del log: trace, debug, info, warn, error.
+# "debug" muestra telemetría de VAD, transcripción y barge-in.
+log_level: info
