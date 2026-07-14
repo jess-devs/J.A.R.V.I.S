@@ -61,7 +61,7 @@ Write-Host "OK: cargo, Python 3.12 y ollama estan disponibles."
 Write-Step "Creando/actualizando el entorno Python de los workers..."
 & "$PSScriptRoot/setup_python_env.ps1"
 
-# Hardware -> modelo de Ollama recomendado ----------------------------
+# Hardware -> modelo de Ollama recomendado
 Write-Step "Detectando hardware para recomendar un modelo de Ollama..."
 
 $ramGb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
@@ -96,7 +96,7 @@ if ($hasGpu -and $vramGb -ge 24)
     $recommended = "qwen3:8b"
 } elseif ($hasGpu -and $vramGb -ge 4)
 {
-    $recommended = "qwen2.5:7b"
+    $recommended = "qwen3.5:0.8b"
 } elseif (-not $hasGpu -and $ramGb -ge 16)
 {
     $recommended = "qwen2.5:7b"
