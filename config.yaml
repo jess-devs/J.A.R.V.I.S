@@ -210,7 +210,7 @@ llm:
 
     # Modelo a usar. "auto" detecta VRAM/RAM y elige un modelo qwen acorde;
     # si no está descargado, avisa el "ollama pull" pero no lo baja solo.
-    model: "auto"
+    model: "qwen3.5:0.8b"
 
     # null = no envía el campo (qwen2.5 lo rechaza); false para qwen3/deepseek-r1.
     think: null
