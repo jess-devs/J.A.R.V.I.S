@@ -135,11 +135,6 @@ else
     fi
 fi
 
-step "Descargando el modelo de Ollama ($model_to_pull)..."
-if ! ollama pull "$model_to_pull"; then
-    warn "No se pudo hacer pull de '$model_to_pull'. Confirma que Ollama este corriendo ('ollama serve') y volve a intentar con 'ollama pull $model_to_pull'."
-fi
-
 # Voz de Piper
 step "Verificando la voz de Piper configurada..."
 
@@ -163,6 +158,11 @@ else
             warn "No se pudo confirmar la descarga de la voz '$voice_name'. Revisa manualmente (ver README.md, seccion 'Voz de Piper')."
         fi
     fi
+fi
+
+step "Descargando el modelo de Ollama ($model_to_pull)..."
+if ! ollama pull "$model_to_pull"; then
+    warn "No se pudo hacer pull de '$model_to_pull'. Confirma que Ollama este corriendo ('ollama serve') y volve a intentar con 'ollama pull $model_to_pull'."
 fi
 
 # .env

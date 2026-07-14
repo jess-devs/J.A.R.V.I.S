@@ -203,19 +203,19 @@ llm:
   # ollama y lmstudio corren local sin API key.
   provider: deepseek
 
-  # --- Ollama (provider: ollama) ---
+  #  Ollama (provider: ollama)
   ollama:
     # URL base del servidor Ollama.
     base_url: "http://localhost:11434"
 
     # Modelo a usar. "auto" detecta VRAM/RAM y elige un modelo qwen acorde;
     # si no está descargado, avisa el "ollama pull" pero no lo baja solo.
-    model: "qwen3.5:4b"
+    model: "auto"
 
     # null = no envía el campo (qwen2.5 lo rechaza); false para qwen3/deepseek-r1.
     think: null
 
-  # --- LM Studio (provider: lmstudio) ---
+  #  LM Studio (provider: lmstudio)
   lmstudio:
     # URL base del servidor LM Studio.
     base_url: "http://localhost:1234/v1"
@@ -226,7 +226,7 @@ llm:
     # null = sin autenticación (default de LM Studio).
     api_key_env: null
 
-  # --- Anthropic (provider: anthropic) ---
+  #  Anthropic (provider: anthropic)
   anthropic:
     # Modelo de Anthropic a usar.
     model: "claude-sonnet-5"
@@ -234,7 +234,7 @@ llm:
     # Nombre de la variable de entorno con la API key (ver .env.example).
     api_key_env: "ANTHROPIC_API_KEY"
 
-  # --- OpenAI (provider: openai) ---
+  #  OpenAI (provider: openai)
   openai:
     # Modelo de OpenAI a usar.
     model: "gpt-4o-mini"
@@ -242,7 +242,7 @@ llm:
     # Nombre de la variable de entorno con la API key.
     api_key_env: "OPENAI_API_KEY"
 
-  # --- DeepSeek (provider: deepseek) ---
+  #  DeepSeek (provider: deepseek)
   deepseek:
     # Modelo de DeepSeek a usar.
     model: "deepseek-v4-flash"
@@ -328,7 +328,7 @@ tts:
   # Proveedor de TTS: piper, elevenlabs o cartesia.
   provider: piper
 
-  # --- Piper (provider: piper) ---
+  #  Piper (provider: piper)
   piper:
     # Ruta al modelo de voz ONNX de Piper.
     voice_path: "voices/es_ES-davefx-medium.onnx"
@@ -345,7 +345,7 @@ tts:
     # Variación en duración de fonemas. null = default de la voz.
     noise_w_scale: null
 
-  # --- ElevenLabs (provider: elevenlabs) ---
+  # ElevenLabs (provider: elevenlabs)
   # Requiere API key y consume créditos.
   elevenlabs:
     # ID de la voz a usar.
@@ -360,7 +360,7 @@ tts:
     # Nombre de la variable de entorno con la API key.
     api_key_env: "ELEVENLABS_API_KEY"
 
-  # --- Cartesia (provider: cartesia) ---
+  #  Cartesia (provider: cartesia)
   # Requiere API key y consume créditos.
   cartesia:
     # ID del modelo (sonic-3.5, sonic-3, sonic-latest).
@@ -505,7 +505,7 @@ agent:
   # Regex extra que se suman a los defaults para elevar un comando a nivel código.
   high_risk_patterns: []
 
-  # --- Búsqueda de archivos ---
+  #  Búsqueda de archivos
   files:
     # Tope de resultados de find_files.
     max_results: 20
@@ -513,7 +513,7 @@ agent:
     # Ruta a es.exe (Everything). null = recorrido acotado con walkdir.
     everything_cli: null
 
-  # --- Apertura de aplicaciones ---
+  #  Apertura de aplicaciones
   apps:
     # Alias hablado -> ejecutable real.
     aliases:
@@ -521,14 +521,14 @@ agent:
       bloc de notas: "notepad"
       calculadora: "calc"
 
-  # --- Búsqueda web ---
+  #  Búsqueda web
   web:
     # Tope de caracteres de página pasados al LLM en fetch_page.
     max_page_chars: 4000
     # Tope de resultados de web_search.
     max_results: 5
 
-  # --- Memoria persistente ---
+  #  Memoria persistente
   memory:
     # Ruta a la base de datos SQLite de memoria.
     db_path: "data/memory.db"

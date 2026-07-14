@@ -99,7 +99,7 @@ if ($hasGpu -and $vramGb -ge 24)
     $recommended = "qwen3.5:0.8b"
 } elseif (-not $hasGpu -and $ramGb -ge 16)
 {
-    $recommended = "qwen2.5:7b"
+    $recommended = "qwen3.5:4b"
 } else
 {
     $recommended = "qwen2.5:3b-instruct"
@@ -169,13 +169,6 @@ if (-not $currentModel)
     }
 }
 
-Write-Step "Descargando el modelo de Ollama ($modelToPull)..."
-ollama pull $modelToPull
-if ($LASTEXITCODE -ne 0)
-{
-    Write-Warn "No se pudo hacer pull de '$modelToPull'. Confirma que Ollama este corriendo ('ollama serve') y volve a intentar con 'ollama pull $modelToPull'."
-}
-
 # Voz de Piper
 Write-Step "Verificando la voz de Piper configurada..."
 
@@ -206,6 +199,13 @@ if (-not $voicePathMatch)
             Write-Warn "No se pudo confirmar la descarga de la voz '$voiceName'. Revisa manualmente (ver README.md, seccion 'Voz de Piper')."
         }
     }
+}
+
+Write-Step "Descargando el modelo de Ollama ($modelToPull)..."
+ollama pull $modelToPull
+if ($LASTEXITCODE -ne 0)
+{
+    Write-Warn "No se pudo hacer pull de '$modelToPull'. Confirma que Ollama este corriendo ('ollama serve') y volve a intentar con 'ollama pull $modelToPull'."
 }
 
 # .env
