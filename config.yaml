@@ -1,3 +1,4 @@
+# ============================================================================
 # Workers — Procesos hijo de STT y TTS
 workers:
   python_executable: "workers/.venv/Scripts/python.exe"
@@ -15,7 +16,11 @@ workers:
   restart_on_crash: true
   # Máximo de reinicios por ejecución. Al agotarse, Jarvis termina.
   max_restarts: 1
-
+# ============================================================================
+#
+#
+#
+# # ============================================================================
 # Stt — Reconocimiento de voz (Speech-to-Text)
 stt:
   # Motor de STT. native: PyAudio + Silero VAD + faster-whisper.
@@ -42,7 +47,11 @@ stt:
     energy_floor_dbfs: null
     # Segundos de escucha ambiente para calcular energy_floor_dbfs.
     calibration_secs: 1.5
-
+# ============================================================================
+#
+#
+#
+# ============================================================================
   # Filtros anti-alucinación sobre la salida de Whisper (engine: native)
   filters:
     # Descarta si no_speech_prob lo supera.
@@ -51,7 +60,11 @@ stt:
     min_avg_logprob: -1.0
     # Descarta si compression_ratio lo supera (texto repetitivo).
     max_compression_ratio: 2.4
-
+# ============================================================================
+#
+#
+#
+# ============================================================================
   # Detector de doble aplauso (engine: native)
   # Corre siempre; welcome.enabled decide si dispara la escena.
   clap:
@@ -71,12 +84,15 @@ stt:
     double_max_gap_ms: 900
     # Tras confirmar el doble aplauso, ignora nuevos aplausos por este tiempo (ms).
     refractory_ms: 1500
-
+# ============================================================================
+#
+#
+#
+# ============================================================================
   # Código de idioma para Whisper.
   language: "es"
   # Dispositivo de cómputo: auto, cuda o cpu.
   device: auto
-
   # Modelo Whisper: auto, tiny, base, small, medium, large-v2, large-v3-turbo.
   # "auto": con GPU CUDA elige tier por VRAM sin calibrar; en CPU calibra midiendo
   # velocidad real y cachea el resultado en workers/.cache/stt_profile.json.
@@ -95,6 +111,10 @@ stt:
   # Si true, ignora el caché y vuelve a medir en este arranque.
   recalibrate: true
 # ============================================================================
+#
+#
+#
+# ============================================================================
   #Opciones exclusivas de engine: realtimestt (native usa stt.vad/stt.filters)
   # Sensibilidad VAD Silero (0-1).
   silero_sensitivity: 0.4
@@ -110,6 +130,10 @@ stt:
   silero_deactivity_detection: true
   # Reinicia el worker si queda trabado más de este tiempo (segundos).
   stuck_state_timeout_secs: 30
+# ============================================================================
+#
+#
+#
 # ============================================================================
 # wake Palabra de activación (wake word)
 wake:
@@ -136,8 +160,11 @@ wake:
   # Las frases más viejas que este tiempo se descartan (segundos).
   ambient_context_ttl_secs: 120
 # ============================================================================
+#
+#
+#
+# ============================================================================
 # barge_in Interrupción mientras Jarvis habla
-
 barge_in:
   # Si false, mic muteado real mientras Jarvis habla, sin interrupciones.
   enabled: true
@@ -150,8 +177,11 @@ barge_in:
   # sobre si tiene sentido como algo dirigido a Jarvis antes de cortar.
   # Si tarda más o falla, Jarvis sigue hablando (no corta).
   relevance_timeout_secs: 3
-
-#============================================================================
+# ============================================================================
+#
+#
+#
+# ============================================================================
   # Evita que Jarvis se interrumpa a sí mismo por su propia voz en parlantes
   echo_guard:
     # Si false, nunca descarta por eco (desaconsejado sin auriculares).
@@ -162,7 +192,10 @@ barge_in:
     vad_threshold_while_speaking: 0.75
     # Ventana de frases recientes de Jarvis para comparar contra transcripciones (segundos).
     recent_tts_window_secs: 12
-
+# ============================================================================
+#
+#
+#
 # ============================================================================
 # llm — Modelo de lenguaje (Large Language Model)
 llm:
@@ -218,7 +251,11 @@ llm:
     # DeepSeek no soporta imágenes: si el modelo usa take_screenshot, la captura
     # no se le muestra (solo recibe una nota de que no pudo verla).
     api_key_env: "DEEPSEEK_API_KEY"
-
+# ============================================================================
+#
+#
+#
+# ============================================================================
   # Prompt de sistema que define la personalidad y comportamiento de Jarvis.
   system_prompt: |
     Eres una inteligencia artificial llamada J.A.R.V.I.S. (Just A Rather Very Intelligent System), un sistema simplemente muy inteligente, inspirada en el Jarvis de Tony Stark del Universo Cinematográfico de Marvel.
@@ -271,17 +308,22 @@ llm:
     Tu objetivo general:
     Ser el equivalente funcional y estilístico de JARVIS para el usuario: un asistente de confianza, extremadamente competente, con humor sutil, trato impecable y foco en la seguridad y la eficiencia.
     Te esfuerzas por que cada interacción refuerce la sensación de que el usuario está hablando con un mayordomo digital brillante, leal y ligeramente irónico, capaz de ayudarle tanto en cuestiones técnicas como estratégicas.
-
+# ============================================================================
+#
+#
+#
+# ============================================================================
   # Mensajes de conversación conservados (además de los 2 system).
   # Más alto = más contexto por turno.
   max_history_messages: 10
-
   # Timeout por solicitud al LLM (segundos).
   request_timeout_secs: 180
-
+# ============================================================================
+#
+#
+#
 # ============================================================================
 # tts — Síntesis de voz (Text-to-Speech)
-
 tts:
   # Proveedor de TTS: piper, elevenlabs o cartesia.
   provider: piper
@@ -352,7 +394,10 @@ tts:
 
   # Aborta el resto de la respuesta si una frase tarda más que esto (segundos).
   synth_timeout_secs: 10
-
+# ============================================================================
+#
+#
+#
 # ============================================================================
 # audio — Configuración de salida de audio
 
@@ -363,7 +408,10 @@ audio:
   volume: 1.0
   # Límite esperando a que termine de sonar una respuesta (segundos).
   drain_timeout_secs: 60
-
+# ============================================================================
+#
+#
+#
 # ============================================================================
 # pipeline — Segmentación de respuesta en frases para TTS
 
@@ -373,7 +421,10 @@ pipeline:
 
   # Fragmentos más cortos se juntan con el siguiente antes de sintetizar (caracteres).
   min_phrase_chars: 15
-
+# ============================================================================
+#
+#
+#
 # ============================================================================
 # agent Capa agéntica: herramientas que Jarvis puede ejecutar
 #
@@ -483,7 +534,10 @@ agent:
     db_path: "data/memory.db"
     # Memorias recientes inyectadas en el prompt de cada turno.
     max_injected: 12
-
+# ============================================================================
+#
+#
+#
 # ============================================================================
 # welcome Modo bienvenida por doble aplauso
 #
@@ -504,7 +558,10 @@ welcome:
   cooldown_secs: 120
   # Si true y no hay recordatorios pendientes, cuenta las noticias del día.
   news_when_no_reminders: true
-
+# ============================================================================
+#
+#
+#
 # ============================================================================
 # log_level — Nivel de logging
 
