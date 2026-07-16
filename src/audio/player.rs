@@ -17,6 +17,7 @@ use rodio::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapProd;
 use ringbuf::HeapRb;
+use tokio::sync::watch;
 
 use crate::errors::AudioError;
 use crate::tts::AudioChunk;
@@ -31,6 +32,10 @@ pub struct AudioPlayer {
     drain_timeout: Duration,
     stop_flag: Arc<AtomicBool>,
     _stream: rodio::cpal::Stream,
+    /// RMS (0.0-1.0 aprox.) del último chunk empujado al buffer, para que la
+    /// TUI anime `JarvisSpeaking` con el nivel real de audio en reproducción
+    /// (no un valor sintético). Ver `Self::level_rx`.
+    level_tx: watch::Sender<f32>,
 }
 
 impl AudioPlayer {
@@ -105,6 +110,8 @@ impl AudioPlayer {
             "dispositivo de audio de salida listo"
         );
 
+        let (level_tx, _) = watch::channel(0.0);
+
         Ok(Self {
             volume,
             output_sample_rate,
@@ -113,7 +120,16 @@ impl AudioPlayer {
             drain_timeout: Duration::from_secs(drain_timeout_secs),
             stop_flag,
             _stream: stream,
+            level_tx,
         })
+    }
+
+    /// Receptor del nivel (RMS, 0.0-1.0 aprox.) del audio que se está
+    /// reproduciendo, actualizado en cada `play_chunk`. Pensado para que la
+    /// TUI anime el orbe/onda de `JarvisSpeaking` con el volumen real de la
+    /// voz sintetizada, en vez de una animación sintética.
+    pub fn level_rx(&self) -> watch::Receiver<f32> {
+        self.level_tx.subscribe()
     }
 
     /// Corta de inmediato lo que esté sonando: no espera a que termine de
@@ -142,6 +158,9 @@ impl AudioPlayer {
         }
 
         let mono = pcm_i16_to_mono_f32(&chunk.pcm, chunk.channels, self.volume);
+        if !mono.is_empty() {
+            self.level_tx.send_replace(rms(&mono));
+        }
         let resampled = resample_linear(&mono, chunk.sample_rate, self.output_sample_rate);
         let samples = upmix_mono_to_channels(&resampled, self.output_channels);
 
@@ -213,6 +232,13 @@ fn resample_linear(input: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f32> {
         output.push(a + (b - a) * frac);
     }
     output
+}
+
+/// RMS simple de un buffer mono en [-1,1], usado solo como nivel visual (ver
+/// `AudioPlayer::level_rx`) — no afecta la reproducción.
+fn rms(samples: &[f32]) -> f32 {
+    let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
+    (sum_sq / samples.len() as f32).sqrt()
 }
 
 /// Duplica cada muestra mono en las `channels` del dispositivo (entrelazado).
