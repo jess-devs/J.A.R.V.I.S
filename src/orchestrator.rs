@@ -28,6 +28,7 @@ use crate::stt::{SttEvent, SttMode, SttWorker};
 use crate::tools::scripted_store::ScriptedToolStore;
 use crate::tools::{system_info, ToolRegistry};
 use crate::tts::{self, TtsProvider};
+use crate::tui::{UiState, VisualState};
 use crate::wake::{AttentionGate, GateDecision};
 
 enum AgentState {
@@ -85,10 +86,14 @@ pub struct Orchestrator {
     /// stdin y cancela el token del turno vigente en este slot. La Fase 3 lo
     /// reemplaza por el disparo real desde el motor de STT.
     test_cancel_slot: Option<Arc<Mutex<Option<CancellationToken>>>>,
+    /// Publica transiciones de estado para la TUI (ver `crate::tui`). Se
+    /// escribe siempre, aunque `config.ui.enabled` sea `false`: sin
+    /// receptores activos, `set()` no cuesta nada relevante.
+    ui: UiState,
 }
 
 impl Orchestrator {
-    pub async fn new(config: Config) -> Result<Self> {
+    pub async fn new(config: Config, ui: UiState) -> Result<Self> {
         let stt = SttWorker::spawn(&config.workers, &config.stt, &config.barge_in).await?;
         let llm_provider = llm::build_provider(&config)?;
         let tts_provider = tts::build_provider(&config).await?;
@@ -177,7 +182,14 @@ impl Orchestrator {
             reminder_store: reminder_store_for_welcome,
             last_welcome: None,
             test_cancel_slot,
+            ui,
         })
+    }
+
+    /// Nivel de audio en reproducción (ver `AudioPlayer::level_rx`), para que
+    /// `main.rs` se lo pase a la TUI sin exponer el `AudioPlayer` entero.
+    pub fn audio_level_rx(&self) -> tokio::sync::watch::Receiver<f32> {
+        self.player.level_rx()
     }
 
     /// Token de cancelación para un turno nuevo. Con `JARVIS_TEST_CANCEL` lo
@@ -203,6 +215,11 @@ impl Orchestrator {
     /// mutear físicamente — así se puede detectar que el usuario habla
     /// encima. Si no, el comportamiento de siempre (mute real).
     async fn begin_speaking(&mut self) {
+        // "Pensando": arranca el turno (mic en modo speaking/mute) antes de
+        // que haya audio de Jarvis. La TUI promueve esto a "hablando" sola
+        // en cuanto detecta nivel de audio real (ver `crate::tui::run`), sin
+        // que el orquestador necesite saber cuándo empieza a sonar el TTS.
+        self.ui.set(VisualState::Thinking);
         if self.music.is_playing() {
             self.music.duck();
         }
@@ -217,6 +234,7 @@ impl Orchestrator {
 
     /// Contraparte de `begin_speaking`: vuelve a escucha normal.
     async fn end_speaking(&mut self) {
+        self.ui.set(VisualState::Listening);
         if self.music.is_playing() {
             self.music.unduck();
         }
@@ -351,6 +369,7 @@ impl Orchestrator {
                 }
                 SttEvent::VadStart => {
                     tracing::debug!("VAD: inicio de voz detectado");
+                    self.ui.set(VisualState::UserSpeaking);
                     // Red de seguridad: si el VAD dispara pero no llega a
                     // generar un turno (el gate lo dropea/ignora), el
                     // `unduck()` de contrapartida es el de VadEnd, no el de
@@ -361,6 +380,7 @@ impl Orchestrator {
                 }
                 SttEvent::VadEnd { speech_ms } => {
                     tracing::debug!(speech_ms = ?speech_ms, "VAD: fin de voz detectado");
+                    self.ui.set(VisualState::Listening);
                     if matches!(self.state, AgentState::Idle) && self.music.is_playing() {
                         self.music.unduck();
                     }
@@ -426,6 +446,8 @@ impl Orchestrator {
             maximo = self.config.workers.max_restarts,
             "el worker de STT se cayó o quedó colgado; reiniciándolo"
         );
+        self.ui
+            .set(VisualState::Error("worker STT reiniciado".to_string()));
         self.stt = SttWorker::spawn(
             &self.config.workers,
             &self.config.stt,
@@ -721,6 +743,7 @@ impl Orchestrator {
                     Instant::now() + Duration::from_secs(self.config.agent.confirm_timeout_secs);
                 self.state = AgentState::AwaitingConfirmation { pending, deadline };
                 self.end_speaking().await;
+                self.ui.set(VisualState::AwaitingConfirmation);
             }
             Err(e) => {
                 tracing::error!(error = %e, "fallo generando la respuesta");
