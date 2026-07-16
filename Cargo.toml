@@ -47,3 +47,6 @@ base64 = "0.22"
 futures-util = "0.3"
 xcap = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
+ratatui = "0.30.2"
+crossterm = "0.29.0"
+tracing-appender = "0.2.5"
