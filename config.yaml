@@ -567,4 +567,4 @@ welcome:
 
 # Nivel de detalle del log: trace, debug, info, warn, error.
 # "debug" muestra telemetría de VAD, transcripción y barge-in.
-log_level: info
+log_level: debug

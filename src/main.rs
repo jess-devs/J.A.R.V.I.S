@@ -94,10 +94,25 @@ async fn run(mut config: Config) -> errors::Result<()> {
         .ok();
 
     let mut console_shutdown_rx = ipc::console_handler::install()
-        .map_err(|e| tracing::warn!(error = %e, "no se pudo instalar el handler de cierre de consola"))
+        .map_err(
+            |e| tracing::warn!(error = %e, "no se pudo instalar el handler de cierre de consola"),
+        )
         .ok();
 
     llm::model_select::resolve(&mut config).await;
+
+    //verifica si el archivo welcome.mp3 se encuentra dentro de assets\musci
+    // En caso de no haber desahbilita el booleano responsable de la funcion
+    // Arreglando el bug que no dejaba iniciar el programa
+    if config.welcome.enabled && !config.welcome.music_path.exists() {
+        tracing::warn!(
+            path = %config.welcome.music_path.display(),
+            "El archivo de música no existe; deshabilitando Welcome"
+        );
+
+        config.welcome.enabled = false;
+    }
+
     startup_checks::run(&config).await?;
 
     let mut assistant = Orchestrator::new(config).await?;
