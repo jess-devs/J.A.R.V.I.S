@@ -76,19 +76,15 @@ async fn main() {
     // logs de tracing van a un archivo en vez de la consola. `_log_guard`
     // debe vivir hasta el final de `main` (el writer no bloqueante de
     // tracing-appender depende de él para no perder líneas al salir).
+    let builder =
+        tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::new(log_level));
     let _log_guard = if config.ui.enabled {
         let file_appender = tracing_appender::rolling::never("logs", "jarvis.log");
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
-            .with_writer(non_blocking)
-            .with_ansi(false)
-            .init();
+        builder.with_writer(non_blocking).with_ansi(false).init();
         Some(guard)
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
-            .init();
+        builder.init();
         None
     };
 
