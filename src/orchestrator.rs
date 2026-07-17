@@ -39,6 +39,21 @@ enum AgentState {
     },
 }
 
+/// Resultado de `handle_confirmation`: o la confirmación quedó resuelta, o
+/// la frase no era una respuesta y el llamador debe procesarla él mismo
+/// (devolverla evita que `handle_confirmation` y `handle_utterance` se
+/// llamen mutuamente — recursión de `async fn` que Rust no permite).
+enum ConfirmOutcome {
+    /// La confirmación se resolvió (aprobada, cancelada o código incorrecto).
+    Done,
+    /// La confirmación expiró: la frase llegó tarde y debe pasar por el wake
+    /// gate como cualquier otra (`dispatch_by_gate`).
+    Dispatch(String),
+    /// El usuario cambió de tema: la frase es una petición normal y debe
+    /// procesarse como turno nuevo (`handle_utterance`), sin wake gate.
+    Utterance(String),
+}
+
 pub struct Orchestrator {
     config: Config,
     stt: SttWorker,
@@ -302,6 +317,7 @@ impl Orchestrator {
         agent::speak(
             &self.tts,
             &mut self.player,
+            &self.echo_gate,
             &self.config.welcome.greeting_phrase,
         )
         .await;
@@ -335,6 +351,7 @@ impl Orchestrator {
                 agent::speak(
                     &self.tts,
                     &mut self.player,
+                    &self.echo_gate,
                     "No tiene recordatorios pendientes, señor.",
                 )
                 .await;
@@ -435,6 +452,7 @@ impl Orchestrator {
         agent::speak(
             &self.tts,
             &mut self.player,
+            &self.echo_gate,
             &format!("Recordatorio, señor: {}", due.text),
         )
         .await;
@@ -473,6 +491,21 @@ impl Orchestrator {
     }
 
     async fn on_transcript(&mut self, text: String) {
+        // El micrófono puede captar la cola del propio TTS ya fuera del
+        // turno (la pregunta de confirmación, el cierre de la respuesta).
+        // Sin este filtro ese eco cuenta como habla del usuario: cancela la
+        // confirmación pendiente como "cambió de tema" y realimenta al LLM
+        // con su propia frase, en bucle.
+        let is_echo = self
+            .echo_gate
+            .lock()
+            .map(|eg| eg.is_echo(&text))
+            .unwrap_or(false);
+        if is_echo {
+            tracing::info!(text = %text, "descartado: probable eco del propio TTS");
+            return;
+        }
+
         // ¿Hay una confirmación pendiente? Toda transcripción cuenta como
         // respuesta (bypass del wake gate: el usuario ya está en diálogo).
         if matches!(self.state, AgentState::AwaitingConfirmation { .. }) {
@@ -481,7 +514,11 @@ impl Orchestrator {
             else {
                 unreachable!();
             };
-            self.handle_confirmation(pending, deadline, text).await;
+            match self.handle_confirmation(pending, deadline, text).await {
+                ConfirmOutcome::Done => {}
+                ConfirmOutcome::Dispatch(text) => self.dispatch_by_gate(text).await,
+                ConfirmOutcome::Utterance(text) => self.handle_utterance(text).await,
+            }
             return;
         }
 
@@ -516,6 +553,36 @@ impl Orchestrator {
     /// `async fn` recursivas sin bloquear el Future en el heap).
     async fn handle_utterance(&mut self, mut user_text: String) {
         loop {
+            // Si el turno anterior de este mismo loop dejó una confirmación
+            // pendiente (`NeedsConfirmation`) y a la vez quedó una
+            // interrupción encadenada, esa frase es la respuesta a la
+            // pregunta ("sí", "no"), no un turno nuevo: procesarla como
+            // turno pisaría la confirmación y dejaría la tool call colgada.
+            if matches!(self.state, AgentState::AwaitingConfirmation { .. }) {
+                let AgentState::AwaitingConfirmation { pending, deadline } =
+                    std::mem::replace(&mut self.state, AgentState::Idle)
+                else {
+                    unreachable!();
+                };
+                match self.handle_confirmation(pending, deadline, user_text).await {
+                    ConfirmOutcome::Done => return,
+                    ConfirmOutcome::Utterance(text) => {
+                        user_text = text;
+                    }
+                    ConfirmOutcome::Dispatch(text) => match self.gate.decide(&text) {
+                        GateDecision::Respond => {
+                            tracing::info!(text = %text, "usuario dijo");
+                            self.gate.mark_responded(&text);
+                            user_text = text;
+                        }
+                        GateDecision::Drop | GateDecision::Ignore => {
+                            tracing::info!(text = %text, "ignorado: llegó tarde a la confirmación y no pasa el wake gate");
+                            return;
+                        }
+                    },
+                }
+            }
+
             let content = match self.gate.take_ambient_context() {
                 Some(ambient) => format!("{ambient}\n{user_text}"),
                 None => user_text.clone(),
@@ -754,7 +821,13 @@ impl Orchestrator {
                     requires_code = pending.requires_code,
                     "esperando confirmación por voz"
                 );
-                agent::speak(&self.tts, &mut self.player, &pending.spoken_question).await;
+                agent::speak(
+                    &self.tts,
+                    &mut self.player,
+                    &self.echo_gate,
+                    &pending.spoken_question,
+                )
+                .await;
                 let deadline =
                     Instant::now() + Duration::from_secs(self.config.agent.confirm_timeout_secs);
                 self.state = AgentState::AwaitingConfirmation { pending, deadline };
@@ -768,12 +841,17 @@ impl Orchestrator {
         }
     }
 
+    /// Interpreta `text` como respuesta a la confirmación pendiente y la
+    /// resuelve. No despacha frases sobrantes por sí misma: las devuelve en
+    /// el `ConfirmOutcome` para que el llamador decida (así puede llamarse
+    /// tanto desde `on_transcript` como desde el loop de `handle_utterance`
+    /// sin crear `async fn` recursivas).
     async fn handle_confirmation(
         &mut self,
         pending: PendingConfirmation,
         deadline: Instant,
         text: String,
-    ) {
+    ) -> ConfirmOutcome {
         if Instant::now() > deadline {
             tracing::info!("la confirmación expiró; se cancela la acción pendiente");
             self.cancel_pending(
@@ -781,8 +859,7 @@ impl Orchestrator {
                 "El usuario no respondió a tiempo; la acción fue cancelada.",
             );
             // La frase que llegó tarde se procesa como una petición normal.
-            self.dispatch_by_gate(text).await;
-            return;
+            return ConfirmOutcome::Dispatch(text);
         }
 
         if pending.requires_code {
@@ -800,6 +877,7 @@ impl Orchestrator {
                     agent::speak(
                         &self.tts,
                         &mut self.player,
+                        &self.echo_gate,
                         "Código incorrecto. Acción cancelada, señor.",
                     )
                     .await;
@@ -809,11 +887,12 @@ impl Orchestrator {
                     self.cancel_and_acknowledge(pending).await;
                 }
                 CodeDecision::Unrelated => {
+                    tracing::info!(text = %text, "no parece respuesta a la confirmación; acción cancelada, la frase sigue como petición normal");
                     self.cancel_pending(
                         pending,
                         "El usuario cambió de tema; la acción fue cancelada.",
                     );
-                    self.handle_utterance(text).await;
+                    return ConfirmOutcome::Utterance(text);
                 }
             }
         } else {
@@ -826,14 +905,16 @@ impl Orchestrator {
                     self.cancel_and_acknowledge(pending).await;
                 }
                 ConfirmDecision::Unrelated => {
+                    tracing::info!(text = %text, "no parece respuesta a la confirmación; acción cancelada, la frase sigue como petición normal");
                     self.cancel_pending(
                         pending,
                         "El usuario cambió de tema; la acción fue cancelada.",
                     );
-                    self.handle_utterance(text).await;
+                    return ConfirmOutcome::Utterance(text);
                 }
             }
         }
+        ConfirmOutcome::Done
     }
 
     /// El usuario aprobó: ejecutar la herramienta pendiente y retomar el

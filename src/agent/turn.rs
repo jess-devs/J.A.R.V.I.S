@@ -167,7 +167,7 @@ async fn turn_loop(
                 .choose(&mut rand::thread_rng())
                 .cloned();
             if let Some(filler) = filler {
-                speak(ctx.tts, ctx.player, &filler).await;
+                speak(ctx.tts, ctx.player, &ctx.echo_gate, &filler).await;
             }
         }
 
