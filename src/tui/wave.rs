@@ -19,7 +19,7 @@ use ratatui::symbols::Marker;
 use ratatui::widgets::canvas::{Canvas, Context, Line};
 use ratatui::Frame;
 
-use super::state::VisualState;
+use super::state::{ToolCategory, VisualState};
 use super::theme::{self, Palette};
 
 const COLUMNS: f64 = 140.0;
@@ -50,7 +50,13 @@ fn polyline(ctx: &mut Context, points: &[(f64, f64)], color: Color) {
 
 /// Onda calma que fluye de derecha a izquierda, con la amplitud
 /// "respirando" lentamente encima. Usada en `Idle`/`Listening`.
-fn flowing_breath(ctx: &mut Context, elapsed: f64, base_amp: f64, breathing_speed: f64, color: Color) {
+fn flowing_breath(
+    ctx: &mut Context,
+    elapsed: f64,
+    base_amp: f64,
+    breathing_speed: f64,
+    color: Color,
+) {
     let amp = base_amp * (0.55 + 0.45 * (elapsed * breathing_speed).sin());
     let steps = 90;
     let points: Vec<(f64, f64)> = (0..=steps)
@@ -123,7 +129,11 @@ fn scanning_pulse(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color
     // sierra que salte).
     let period = 1.6;
     let phase = (elapsed / period).fract();
-    let triangle = if phase < 0.5 { phase * 2.0 } else { 2.0 - phase * 2.0 };
+    let triangle = if phase < 0.5 {
+        phase * 2.0
+    } else {
+        2.0 - phase * 2.0
+    };
     let x = COLUMNS * triangle;
     let width = 10.0;
     let steps = 16;
@@ -148,6 +158,103 @@ fn slow_pulse_flat(ctx: &mut Context, elapsed: f64, color: Color) {
         })
         .collect();
     polyline(ctx, &points, color);
+}
+
+/// Dos marcadores que se acercan y se alejan del centro sobre la línea
+/// base — efecto "radar"/ping de búsqueda. Usada en `ToolCategory::Web`.
+fn radar_ping(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color) {
+    ctx.draw(&Line {
+        x1: 0.0,
+        y1: 0.0,
+        x2: COLUMNS,
+        y2: 0.0,
+        color: baseline,
+    });
+    let spread = (0.5 + 0.5 * (elapsed * 2.2).sin()) * (COLUMNS / 2.0 - 6.0);
+    let center = COLUMNS / 2.0;
+    for x in [center - spread, center + spread] {
+        ctx.draw(&Line {
+            x1: x,
+            y1: -14.0,
+            x2: x,
+            y2: 14.0,
+            color,
+        });
+    }
+}
+
+/// Barras parejas subiendo y bajando en fase (no el hash aleatorio de
+/// `voice_bars`) — tipo ecualizador rítmico. Usada en `ToolCategory::Media`.
+fn rhythmic_bars(ctx: &mut Context, elapsed: f64, color: Color) {
+    let bar_count = 10;
+    let spacing = COLUMNS / bar_count as f64;
+    for i in 0..bar_count {
+        let x = spacing * i as f64 + spacing / 2.0;
+        let phase = i as f64 * 0.6;
+        let height = 10.0 + 16.0 * (0.5 + 0.5 * (elapsed * 3.0 + phase).sin());
+        ctx.draw(&Line {
+            x1: x,
+            y1: -height,
+            x2: x,
+            y2: height,
+            color,
+        });
+    }
+}
+
+/// Un segmento que "escribe"/avanza de izquierda a derecha y se resetea —
+/// efecto de progreso/guardado. Usada en `ToolCategory::Memory`.
+fn writing_tick(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color) {
+    ctx.draw(&Line {
+        x1: 0.0,
+        y1: 0.0,
+        x2: COLUMNS,
+        y2: 0.0,
+        color: baseline,
+    });
+    let period = 1.2;
+    let progress = (elapsed / period).fract();
+    ctx.draw(&Line {
+        x1: 0.0,
+        y1: 0.0,
+        x2: COLUMNS * progress,
+        y2: 0.0,
+        color,
+    });
+    // Punta un poco más alta, para que se note el "cabezal" de escritura.
+    let head = COLUMNS * progress;
+    ctx.draw(&Line {
+        x1: head,
+        y1: -8.0,
+        x2: head,
+        y2: 8.0,
+        color,
+    });
+}
+
+/// Dos marcadores cruzándose en direcciones opuestas — sensación de
+/// "ocupado". Usada en `ToolCategory::System`.
+fn crossing_markers(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color) {
+    ctx.draw(&Line {
+        x1: 0.0,
+        y1: 0.0,
+        x2: COLUMNS,
+        y2: 0.0,
+        color: baseline,
+    });
+    let period = 2.0;
+    let phase = (elapsed / period).fract();
+    let a = COLUMNS * phase;
+    let b = COLUMNS * (1.0 - phase);
+    for x in [a, b] {
+        ctx.draw(&Line {
+            x1: x,
+            y1: -12.0,
+            x2: x,
+            y2: 12.0,
+            color,
+        });
+    }
 }
 
 /// Línea plana que parpadea rápido — `Error`.
@@ -184,12 +291,29 @@ pub fn render(
             VisualState::Idle => flowing_breath(ctx, elapsed, 8.0, 1.55, palette.idle),
             VisualState::Listening => flowing_breath(ctx, elapsed, 10.0, 2.1, palette.listening),
             VisualState::UserSpeaking => voice_bars(ctx, elapsed, level, palette.user_speaking),
-            VisualState::JarvisSpeaking => glowing_curve(ctx, elapsed, level, palette.jarvis_speaking),
+            VisualState::JarvisSpeaking => {
+                glowing_curve(ctx, elapsed, level, palette.jarvis_speaking)
+            }
             VisualState::Thinking => {
                 scanning_pulse(ctx, elapsed, palette.thinking, palette.baseline)
             }
             VisualState::AwaitingConfirmation => {
                 slow_pulse_flat(ctx, elapsed, palette.awaiting_confirmation)
+            }
+            VisualState::ToolRunning(ToolCategory::Web) => {
+                radar_ping(ctx, elapsed, palette.tool, palette.baseline)
+            }
+            VisualState::ToolRunning(ToolCategory::Media) => {
+                rhythmic_bars(ctx, elapsed, palette.tool)
+            }
+            VisualState::ToolRunning(ToolCategory::Memory) => {
+                writing_tick(ctx, elapsed, palette.tool, palette.baseline)
+            }
+            VisualState::ToolRunning(ToolCategory::System) => {
+                crossing_markers(ctx, elapsed, palette.tool, palette.baseline)
+            }
+            VisualState::ToolRunning(ToolCategory::Other) => {
+                scanning_pulse(ctx, elapsed, palette.thinking, palette.baseline)
             }
             VisualState::Error(_) => flashing_flat(ctx, elapsed, palette.error),
         });

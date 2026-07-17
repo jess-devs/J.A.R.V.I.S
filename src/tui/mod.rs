@@ -13,7 +13,7 @@ mod state;
 mod theme;
 mod wave;
 
-pub use state::{UiState, VisualState};
+pub use state::{ToolCategory, UiState, VisualState};
 
 use std::time::{Duration, Instant};
 

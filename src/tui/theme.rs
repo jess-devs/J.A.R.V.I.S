@@ -18,6 +18,10 @@ pub struct Palette {
     /// Línea base/tenue de fondo (ej. la base plana detrás del scanner de
     /// `Thinking`).
     pub baseline: Color,
+    /// Compartido por las categorías de `ToolRunning` (salvo `Other`, que
+    /// reusa `thinking`) — lo que distingue cada herramienta es la forma y
+    /// el movimiento, no el color.
+    pub tool: Color,
 }
 
 impl Palette {
@@ -32,6 +36,7 @@ impl Palette {
                 awaiting_confirmation: Color::Rgb(235, 165, 45),
                 error: Color::Rgb(225, 70, 70),
                 baseline: Color::Rgb(35, 55, 65),
+                tool: Color::Rgb(80, 210, 160),
             }
         } else {
             Self {
@@ -43,6 +48,7 @@ impl Palette {
                 awaiting_confirmation: Color::LightYellow,
                 error: Color::Red,
                 baseline: Color::DarkGray,
+                tool: Color::Green,
             }
         }
     }

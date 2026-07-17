@@ -550,6 +550,7 @@ impl Orchestrator {
                         cancel,
                         echo_gate: self.echo_gate.clone(),
                         pause_rx,
+                        ui: self.ui.clone(),
                     };
                     agent::run_agentic_turn(&mut ctx, &mut self.history).await
                 };
@@ -653,6 +654,7 @@ impl Orchestrator {
                 cancel: cancel.clone(),
                 echo_gate: self.echo_gate.clone(),
                 pause_rx: pause_rx.clone(),
+                ui: self.ui.clone(),
             };
             let turn_future = agent::run_agentic_turn(&mut ctx, &mut self.history);
             tokio::pin!(turn_future);
@@ -852,6 +854,7 @@ impl Orchestrator {
             cancel,
             echo_gate: self.echo_gate.clone(),
             pause_rx,
+            ui: self.ui.clone(),
         };
         let result = agent::resume_agentic_turn(&mut ctx, &mut self.history, pending).await;
         self.conclude_turn(result).await;

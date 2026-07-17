@@ -7,7 +7,7 @@ use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use super::state::VisualState;
+use super::state::{ToolCategory, VisualState};
 use super::theme::Palette;
 
 fn label(state: &VisualState) -> String {
@@ -18,7 +18,18 @@ fn label(state: &VisualState) -> String {
         VisualState::Thinking => "⟨ PENSANDO… ⟩".to_string(),
         VisualState::JarvisSpeaking => "⟨ HABLANDO ⟩".to_string(),
         VisualState::AwaitingConfirmation => "⟨ ESPERANDO CONFIRMACIÓN ⟩".to_string(),
+        VisualState::ToolRunning(category) => tool_label(*category).to_string(),
         VisualState::Error(msg) => format!("⟨ ERROR: {msg} ⟩"),
+    }
+}
+
+fn tool_label(category: ToolCategory) -> &'static str {
+    match category {
+        ToolCategory::Web => "⟨ BUSCANDO EN LA WEB ⟩",
+        ToolCategory::Media => "⟨ REPRODUCIENDO ⟩",
+        ToolCategory::Memory => "⟨ REVISANDO MEMORIA ⟩",
+        ToolCategory::System => "⟨ TRABAJANDO ⟩",
+        ToolCategory::Other => "⟨ PENSANDO… ⟩",
     }
 }
 
@@ -30,6 +41,8 @@ fn color(state: &VisualState, palette: &Palette) -> ratatui::style::Color {
         VisualState::Thinking => palette.thinking,
         VisualState::JarvisSpeaking => palette.jarvis_speaking,
         VisualState::AwaitingConfirmation => palette.awaiting_confirmation,
+        VisualState::ToolRunning(ToolCategory::Other) => palette.thinking,
+        VisualState::ToolRunning(_) => palette.tool,
         VisualState::Error(_) => palette.error,
     }
 }
