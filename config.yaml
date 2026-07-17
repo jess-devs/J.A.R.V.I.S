@@ -138,11 +138,11 @@ stt:
 # wake Palabra de activación (wake word)
 wake:
   # Si false, Jarvis responde a todo sin gate de activación.
-  enabled: false
+  enabled: true
   # Palabras de activación normalizadas (sin tildes), con tolerancia a 1 letra de error.
   words: ["jarvis"]
   # Tras responder, sigue atento sin necesidad del nombre durante este tiempo (segundos).
-  attention_window_secs: 25
+  attention_window_secs: 15
   # Dentro de la ventana, ignora frases más cortas sin el nombre (1 = sin filtro).
   window_min_words: 2
   # Frases-basura que Whisper inventa en silencio; se descartan siempre.
@@ -170,7 +170,7 @@ barge_in:
   enabled: true
   # Modo de interrupción (solo aplica con stt.engine: native; realtimestt usa mute real).
   # wake_word: exige el nombre (fiable con altavoces). any_voice: recomendado con auriculares.
-  mode: any_voice
+  mode: wake_word
   # Milisegundos de voz sostenida para confirmar interrupción real.
   min_speech_ms: 400
   # Solo mode: any_voice. Al llegar la transcripción, cuánto esperar la respuesta del LLM
@@ -201,7 +201,7 @@ barge_in:
 llm:
   # Proveedor del LLM: ollama, anthropic, openai, deepseek o lmstudio.
   # ollama y lmstudio corren local sin API key.
-  provider: deepseek
+  provider: ollama
 
   #  Ollama (provider: ollama)
   ollama:
@@ -210,7 +210,7 @@ llm:
 
     # Modelo a usar. "auto" detecta VRAM/RAM y elige un modelo qwen acorde;
     # si no está descargado, avisa el "ollama pull" pero no lo baja solo.
-    model: "auto"
+    model: "qwen3.5:0.8b"
 
     # null = no envía el campo (qwen2.5 lo rechaza); false para qwen3/deepseek-r1.
     think: null
@@ -591,4 +591,4 @@ ui:
 
 # Nivel de detalle del log: trace, debug, info, warn, error.
 # "debug" muestra telemetría de VAD, transcripción y barge-in.
-log_level: info
+log_level: debug
