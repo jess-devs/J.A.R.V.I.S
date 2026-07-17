@@ -514,21 +514,30 @@ impl Orchestrator {
 
         // ¿Hay una confirmación pendiente? Toda transcripción cuenta como
         // respuesta (bypass del wake gate: el usuario ya está en diálogo).
-        if matches!(self.state, AgentState::AwaitingConfirmation { .. }) {
-            let AgentState::AwaitingConfirmation { pending, deadline } =
-                std::mem::replace(&mut self.state, AgentState::Idle)
-            else {
-                unreachable!();
-            };
-            match self.handle_confirmation(pending, deadline, text).await {
-                ConfirmOutcome::Done => {}
-                ConfirmOutcome::Dispatch(text) => self.dispatch_by_gate(text).await,
-                ConfirmOutcome::Utterance(text) => self.handle_utterance(text).await,
-            }
-            return;
+        match self.resolve_pending_confirmation(text).await {
+            Ok(ConfirmOutcome::Done) => {}
+            Ok(ConfirmOutcome::Dispatch(text)) => self.dispatch_by_gate(text).await,
+            Ok(ConfirmOutcome::Utterance(text)) => self.handle_utterance(text).await,
+            Err(text) => self.dispatch_by_gate(text).await,
         }
+    }
 
-        self.dispatch_by_gate(text).await;
+    /// Si hay una confirmación pendiente, la consume y la resuelve con
+    /// `text` (`Ok`). Si no hay ninguna, devuelve `text` sin tocar (`Err`),
+    /// para que el llamador siga con su propio camino.
+    async fn resolve_pending_confirmation(
+        &mut self,
+        text: String,
+    ) -> std::result::Result<ConfirmOutcome, String> {
+        if !matches!(self.state, AgentState::AwaitingConfirmation { .. }) {
+            return Err(text);
+        }
+        let AgentState::AwaitingConfirmation { pending, deadline } =
+            std::mem::replace(&mut self.state, AgentState::Idle)
+        else {
+            unreachable!();
+        };
+        Ok(self.handle_confirmation(pending, deadline, text).await)
     }
 
     async fn dispatch_by_gate(&mut self, text: String) {
@@ -564,29 +573,23 @@ impl Orchestrator {
             // interrupción encadenada, esa frase es la respuesta a la
             // pregunta ("sí", "no"), no un turno nuevo: procesarla como
             // turno pisaría la confirmación y dejaría la tool call colgada.
-            if matches!(self.state, AgentState::AwaitingConfirmation { .. }) {
-                let AgentState::AwaitingConfirmation { pending, deadline } =
-                    std::mem::replace(&mut self.state, AgentState::Idle)
-                else {
-                    unreachable!();
-                };
-                match self.handle_confirmation(pending, deadline, user_text).await {
-                    ConfirmOutcome::Done => return,
-                    ConfirmOutcome::Utterance(text) => {
+            match self.resolve_pending_confirmation(user_text).await {
+                Err(text) => user_text = text,
+                Ok(ConfirmOutcome::Done) => return,
+                Ok(ConfirmOutcome::Utterance(text)) => {
+                    user_text = text;
+                }
+                Ok(ConfirmOutcome::Dispatch(text)) => match self.gate.decide(&text) {
+                    GateDecision::Respond => {
+                        tracing::info!(text = %text, "usuario dijo");
+                        self.gate.mark_responded(&text);
                         user_text = text;
                     }
-                    ConfirmOutcome::Dispatch(text) => match self.gate.decide(&text) {
-                        GateDecision::Respond => {
-                            tracing::info!(text = %text, "usuario dijo");
-                            self.gate.mark_responded(&text);
-                            user_text = text;
-                        }
-                        GateDecision::Drop | GateDecision::Ignore => {
-                            tracing::info!(text = %text, "ignorado: llegó tarde a la confirmación y no pasa el wake gate");
-                            return;
-                        }
-                    },
-                }
+                    GateDecision::Drop | GateDecision::Ignore => {
+                        tracing::info!(text = %text, "ignorado: llegó tarde a la confirmación y no pasa el wake gate");
+                        return;
+                    }
+                },
             }
 
             let content = match self.gate.take_ambient_context() {
