@@ -24,7 +24,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::audio::PlaybackMeter;
-use crate::config::UiConfig;
+use crate::config::{MarkerKind, UiConfig};
 use crate::errors::Result;
 use theme::Palette;
 
@@ -42,10 +42,9 @@ pub async fn run(
 ) -> Result<()> {
     let mut terminal = ratatui::try_init()?;
     let palette = Palette::from_config(&config);
-    let marker = if config.marker == "block" {
-        Marker::Block
-    } else {
-        Marker::Braille
+    let marker = match config.marker {
+        MarkerKind::Block => Marker::Block,
+        MarkerKind::Braille => Marker::Braille,
     };
 
     let fps = config.fps.max(1);

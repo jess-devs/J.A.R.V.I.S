@@ -1016,6 +1016,16 @@ impl Default for WelcomeConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkerKind {
+    /// Curvas suaves; requiere fuente con glifos Braille.
+    #[default]
+    Braille,
+    /// Fallback más compatible con fuentes/terminales limitados.
+    Block,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -1031,7 +1041,7 @@ pub struct UiConfig {
     pub truecolor: bool,
     /// "braille" (curvas suaves, requiere fuente con glifos Braille) o
     /// "block" (fallback más compatible con fuentes/terminales limitados).
-    pub marker: String,
+    pub marker: MarkerKind,
 }
 
 impl Default for UiConfig {
@@ -1040,7 +1050,7 @@ impl Default for UiConfig {
             enabled: false,
             fps: 30,
             truecolor: true,
-            marker: "braille".to_string(),
+            marker: MarkerKind::default(),
         }
     }
 }
