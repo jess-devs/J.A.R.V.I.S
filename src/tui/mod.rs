@@ -28,6 +28,26 @@ use crate::config::{MarkerKind, UiConfig};
 use crate::errors::Result;
 use theme::Palette;
 
+/// Suaviza `envelope` hacia `target` con una tasa de ataque (subiendo) o
+/// liberación (bajando) distinta, para que la animación reaccione rápido
+/// pero no caiga en seco.
+fn smooth(envelope: f32, target: f32, attack: f32, release: f32) -> f32 {
+    let rate = if target > envelope { attack } else { release };
+    envelope + (target - envelope) * rate
+}
+
+/// El orquestador nunca reporta `JarvisSpeaking` directamente (ver
+/// `VisualState`): se deriva acá cruzando el estado discreto reportado con
+/// el nivel real de reproducción, con un margen (`grace`) para no parpadear
+/// en los micro-cortes entre frases mientras Jarvis sintetiza la siguiente.
+fn effective_state(reported: VisualState, jarvis_active: bool) -> VisualState {
+    if matches!(reported, VisualState::Thinking) && jarvis_active {
+        VisualState::JarvisSpeaking
+    } else {
+        reported
+    }
+}
+
 /// Corre el loop de renderizado hasta que el usuario pide salir (`q`/Esc) o
 /// falla la terminal. Instala/restaura la terminal (raw mode + alternate
 /// screen) al entrar/salir; un panic mientras corre queda cubierto por el
@@ -49,6 +69,7 @@ pub async fn run(
 
     let fps = config.fps.max(1);
     let frame_duration = Duration::from_millis(1000 / u64::from(fps));
+    let mut ticker = tokio::time::interval(frame_duration);
     let start = Instant::now();
 
     // Envolvente del nivel real del micrófono (dBFS normalizado por
@@ -105,19 +126,10 @@ pub async fn run(
         } else {
             0.0
         };
-        let jarvis_rate: f32 = if jarvis_target > jarvis_envelope {
-            0.5
-        } else {
-            0.06
-        };
-        jarvis_envelope += (jarvis_target - jarvis_envelope) * jarvis_rate;
+        jarvis_envelope = smooth(jarvis_envelope, jarvis_target, 0.5, 0.06);
         let jarvis_level = jarvis_envelope.clamp(0.0, 1.0);
 
-        let render_state = if matches!(reported_state, VisualState::Thinking) && jarvis_active {
-            VisualState::JarvisSpeaking
-        } else {
-            reported_state
-        };
+        let render_state = effective_state(reported_state, jarvis_active);
 
         let mic_raw = mic_level_rx.borrow_and_update().clamp(0.0, 1.0);
         let user_target: f32 = if matches!(render_state, VisualState::UserSpeaking) {
@@ -125,12 +137,7 @@ pub async fn run(
         } else {
             0.0
         };
-        let rate: f32 = if user_target > user_envelope {
-            0.5
-        } else {
-            0.15
-        };
-        user_envelope += (user_target - user_envelope) * rate;
+        user_envelope = smooth(user_envelope, user_target, 0.5, 0.15);
 
         let level = match render_state {
             VisualState::JarvisSpeaking => jarvis_level,
@@ -159,7 +166,7 @@ pub async fn run(
         })?;
 
         tokio::select! {
-            _ = tokio::time::sleep(frame_duration) => {}
+            _ = ticker.tick() => {}
             _ = shutdown.cancelled() => break Ok(()),
         }
     };
