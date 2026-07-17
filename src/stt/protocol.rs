@@ -150,6 +150,13 @@ pub enum SttOutMessage {
     },
     /// Doble aplauso confirmado (solo motor nativo). Ver `ClapInit`.
     ClapDetected,
+    /// Energía instantánea del micrófono (dBFS), emitida cada ~100ms
+    /// mientras el motor nativo no está suprimido — independiente del VAD,
+    /// para animar el nivel real de voz del usuario en la TUI.
+    Level {
+        #[serde(default)]
+        dbfs: f32,
+    },
     Transcript {
         text: String,
         #[allow(dead_code)]

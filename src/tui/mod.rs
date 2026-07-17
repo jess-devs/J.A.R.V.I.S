@@ -36,6 +36,7 @@ pub async fn run(
     config: UiConfig,
     mut state_rx: watch::Receiver<VisualState>,
     mut level_rx: watch::Receiver<f32>,
+    mut mic_level_rx: watch::Receiver<f32>,
     shutdown: CancellationToken,
 ) -> Result<()> {
     let mut terminal = ratatui::try_init()?;
@@ -50,10 +51,13 @@ pub async fn run(
     let frame_duration = Duration::from_millis(1000 / u64::from(fps));
     let start = Instant::now();
 
-    // Envolvente sintética de "usuario hablando" (v1: no hay amplitud real
-    // de mic, solo los eventos VadStart/VadEnd que ya llegan como
-    // VisualState::UserSpeaking/no). Ataque rápido, decaimiento un poco más
-    // lento, para que se sienta como una reacción viva y no un interruptor.
+    // Envolvente del nivel real del micrófono (dBFS normalizado por
+    // `Orchestrator::normalize_mic_level`), suavizada con ataque rápido y
+    // liberación un poco más lenta para que reaccione al volumen de la voz
+    // sin verse nerviosa cuadro a cuadro. Fuera de `UserSpeaking` el objetivo
+    // es 0.0, así que decae solo al terminar de hablar (no hace falta un
+    // "gap de silencio" como con Jarvis: acá el límite lo da el propio
+    // cambio de estado, `VadEnd` ya dispara `Listening` de inmediato).
     let mut user_envelope: f32 = 0.0;
 
     // El nivel de audio de Jarvis solo se actualiza cuando hay un chunk de
@@ -86,8 +90,8 @@ pub async fn run(
                 // terminal: Ctrl+C ya no llega como SIGINT (`tokio::signal
                 // ::ctrl_c()` nunca dispararía), sino como un evento de
                 // tecla más — hay que interceptarlo acá a mano.
-                let is_ctrl_c = key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL);
+                let is_ctrl_c =
+                    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
                 if key.kind == KeyEventKind::Press
                     && (matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) || is_ctrl_c)
                 {
@@ -123,15 +127,16 @@ pub async fn run(
             reported_state
         };
 
+        let mic_raw = mic_level_rx.borrow_and_update().clamp(0.0, 1.0);
         let user_target: f32 = if matches!(render_state, VisualState::UserSpeaking) {
-            1.0
+            mic_raw
         } else {
             0.0
         };
         let rate: f32 = if user_target > user_envelope {
-            0.35
+            0.5
         } else {
-            0.12
+            0.15
         };
         user_envelope += (user_target - user_envelope) * rate;
 
@@ -150,7 +155,15 @@ pub async fn run(
                 .split(frame.area());
 
             hud::render_label(frame, rows[0], &render_state, &palette);
-            wave::render(frame, rows[1], &render_state, level, elapsed, &palette, marker);
+            wave::render(
+                frame,
+                rows[1],
+                &render_state,
+                level,
+                elapsed,
+                &palette,
+                marker,
+            );
         })?;
 
         tokio::select! {

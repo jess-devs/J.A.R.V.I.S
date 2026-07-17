@@ -41,6 +41,12 @@ pub enum SttEvent {
     },
     /// Doble aplauso confirmado (solo `engine: native`). Ver `ClapInit`.
     ClapDetected,
+    /// Energía instantánea del micrófono (dBFS), cada ~100ms mientras el
+    /// motor no está suprimido — independiente del VAD, para animar el nivel
+    /// real de voz del usuario en la TUI.
+    Level {
+        dbfs: f32,
+    },
     WorkerDied,
 }
 
@@ -225,6 +231,7 @@ impl SttWorker {
                             return Some(SttEvent::Discarded { reason })
                         }
                         Ok(SttOutMessage::ClapDetected) => return Some(SttEvent::ClapDetected),
+                        Ok(SttOutMessage::Level { dbfs }) => return Some(SttEvent::Level { dbfs }),
                         Ok(SttOutMessage::Error { code, message, .. }) => {
                             tracing::warn!(code = %code, message = %message, "error de transcripción recuperable");
                             continue;

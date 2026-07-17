@@ -13,10 +13,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rodio::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapProd;
 use ringbuf::HeapRb;
+use rodio::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use tokio::sync::watch;
 
 use crate::errors::AudioError;

@@ -90,6 +90,10 @@ pub struct Orchestrator {
     /// escribe siempre, aunque `config.ui.enabled` sea `false`: sin
     /// receptores activos, `set()` no cuesta nada relevante.
     ui: UiState,
+    /// Nivel de energía del micrófono (0.0-1.0, normalizado desde dBFS), para
+    /// que la TUI anime `UserSpeaking` con el volumen real de voz. Igual que
+    /// `ui`, se escribe siempre aunque nadie la lea.
+    mic_level_tx: watch::Sender<f32>,
 }
 
 impl Orchestrator {
@@ -183,6 +187,7 @@ impl Orchestrator {
             last_welcome: None,
             test_cancel_slot,
             ui,
+            mic_level_tx: watch::channel(0.0).0,
         })
     }
 
@@ -190,6 +195,12 @@ impl Orchestrator {
     /// `main.rs` se lo pase a la TUI sin exponer el `AudioPlayer` entero.
     pub fn audio_level_rx(&self) -> tokio::sync::watch::Receiver<f32> {
         self.player.level_rx()
+    }
+
+    /// Nivel de energía del micrófono (0.0-1.0), para animar `UserSpeaking`
+    /// con el volumen real de voz en vez de un pulso sintético.
+    pub fn mic_level_rx(&self) -> tokio::sync::watch::Receiver<f32> {
+        self.mic_level_tx.subscribe()
     }
 
     /// Token de cancelación para un turno nuevo. Con `JARVIS_TEST_CANCEL` lo
@@ -395,6 +406,9 @@ impl Orchestrator {
                     tracing::debug!(reason = %reason, "audio descartado por el motor STT");
                 }
                 SttEvent::ClapDetected => self.handle_clap().await,
+                SttEvent::Level { dbfs } => {
+                    self.mic_level_tx.send_replace(normalize_mic_level(dbfs));
+                }
                 SttEvent::WorkerDied => {
                     self.restart_stt_or_die().await?;
                 }
@@ -1050,8 +1064,21 @@ fn classify_barge_in_event(
         // v1: un doble aplauso a mitad de turno se ignora, no interrumpe la
         // respuesta en curso ni dispara la escena de bienvenida encima.
         SttEvent::ClapDetected => BargeInAction::Ignore,
+        // Telemetría de nivel, no afecta la decisión de barge-in (el nivel
+        // en sí se publica aparte, en el loop principal de `run()`).
+        SttEvent::Level { .. } => BargeInAction::Ignore,
         SttEvent::WorkerDied => BargeInAction::Ignore,
     }
+}
+
+/// Convierte dBFS a un nivel 0.0-1.0 para la TUI. No depende del piso de
+/// energía calibrado por el motor nativo (`energy_floor_dbfs`, específico de
+/// cada máquina/micrófono): es una señal puramente visual, no de decisión,
+/// así que alcanza con un rango fijo razonable para voz.
+fn normalize_mic_level(dbfs: f32) -> f32 {
+    const FLOOR_DBFS: f32 = -50.0;
+    const RANGE_DB: f32 = 35.0;
+    ((dbfs - FLOOR_DBFS) / RANGE_DB).clamp(0.0, 1.0)
 }
 
 /// Resuelve un evento de STT llegado durante un turno: clasifica (síncrono,

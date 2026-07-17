@@ -130,11 +130,13 @@ async fn run(mut config: Config) -> errors::Result<()> {
     let ui_shutdown = tokio_util::sync::CancellationToken::new();
     let mut ui_handle = if ui_config.enabled {
         let level_rx = assistant.audio_level_rx();
+        let mic_level_rx = assistant.mic_level_rx();
         let shutdown = ui_shutdown.clone();
         Some(tokio::spawn(tui::run(
             ui_config,
             ui_state_rx,
             level_rx,
+            mic_level_rx,
             shutdown,
         )))
     } else {

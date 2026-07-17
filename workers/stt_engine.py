@@ -203,6 +203,7 @@ class _Engine:
         speech_confirmed_sent = False
         utterance_started_at = 0.0
         last_voiced_at = 0.0
+        last_level_sent_at = 0.0
         self.vad_model.reset_states()
 
         while not shutdown.is_set():
@@ -233,6 +234,16 @@ class _Engine:
             if self.clap_detector.process(frame, prob=prob):
                 ipc.send({"type": "clap_detected"})
             now = time.monotonic()
+
+            # Nivel de energía instantáneo del micrófono, para que la TUI anime
+            # "el usuario habla" con el volumen real en vez de un pulso
+            # sintético. Corre siempre que no esté suprimido (arriba), sin
+            # tocar pre_roll/recording/speech_confirmed_sent — es un canal
+            # aparte, con throttle de tiempo (no de frames) para no acoplarse
+            # a FRAME_SAMPLES/SAMPLE_RATE.
+            if now - last_level_sent_at >= 0.1:
+                ipc.send({"type": "level", "dbfs": round(_rms_dbfs(frame), 1)})
+                last_level_sent_at = now
 
             if recording_state == "listening":
                 pre_roll.append(frame)
