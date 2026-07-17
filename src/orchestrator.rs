@@ -16,7 +16,7 @@ use crate::agent::{
     confirm::{self, CodeDecision, ConfirmDecision},
     AgentTurnResult, PendingConfirmation, TurnContext,
 };
-use crate::audio::{AudioPlayer, MusicPlayer};
+use crate::audio::{AudioPlayer, MusicPlayer, PlaybackMeter};
 use crate::config::{AgentConfig, BargeInConfig, BargeInMode, Config, SttEngineKind};
 use crate::echo_gate::EchoGate;
 use crate::errors::{Result, WorkerError};
@@ -191,10 +191,10 @@ impl Orchestrator {
         })
     }
 
-    /// Nivel de audio en reproducción (ver `AudioPlayer::level_rx`), para que
-    /// `main.rs` se lo pase a la TUI sin exponer el `AudioPlayer` entero.
-    pub fn audio_level_rx(&self) -> tokio::sync::watch::Receiver<f32> {
-        self.player.level_rx()
+    /// Nivel de reproducción en tiempo real (ver `AudioPlayer::playback_meter`),
+    /// para que `main.rs` se lo pase a la TUI sin exponer el `AudioPlayer` entero.
+    pub fn playback_meter(&self) -> PlaybackMeter {
+        self.player.playback_meter()
     }
 
     /// Nivel de energía del micrófono (0.0-1.0), para animar `UserSpeaking`

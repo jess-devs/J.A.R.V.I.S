@@ -23,6 +23,7 @@ use ratatui::symbols::Marker;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
+use crate::audio::PlaybackMeter;
 use crate::config::UiConfig;
 use crate::errors::Result;
 use theme::Palette;
@@ -35,7 +36,7 @@ use theme::Palette;
 pub async fn run(
     config: UiConfig,
     mut state_rx: watch::Receiver<VisualState>,
-    mut level_rx: watch::Receiver<f32>,
+    jarvis_meter: PlaybackMeter,
     mut mic_level_rx: watch::Receiver<f32>,
     shutdown: CancellationToken,
 ) -> Result<()> {
@@ -60,24 +61,18 @@ pub async fn run(
     // cambio de estado, `VadEnd` ya dispara `Listening` de inmediato).
     let mut user_envelope: f32 = 0.0;
 
-    // El nivel de audio de Jarvis solo se actualiza cuando hay un chunk de
-    // TTS nuevo (`AudioPlayer::play_chunk`); nada lo vuelve a 0 cuando el
-    // audio termina. Si no llegó ningún cambio en un rato se asume silencio
-    // — con un margen generoso, porque Jarvis sintetiza frase por frase y
-    // entre una y la siguiente hay un hueco real sin audio (mientras se
-    // genera la próxima) que no debería leerse como "dejó de hablar".
-    let mut last_jarvis_raw: f32 = 0.0;
-    let mut last_jarvis_update = Instant::now();
-    const JARVIS_SILENCE_GAP: Duration = Duration::from_millis(500);
-    // Umbral por debajo del cual se considera que todavía no hay audio real
-    // sonando (turno recién empezado, LLM generando): el estado se ve como
-    // `Thinking` hasta que este umbral se supera, momento en que se "asciende"
-    // a `JarvisSpeaking` sin que el orquestador necesite saber cuándo
-    // arrancó el TTS.
-    const SPEAKING_THRESHOLD: f32 = 0.015;
+    // `jarvis_meter.is_speaking()` viene del callback de audio en tiempo
+    // real (ver `AudioPlayer::new`): es exactamente lo que se le está
+    // mandando a la tarjeta de sonido en este instante, no un valor que se
+    // encoló hace rato. Igual se le da un margen chico antes de "apagar" la
+    // animación — no para compensar un desfasaje grande (ya no lo hay), sino
+    // para no parpadear en los micro-cortes naturales entre frases mientras
+    // Jarvis sintetiza la siguiente.
+    let mut last_jarvis_active_at = Instant::now();
+    const JARVIS_DEMOTE_GRACE: Duration = Duration::from_millis(150);
     // Envolvente suavizada del nivel de Jarvis: ataque rápido (reacciona ya
-    // al primer chunk audible) y liberación lenta (no parpadea entre frases
-    // ni cae en seco al final de una).
+    // al primer chunk audible) y liberación lenta (no cae en seco al final
+    // de una frase).
     let mut jarvis_envelope: f32 = 0.0;
 
     let outcome = loop {
@@ -102,14 +97,14 @@ pub async fn run(
 
         let reported_state = state_rx.borrow_and_update().clone();
 
-        if level_rx.has_changed().unwrap_or(false) {
-            last_jarvis_raw = level_rx.borrow_and_update().clamp(0.0, 1.0);
-            last_jarvis_update = Instant::now();
+        if jarvis_meter.is_speaking() {
+            last_jarvis_active_at = Instant::now();
         }
-        let jarvis_target = if last_jarvis_update.elapsed() > JARVIS_SILENCE_GAP {
-            0.0
+        let jarvis_active = last_jarvis_active_at.elapsed() < JARVIS_DEMOTE_GRACE;
+        let jarvis_target = if jarvis_active {
+            jarvis_meter.level().clamp(0.0, 1.0)
         } else {
-            last_jarvis_raw
+            0.0
         };
         let jarvis_rate: f32 = if jarvis_target > jarvis_envelope {
             0.5
@@ -119,9 +114,7 @@ pub async fn run(
         jarvis_envelope += (jarvis_target - jarvis_envelope) * jarvis_rate;
         let jarvis_level = jarvis_envelope.clamp(0.0, 1.0);
 
-        let render_state = if matches!(reported_state, VisualState::Thinking)
-            && jarvis_level > SPEAKING_THRESHOLD
-        {
+        let render_state = if matches!(reported_state, VisualState::Thinking) && jarvis_active {
             VisualState::JarvisSpeaking
         } else {
             reported_state

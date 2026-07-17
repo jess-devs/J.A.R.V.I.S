@@ -129,13 +129,13 @@ async fn run(mut config: Config) -> errors::Result<()> {
     // rama del `select!` de abajo se terminó cerrando Jarvis.
     let ui_shutdown = tokio_util::sync::CancellationToken::new();
     let mut ui_handle = if ui_config.enabled {
-        let level_rx = assistant.audio_level_rx();
+        let jarvis_meter = assistant.playback_meter();
         let mic_level_rx = assistant.mic_level_rx();
         let shutdown = ui_shutdown.clone();
         Some(tokio::spawn(tui::run(
             ui_config,
             ui_state_rx,
-            level_rx,
+            jarvis_meter,
             mic_level_rx,
             shutdown,
         )))
