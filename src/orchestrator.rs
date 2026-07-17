@@ -1154,8 +1154,9 @@ fn classify_barge_in_event(
         // v1: un doble aplauso a mitad de turno se ignora, no interrumpe la
         // respuesta en curso ni dispara la escena de bienvenida encima.
         SttEvent::ClapDetected => BargeInAction::Ignore,
-        // Telemetría de nivel, no afecta la decisión de barge-in (el nivel
-        // en sí se publica aparte, en el loop principal de `run()`).
+        // Telemetría de nivel, no afecta la decisión de barge-in.
+        // `handle_barge_in_event` ya la descarta antes de llegar acá (evita
+        // el lock de `echo_gate`); este brazo queda por exhaustividad.
         SttEvent::Level { .. } => BargeInAction::Ignore,
         SttEvent::WorkerDied => BargeInAction::Ignore,
     }
@@ -1178,6 +1179,12 @@ async fn handle_barge_in_event(
     paused: &mut bool,
     interrupt_text: &mut Option<String>,
 ) {
+    // `Level` es telemetría pura (no afecta la decisión de barge-in, ver
+    // `classify_barge_in_event`) pero llega ~10 veces por segundo durante
+    // todo el turno: evita el lock/unlock de `echo_gate` para descartarla.
+    if matches!(event, SttEvent::Level { .. }) {
+        return;
+    }
     let action = {
         let mut eg = echo_gate.lock().unwrap();
         classify_barge_in_event(gate, &mut eg, barge_in, event, *paused)
