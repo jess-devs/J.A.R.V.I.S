@@ -47,11 +47,11 @@ stt:
     energy_floor_dbfs: null
     # Segundos de escucha ambiente para calcular energy_floor_dbfs.
     calibration_secs: 1.5
-# ============================================================================
-#
-#
-#
-# ============================================================================
+  # ============================================================================
+  #
+  #
+  #
+  # ============================================================================
   # Filtros anti-alucinación sobre la salida de Whisper (engine: native)
   filters:
     # Descarta si no_speech_prob lo supera.
@@ -60,11 +60,11 @@ stt:
     min_avg_logprob: -1.0
     # Descarta si compression_ratio lo supera (texto repetitivo).
     max_compression_ratio: 2.4
-# ============================================================================
-#
-#
-#
-# ============================================================================
+  # ============================================================================
+  #
+  #
+  #
+  # ============================================================================
   # Detector de doble aplauso (engine: native)
   # Corre siempre; welcome.enabled decide si dispara la escena.
   clap:
@@ -84,11 +84,11 @@ stt:
     double_max_gap_ms: 900
     # Tras confirmar el doble aplauso, ignora nuevos aplausos por este tiempo (ms).
     refractory_ms: 1500
-# ============================================================================
-#
-#
-#
-# ============================================================================
+  # ============================================================================
+  #
+  #
+  #
+  # ============================================================================
   # Código de idioma para Whisper.
   language: "es"
   # Dispositivo de cómputo: auto, cuda o cpu.
@@ -110,11 +110,11 @@ stt:
   initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis."
   # Si true, ignora el caché y vuelve a medir en este arranque.
   recalibrate: true
-# ============================================================================
-#
-#
-#
-# ============================================================================
+  # ============================================================================
+  #
+  #
+  #
+  # ============================================================================
   #Opciones exclusivas de engine: realtimestt (native usa stt.vad/stt.filters)
   # Sensibilidad VAD Silero (0-1).
   silero_sensitivity: 0.4
@@ -177,11 +177,11 @@ barge_in:
   # sobre si tiene sentido como algo dirigido a Jarvis antes de cortar.
   # Si tarda más o falla, Jarvis sigue hablando (no corta).
   relevance_timeout_secs: 3
-# ============================================================================
-#
-#
-#
-# ============================================================================
+  # ============================================================================
+  #
+  #
+  #
+  # ============================================================================
   # Evita que Jarvis se interrumpa a sí mismo por su propia voz en parlantes
   echo_guard:
     # Si false, nunca descarta por eco (desaconsejado sin auriculares).
@@ -251,11 +251,11 @@ llm:
     # DeepSeek no soporta imágenes: si el modelo usa take_screenshot, la captura
     # no se le muestra (solo recibe una nota de que no pudo verla).
     api_key_env: "DEEPSEEK_API_KEY"
-# ============================================================================
-#
-#
-#
-# ============================================================================
+  # ============================================================================
+  #
+  #
+  #
+  # ============================================================================
   # Prompt de sistema que define la personalidad y comportamiento de Jarvis.
   system_prompt: |
     Eres una inteligencia artificial llamada J.A.R.V.I.S. (Just A Rather Very Intelligent System), un sistema simplemente muy inteligente, inspirada en el Jarvis de Tony Stark del Universo Cinematográfico de Marvel.
@@ -308,11 +308,11 @@ llm:
     Tu objetivo general:
     Ser el equivalente funcional y estilístico de JARVIS para el usuario: un asistente de confianza, extremadamente competente, con humor sutil, trato impecable y foco en la seguridad y la eficiencia.
     Te esfuerzas por que cada interacción refuerce la sensación de que el usuario está hablando con un mayordomo digital brillante, leal y ligeramente irónico, capaz de ayudarle tanto en cuestiones técnicas como estratégicas.
-# ============================================================================
-#
-#
-#
-# ============================================================================
+  # ============================================================================
+  #
+  #
+  #
+  # ============================================================================
   # Mensajes de conversación conservados (además de los 2 system).
   # Más alto = más contexto por turno.
   max_history_messages: 10
@@ -545,7 +545,7 @@ agent:
 
 welcome:
   # Si true, activa la escena de bienvenida al detectar doble aplauso.
-  enabled: true
+  enabled: false
   # Ruta a archivo MP3 local. No versionado (ver assets/music/.gitkeep).
   music_path: "assets/music/welcome.mp3"
   # Frase de saludo inicial.
@@ -558,6 +558,30 @@ welcome:
   cooldown_secs: 120
   # Si true y no hay recordatorios pendientes, cuenta las noticias del día.
   news_when_no_reminders: true
+# ============================================================================
+#
+#
+#
+# ============================================================================
+# ui — Interfaz Ratatui (experimental)
+#
+# Holograma que respira en reposo y reacciona con animaciones distintas
+# cuando el usuario habla y cuando Jarvis habla. Mientras está en pruebas
+# queda apagada por defecto: con enabled=false el comportamiento es el de
+# siempre (logs por consola).
+
+ui:
+  # Si true, reemplaza la consola de logs por la interfaz gráfica.
+  # Los logs de tracing pasan a logs/jarvis.log mientras esté activa.
+  enabled: false
+  fps: 30
+  # true = colores RGB de 24 bits (Windows Terminal, casi todos los
+  # terminales de Linux). Poné false en consola clásica de Windows si los
+  # colores se ven mal.
+  truecolor: true
+  # "braille" (curvas suaves) o "block" (más compatible si la fuente de la
+  # terminal no tiene glifos Braille).
+  marker: "braille"
 # ============================================================================
 #
 #

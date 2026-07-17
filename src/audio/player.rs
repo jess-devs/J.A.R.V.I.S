@@ -9,14 +9,14 @@
 // Por eso, antes de enviar el sonido por el tubo, se ajusta la frecuencia (remuestreo)
 // y se duplican los canales (de mono a los que necesite el dispositivo).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use rodio::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::traits::{Consumer, Observer, Producer, Split};
 use ringbuf::HeapProd;
 use ringbuf::HeapRb;
+use rodio::cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::errors::AudioError;
 use crate::tts::AudioChunk;
@@ -31,6 +31,38 @@ pub struct AudioPlayer {
     drain_timeout: Duration,
     stop_flag: Arc<AtomicBool>,
     _stream: rodio::cpal::Stream,
+    /// `true` mientras el callback de audio (tiempo real) está sacando
+    /// muestras reales del buffer, en vez de rellenar con silencio. Ver
+    /// `PlaybackMeter`.
+    speaking_flag: Arc<AtomicBool>,
+    /// RMS (0.0-1.0 aprox.) de lo que el callback de audio mandó a la tarjeta
+    /// de sonido en su última invocación, codificado con `f32::to_bits` (no
+    /// existe `AtomicF32` en `std`). Ver `PlaybackMeter`.
+    level_bits: Arc<AtomicU32>,
+}
+
+/// Handle liviano y clonable hacia el nivel de reproducción en tiempo real,
+/// escrito directamente desde el callback de audio de `cpal` (no desde
+/// `play_chunk`, que solo encola — ver el comentario en `AudioPlayer::new`).
+/// Pensado para que la TUI anime `JarvisSpeaking` pegado a lo que realmente
+/// suena, no a lo que ya se encoló para sonar.
+#[derive(Clone)]
+pub struct PlaybackMeter {
+    speaking: Arc<AtomicBool>,
+    level_bits: Arc<AtomicU32>,
+}
+
+impl PlaybackMeter {
+    /// `true` si en el último callback de audio se mandaron muestras reales
+    /// a la tarjeta de sonido (no silencio de relleno).
+    pub fn is_speaking(&self) -> bool {
+        self.speaking.load(Ordering::Relaxed)
+    }
+
+    /// RMS (0.0-1.0 aprox.) de lo que sonó en el último callback de audio.
+    pub fn level(&self) -> f32 {
+        f32::from_bits(self.level_bits.load(Ordering::Relaxed))
+    }
 }
 
 impl AudioPlayer {
@@ -75,6 +107,10 @@ impl AudioPlayer {
 
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_cb = stop_flag.clone();
+        let speaking_flag = Arc::new(AtomicBool::new(false));
+        let speaking_flag_cb = speaking_flag.clone();
+        let level_bits = Arc::new(AtomicU32::new(0.0f32.to_bits()));
+        let level_bits_cb = level_bits.clone();
 
         let stream = device
             .build_output_stream(
@@ -87,6 +123,16 @@ impl AudioPlayer {
                     let filled = consumer.pop_slice(data);
                     for sample in &mut data[filled..] {
                         *sample = 0.0;
+                    }
+                    // Única fuente de verdad de "está sonando algo ahora
+                    // mismo": esto es lo que de verdad se le mandó a la
+                    // tarjeta de sonido en esta invocación, no lo que se
+                    // encoló hace rato (`play_chunk` puede ir hasta
+                    // `RING_BUFFER_SECONDS` adelantado). Operaciones
+                    // atómicas puras, sin locks ni allocations — seguras acá.
+                    speaking_flag_cb.store(filled > 0, Ordering::Relaxed);
+                    if filled > 0 {
+                        level_bits_cb.store(rms(&data[..filled]).to_bits(), Ordering::Relaxed);
                     }
                 },
                 |error| tracing::error!(%error, "error del stream de audio"),
@@ -113,7 +159,19 @@ impl AudioPlayer {
             drain_timeout: Duration::from_secs(drain_timeout_secs),
             stop_flag,
             _stream: stream,
+            speaking_flag,
+            level_bits,
         })
+    }
+
+    /// Handle hacia el nivel de reproducción en tiempo real (ver
+    /// `PlaybackMeter`), para que la TUI anime `JarvisSpeaking` pegado a lo
+    /// que realmente suena.
+    pub fn playback_meter(&self) -> PlaybackMeter {
+        PlaybackMeter {
+            speaking: self.speaking_flag.clone(),
+            level_bits: self.level_bits.clone(),
+        }
     }
 
     /// Corta de inmediato lo que esté sonando: no espera a que termine de
@@ -213,6 +271,16 @@ fn resample_linear(input: &[f32], src_rate: u32, dst_rate: u32) -> Vec<f32> {
         output.push(a + (b - a) * frac);
     }
     output
+}
+
+/// RMS simple de un buffer en [-1,1], usado solo como nivel visual (ver
+/// `PlaybackMeter`) — no afecta la reproducción. Se llama desde el callback
+/// de audio sobre las muestras que de verdad se mandan a la tarjeta de
+/// sonido (posiblemente multicanal entrelazado); es un proxy de energía, no
+/// hace falta bajar a mono para eso.
+fn rms(samples: &[f32]) -> f32 {
+    let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
+    (sum_sq / samples.len() as f32).sqrt()
 }
 
 /// Duplica cada muestra mono en las `channels` del dispositivo (entrelazado).

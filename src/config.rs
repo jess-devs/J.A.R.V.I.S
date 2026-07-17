@@ -23,6 +23,7 @@ pub struct Config {
     pub pipeline: PipelineConfig,
     pub agent: AgentConfig,
     pub welcome: WelcomeConfig,
+    pub ui: UiConfig,
     pub log_level: String,
 }
 
@@ -39,6 +40,7 @@ impl Default for Config {
             pipeline: PipelineConfig::default(),
             agent: AgentConfig::default(),
             welcome: WelcomeConfig::default(),
+            ui: UiConfig::default(),
             log_level: "info".to_string(),
         }
     }
@@ -1010,6 +1012,45 @@ impl Default for WelcomeConfig {
             duck_volume: 0.12,
             cooldown_secs: 120,
             news_when_no_reminders: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkerKind {
+    /// Curvas suaves; requiere fuente con glifos Braille.
+    #[default]
+    Braille,
+    /// Fallback más compatible con fuentes/terminales limitados.
+    Block,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct UiConfig {
+    /// Si true, reemplaza los logs de consola por la interfaz Ratatui
+    /// (holograma que respira/reacciona a la voz). Los logs de `tracing`
+    /// pasan a un archivo (ver `main.rs`) mientras esté activa.
+    pub enabled: bool,
+    /// Cuadros por segundo del loop de renderizado.
+    pub fps: u32,
+    /// true = colores RGB de 24 bits (Windows Terminal, la mayoría de
+    /// terminales Linux). false = paleta ANSI de 16 colores, para consola
+    /// clásica de Windows u otros terminales sin soporte truecolor.
+    pub truecolor: bool,
+    /// "braille" (curvas suaves, requiere fuente con glifos Braille) o
+    /// "block" (fallback más compatible con fuentes/terminales limitados).
+    pub marker: MarkerKind,
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            fps: 30,
+            truecolor: true,
+            marker: MarkerKind::default(),
         }
     }
 }

@@ -21,6 +21,7 @@ use crate::llm::{ChatMessage, LlmProvider, ToolCallRequest};
 use crate::pipeline::run_speaking_turn;
 use crate::tools::{RiskLevel, ToolRegistry};
 use crate::tts::TtsProvider;
+use crate::tui::{ToolCategory, UiState, VisualState};
 
 use super::speak;
 
@@ -42,6 +43,10 @@ pub struct TurnContext<'a> {
     /// el STT (ej. al retomar tras una confirmación) queda en `false` para
     /// siempre — nunca pausa.
     pub pause_rx: watch::Receiver<bool>,
+    /// Handle para publicar el estado visual de la TUI (ver `crate::tui`).
+    /// Clon barato; `execute_and_record` lo usa para mostrar una animación
+    /// distinta mientras corre cada herramienta.
+    pub ui: UiState,
 }
 
 /// Una herramienta esperando aprobación por voz del usuario.
@@ -86,7 +91,7 @@ pub async fn resume_agentic_turn(
     history: &mut Vec<ChatMessage>,
     pending: PendingConfirmation,
 ) -> Result<AgentTurnResult, JarvisError> {
-    execute_and_record(ctx.registry, ctx.config, history, &pending.call).await;
+    execute_and_record(ctx.registry, ctx.config, &ctx.ui, history, &pending.call).await;
     turn_loop(
         ctx,
         history,
@@ -162,7 +167,7 @@ async fn turn_loop(
                 .choose(&mut rand::thread_rng())
                 .cloned();
             if let Some(filler) = filler {
-                speak(ctx.tts, ctx.player, &filler).await;
+                speak(ctx.tts, ctx.player, &ctx.echo_gate, &filler).await;
             }
         }
 
@@ -223,13 +228,13 @@ async fn process_queue(
 
         match tool.assess_risk(&call.arguments) {
             RiskLevel::Safe => {
-                execute_and_record(ctx.registry, ctx.config, history, &call).await;
+                execute_and_record(ctx.registry, ctx.config, &ctx.ui, history, &call).await;
             }
             RiskLevel::Confirm if ctx.config.agent.confirm_mode == ConfirmMode::Free => {
                 // Mano libre: riesgo `Confirm` se ejecuta directo. `Code`
                 // (riesgo extremo) nunca entra por acá, sigue pidiendo
                 // siempre el código de aceptación.
-                execute_and_record(ctx.registry, ctx.config, history, &call).await;
+                execute_and_record(ctx.registry, ctx.config, &ctx.ui, history, &call).await;
             }
             risk => {
                 let action = tool.describe_action(&call.arguments);
@@ -260,6 +265,7 @@ async fn process_queue(
 pub async fn execute_and_record(
     registry: &ToolRegistry,
     config: &Config,
+    ui: &UiState,
     history: &mut Vec<ChatMessage>,
     call: &ToolCallRequest,
 ) {
@@ -274,18 +280,27 @@ pub async fn execute_and_record(
             Vec::new(),
         ),
         Some(tool) => {
+            ui.set(VisualState::ToolRunning(ToolCategory::from_tool_name(
+                &call.name,
+            )));
             let fut = tool.execute(call.arguments.clone());
-            match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), fut).await {
-                Err(_) => (
-                    format!("Error: {}", ToolError::Timeout(timeout_secs)),
-                    Vec::new(),
-                ),
-                Ok(Err(e)) => (format!("Error: {e}"), Vec::new()),
-                Ok(Ok(output)) => {
-                    succeeded = true;
-                    (registry.truncate_result(output.text), output.images)
-                }
-            }
+            let outcome =
+                match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), fut).await
+                {
+                    Err(_) => (
+                        format!("Error: {}", ToolError::Timeout(timeout_secs)),
+                        Vec::new(),
+                    ),
+                    Ok(Err(e)) => (format!("Error: {e}"), Vec::new()),
+                    Ok(Ok(output)) => {
+                        succeeded = true;
+                        (registry.truncate_result(output.text), output.images)
+                    }
+                };
+            // Vuelve al genérico "pensando" — puede venir otro tool call o la
+            // respuesta final, ninguno de los dos tiene categoría propia.
+            ui.set(VisualState::Thinking);
+            outcome
         }
     };
     // create_tool/delete_custom_tool mutan el set de tools persistidas:
