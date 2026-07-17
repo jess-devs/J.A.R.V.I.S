@@ -48,6 +48,17 @@ fn effective_state(reported: VisualState, jarvis_active: bool) -> VisualState {
     }
 }
 
+/// Convierte dBFS crudo (`Orchestrator::mic_level_rx`) a un nivel 0.0-1.0
+/// para la TUI. No depende del piso de energía calibrado por el motor
+/// nativo (`energy_floor_dbfs`, específico de cada máquina/micrófono): es
+/// una señal puramente visual, no de decisión, así que alcanza con un rango
+/// fijo razonable para voz.
+pub fn normalize_mic_level(dbfs: f32) -> f32 {
+    const FLOOR_DBFS: f32 = -50.0;
+    const RANGE_DB: f32 = 35.0;
+    ((dbfs - FLOOR_DBFS) / RANGE_DB).clamp(0.0, 1.0)
+}
+
 /// Corre el loop de renderizado hasta que el usuario pide salir (`q`/Esc) o
 /// falla la terminal. Instala/restaura la terminal (raw mode + alternate
 /// screen) al entrar/salir; un panic mientras corre queda cubierto por el
@@ -73,7 +84,7 @@ pub async fn run(
     let start = Instant::now();
 
     // Envolvente del nivel real del micrófono (dBFS normalizado por
-    // `Orchestrator::normalize_mic_level`), suavizada con ataque rápido y
+    // `normalize_mic_level`), suavizada con ataque rápido y
     // liberación un poco más lenta para que reaccione al volumen de la voz
     // sin verse nerviosa cuadro a cuadro. Fuera de `UserSpeaking` el objetivo
     // es 0.0, así que decae solo al terminar de hablar (no hace falta un
@@ -131,7 +142,7 @@ pub async fn run(
 
         let render_state = effective_state(reported_state, jarvis_active);
 
-        let mic_raw = mic_level_rx.borrow_and_update().clamp(0.0, 1.0);
+        let mic_raw = normalize_mic_level(*mic_level_rx.borrow_and_update());
         let user_target: f32 = if matches!(render_state, VisualState::UserSpeaking) {
             mic_raw
         } else {

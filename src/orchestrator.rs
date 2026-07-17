@@ -105,9 +105,10 @@ pub struct Orchestrator {
     /// escribe siempre, aunque `config.ui.enabled` sea `false`: sin
     /// receptores activos, `set()` no cuesta nada relevante.
     ui: UiState,
-    /// Nivel de energía del micrófono (0.0-1.0, normalizado desde dBFS), para
-    /// que la TUI anime `UserSpeaking` con el volumen real de voz. Igual que
-    /// `ui`, se escribe siempre aunque nadie la lea.
+    /// Nivel de energía del micrófono en dBFS crudo (la normalización a
+    /// 0.0-1.0 es cosa de la TUI, ver `crate::tui::normalize_mic_level`),
+    /// para que la TUI anime `UserSpeaking` con el volumen real de voz.
+    /// Igual que `ui`, se escribe siempre aunque nadie la lea.
     mic_level_tx: watch::Sender<f32>,
 }
 
@@ -202,7 +203,10 @@ impl Orchestrator {
             last_welcome: None,
             test_cancel_slot,
             ui,
-            mic_level_tx: watch::channel(0.0).0,
+            // -100.0 dBFS = silencio total (por debajo del piso que usa
+            // `normalize_mic_level`), para que el nivel arranque en 0.0
+            // visualmente antes de que llegue el primer `SttEvent::Level`.
+            mic_level_tx: watch::channel(-100.0).0,
         })
     }
 
@@ -212,8 +216,10 @@ impl Orchestrator {
         self.player.playback_meter()
     }
 
-    /// Nivel de energía del micrófono (0.0-1.0), para animar `UserSpeaking`
-    /// con el volumen real de voz en vez de un pulso sintético.
+    /// Nivel de energía del micrófono en dBFS crudo (sin normalizar), para
+    /// animar `UserSpeaking` con el volumen real de voz en vez de un pulso
+    /// sintético. La normalización a 0.0-1.0 es puramente visual y vive del
+    /// lado de la TUI (`crate::tui::normalize_mic_level`).
     pub fn mic_level_rx(&self) -> tokio::sync::watch::Receiver<f32> {
         self.mic_level_tx.subscribe()
     }
@@ -424,7 +430,7 @@ impl Orchestrator {
                 }
                 SttEvent::ClapDetected => self.handle_clap().await,
                 SttEvent::Level { dbfs } => {
-                    self.mic_level_tx.send_replace(normalize_mic_level(dbfs));
+                    self.mic_level_tx.send_replace(dbfs);
                 }
                 SttEvent::WorkerDied => {
                     self.restart_stt_or_die().await?;
@@ -1153,16 +1159,6 @@ fn classify_barge_in_event(
         SttEvent::Level { .. } => BargeInAction::Ignore,
         SttEvent::WorkerDied => BargeInAction::Ignore,
     }
-}
-
-/// Convierte dBFS a un nivel 0.0-1.0 para la TUI. No depende del piso de
-/// energía calibrado por el motor nativo (`energy_floor_dbfs`, específico de
-/// cada máquina/micrófono): es una señal puramente visual, no de decisión,
-/// así que alcanza con un rango fijo razonable para voz.
-fn normalize_mic_level(dbfs: f32) -> f32 {
-    const FLOOR_DBFS: f32 = -50.0;
-    const RANGE_DB: f32 = 35.0;
-    ((dbfs - FLOOR_DBFS) / RANGE_DB).clamp(0.0, 1.0)
 }
 
 /// Resuelve un evento de STT llegado durante un turno: clasifica (síncrono,
