@@ -573,7 +573,7 @@ welcome:
 ui:
   # Si true, reemplaza la consola de logs por la interfaz gráfica.
   # Los logs de tracing pasan a logs/jarvis.log mientras esté activa.
-  enabled: false
+  enabled: true
   fps: 30
   # true = colores RGB de 24 bits (Windows Terminal, casi todos los
   # terminales de Linux). Poné false en consola clásica de Windows si los
