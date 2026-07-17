@@ -34,18 +34,32 @@ fn hash01(seed: f64) -> f64 {
     s - s.floor()
 }
 
-fn polyline(ctx: &mut Context, points: &[(f64, f64)], color: Color) {
-    for pair in points.windows(2) {
-        let (x1, y1) = pair[0];
-        let (x2, y2) = pair[1];
+/// Dibuja una curva paramétrica de `0` a `steps` segmento a segmento, sin
+/// materializar un `Vec` intermedio — `point(i)` genera el punto i-ésimo.
+fn draw_curve(ctx: &mut Context, steps: usize, color: Color, point: impl Fn(usize) -> (f64, f64)) {
+    let mut prev = point(0);
+    for i in 1..=steps {
+        let curr = point(i);
         ctx.draw(&Line {
-            x1,
-            y1,
-            x2,
-            y2,
+            x1: prev.0,
+            y1: prev.1,
+            x2: curr.0,
+            y2: curr.1,
             color,
         });
+        prev = curr;
     }
+}
+
+/// Línea base plana que varias formas dibujan detrás de su animación.
+fn draw_baseline(ctx: &mut Context, color: Color) {
+    ctx.draw(&Line {
+        x1: 0.0,
+        y1: 0.0,
+        x2: COLUMNS,
+        y2: 0.0,
+        color,
+    });
 }
 
 /// Onda calma que fluye de derecha a izquierda, con la amplitud
@@ -59,14 +73,11 @@ fn flowing_breath(
 ) {
     let amp = base_amp * (0.55 + 0.45 * (elapsed * breathing_speed).sin());
     let steps = 90;
-    let points: Vec<(f64, f64)> = (0..=steps)
-        .map(|i| {
-            let x = COLUMNS * i as f64 / steps as f64;
-            let y = amp * (0.09 * x - elapsed * 1.1).sin();
-            (x, y)
-        })
-        .collect();
-    polyline(ctx, &points, color);
+    draw_curve(ctx, steps, color, |i| {
+        let x = COLUMNS * i as f64 / steps as f64;
+        let y = amp * (0.09 * x - elapsed * 1.1).sin();
+        (x, y)
+    });
 }
 
 /// Barras irregulares reactivas a `envelope` (0.0-1.0) — como un waveform de
@@ -100,31 +111,21 @@ fn voice_bars(ctx: &mut Context, elapsed: f64, envelope: f64, color: Color) {
 fn glowing_curve(ctx: &mut Context, elapsed: f64, level: f64, color: Color) {
     let amp = 6.0 + level * 40.0;
     let steps = 110;
-    let shape = |mul: f64, phase: f64| -> Vec<(f64, f64)> {
-        (0..=steps)
-            .map(|i| {
-                let x = COLUMNS * i as f64 / steps as f64;
-                let y = amp * mul * (0.12 * x - elapsed * 2.6 + phase).sin();
-                (x, y)
-            })
-            .collect()
+    let point = |mul: f64, phase: f64, i: usize| {
+        let x = COLUMNS * i as f64 / steps as f64;
+        let y = amp * mul * (0.12 * x - elapsed * 2.6 + phase).sin();
+        (x, y)
     };
     // Glow: mismo trazo, un poco más grande y bien tenue, detrás del
     // principal — dos pasadas alcanzan para leerse como un brillo suave.
-    polyline(ctx, &shape(1.35, 0.0), theme::dim(color, 0.35));
-    polyline(ctx, &shape(1.0, 0.0), color);
+    draw_curve(ctx, steps, theme::dim(color, 0.35), |i| point(1.35, 0.0, i));
+    draw_curve(ctx, steps, color, |i| point(1.0, 0.0, i));
 }
 
 /// Un pulso que recorre la franja de un lado a otro sobre una base plana:
 /// efecto "escáner", para distinguir claramente "procesando" de "hablando".
 fn scanning_pulse(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color) {
-    ctx.draw(&Line {
-        x1: 0.0,
-        y1: 0.0,
-        x2: COLUMNS,
-        y2: 0.0,
-        color: baseline,
-    });
+    draw_baseline(ctx, baseline);
     // Onda triangular en [0,1] para un barrido ida y vuelta (no un diente de
     // sierra que salte).
     let period = 1.6;
@@ -137,39 +138,28 @@ fn scanning_pulse(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color
     let x = COLUMNS * triangle;
     let width = 10.0;
     let steps = 16;
-    let points: Vec<(f64, f64)> = (0..=steps)
-        .map(|i| {
-            let t = i as f64 / steps as f64 - 0.5;
-            let px = x + t * width;
-            let py = 20.0 * (1.0 - (2.0 * t).abs()) * (elapsed * 6.0 + t).cos();
-            (px.clamp(0.0, COLUMNS), py)
-        })
-        .collect();
-    polyline(ctx, &points, color);
+    draw_curve(ctx, steps, color, |i| {
+        let t = i as f64 / steps as f64 - 0.5;
+        let px = x + t * width;
+        let py = 20.0 * (1.0 - (2.0 * t).abs()) * (elapsed * 6.0 + t).cos();
+        (px.clamp(0.0, COLUMNS), py)
+    });
 }
 
 /// Línea plana con una respiración lenta en amplitud — `AwaitingConfirmation`.
 fn slow_pulse_flat(ctx: &mut Context, elapsed: f64, color: Color) {
     let amp = 3.0 + 9.0 * (0.5 + 0.5 * (elapsed * 0.8).sin());
-    let points: Vec<(f64, f64)> = (0..=60)
-        .map(|i| {
-            let x = COLUMNS * i as f64 / 60.0;
-            (x, amp * (0.06 * x).sin())
-        })
-        .collect();
-    polyline(ctx, &points, color);
+    let steps = 60;
+    draw_curve(ctx, steps, color, |i| {
+        let x = COLUMNS * i as f64 / steps as f64;
+        (x, amp * (0.06 * x).sin())
+    });
 }
 
 /// Dos marcadores que se acercan y se alejan del centro sobre la línea
 /// base — efecto "radar"/ping de búsqueda. Usada en `ToolCategory::Web`.
 fn radar_ping(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color) {
-    ctx.draw(&Line {
-        x1: 0.0,
-        y1: 0.0,
-        x2: COLUMNS,
-        y2: 0.0,
-        color: baseline,
-    });
+    draw_baseline(ctx, baseline);
     let spread = (0.5 + 0.5 * (elapsed * 2.2).sin()) * (COLUMNS / 2.0 - 6.0);
     let center = COLUMNS / 2.0;
     for x in [center - spread, center + spread] {
@@ -205,13 +195,7 @@ fn rhythmic_bars(ctx: &mut Context, elapsed: f64, color: Color) {
 /// Un segmento que "escribe"/avanza de izquierda a derecha y se resetea —
 /// efecto de progreso/guardado. Usada en `ToolCategory::Memory`.
 fn writing_tick(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color) {
-    ctx.draw(&Line {
-        x1: 0.0,
-        y1: 0.0,
-        x2: COLUMNS,
-        y2: 0.0,
-        color: baseline,
-    });
+    draw_baseline(ctx, baseline);
     let period = 1.2;
     let progress = (elapsed / period).fract();
     ctx.draw(&Line {
@@ -235,13 +219,7 @@ fn writing_tick(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color) 
 /// Dos marcadores cruzándose en direcciones opuestas — sensación de
 /// "ocupado". Usada en `ToolCategory::System`.
 fn crossing_markers(ctx: &mut Context, elapsed: f64, color: Color, baseline: Color) {
-    ctx.draw(&Line {
-        x1: 0.0,
-        y1: 0.0,
-        x2: COLUMNS,
-        y2: 0.0,
-        color: baseline,
-    });
+    draw_baseline(ctx, baseline);
     let period = 2.0;
     let phase = (elapsed / period).fract();
     let a = COLUMNS * phase;
@@ -280,14 +258,13 @@ pub fn render(
     marker: Marker,
 ) {
     let level = level.clamp(0.0, 1.0) as f64;
-    let state = state.clone();
     let palette = *palette;
 
     let canvas = Canvas::default()
         .marker(marker)
         .x_bounds(X_BOUNDS)
         .y_bounds(Y_BOUNDS)
-        .paint(move |ctx| match &state {
+        .paint(|ctx| match state {
             VisualState::Idle => flowing_breath(ctx, elapsed, 8.0, 1.55, palette.idle),
             VisualState::Listening => flowing_breath(ctx, elapsed, 10.0, 2.1, palette.listening),
             VisualState::UserSpeaking => voice_bars(ctx, elapsed, level, palette.user_speaking),

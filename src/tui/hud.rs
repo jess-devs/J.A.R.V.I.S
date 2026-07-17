@@ -1,6 +1,8 @@
 //! Rótulo de estado en una esquina, estilo HUD (sin panel de logs: solo la
 //! etiqueta del estado actual entre corchetes finos).
 
+use std::borrow::Cow;
+
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
@@ -10,16 +12,16 @@ use ratatui::Frame;
 use super::state::{ToolCategory, VisualState};
 use super::theme::Palette;
 
-fn label(state: &VisualState) -> String {
+fn label(state: &VisualState) -> Cow<'static, str> {
     match state {
-        VisualState::Idle => "⟨ EN REPOSO ⟩".to_string(),
-        VisualState::Listening => "⟨ ESCUCHANDO ⟩".to_string(),
-        VisualState::UserSpeaking => "⟨ TE ESCUCHO ⟩".to_string(),
-        VisualState::Thinking => "⟨ PENSANDO… ⟩".to_string(),
-        VisualState::JarvisSpeaking => "⟨ HABLANDO ⟩".to_string(),
-        VisualState::AwaitingConfirmation => "⟨ ESPERANDO CONFIRMACIÓN ⟩".to_string(),
-        VisualState::ToolRunning(category) => tool_label(*category).to_string(),
-        VisualState::Error(msg) => format!("⟨ ERROR: {msg} ⟩"),
+        VisualState::Idle => Cow::Borrowed("⟨ EN REPOSO ⟩"),
+        VisualState::Listening => Cow::Borrowed("⟨ ESCUCHANDO ⟩"),
+        VisualState::UserSpeaking => Cow::Borrowed("⟨ TE ESCUCHO ⟩"),
+        VisualState::Thinking => Cow::Borrowed("⟨ PENSANDO… ⟩"),
+        VisualState::JarvisSpeaking => Cow::Borrowed("⟨ HABLANDO ⟩"),
+        VisualState::AwaitingConfirmation => Cow::Borrowed("⟨ ESPERANDO CONFIRMACIÓN ⟩"),
+        VisualState::ToolRunning(category) => Cow::Borrowed(tool_label(*category)),
+        VisualState::Error(msg) => Cow::Owned(format!("⟨ ERROR: {msg} ⟩")),
     }
 }
 
