@@ -83,11 +83,10 @@ correspondiente.
 #### 2. Ollama y el modelo
 
 ```bash
-ollama serve                    # si no corre ya como servicio
-ollama pull qwen2.5:3b-instruct # modelo default en config.yaml
+ollama pull qwen3.5:0.8b # tier mínimo; setup.ps1/.sh eligen el modelo según tu hardware
 ```
 
-El modo agéntico necesita un modelo que soporte **tool calling**. El default (`qwen2.5:3b-instruct`) está pensado para hardware sin GPU con 4-8GB de RAM libres. Con más RAM o GPU disponible convienen `qwen2.5:7b` o `qwen3:8b` (mejor tool calling; con `qwen3` poné además `llm.ollama.think: false` en `config.yaml` para que los tokens de razonamiento no se hablen en voz alta), `scripts/setup.ps1`/`.sh` eligen entre estas opciones automáticamente según tu RAM/VRAM. Si preferís chat puro sin herramientas, poné `agent.enabled: false`.
+No hace falta arrancar el servidor a mano: con `llm.ollama.auto_serve: true` (el default) Jarvis levanta `ollama serve` solo si no está corriendo, y ese servidor muere junto con Jarvis. El modo agéntico necesita un modelo que soporte **tool calling**: los tiers van de `qwen3.5:0.8b` (hardware mínimo) a `qwen3.5:4b`, `qwen3:8b`, `qwen3:14b` y `qwen3:32b` según RAM/VRAM (`llm.ollama.model: auto` y `scripts/setup.ps1`/`.sh` usan la misma tabla; el `think: false` que necesitan qwen3/qwen3.5 se aplica solo con `auto`). Si preferís chat puro sin herramientas, poné `agent.enabled: false`.
 
 #### 3. Voz de Piper
 
@@ -252,8 +251,8 @@ El `system_prompt` por defecto le pide al modelo respuestas breves (1-2 oracione
 |---|---|
 | `no se encontró el ejecutable de Python en '...'` | Corré `scripts/setup_python_env.ps1` (o `.sh`) para crear el venv. |
 | `el entorno Python no tiene las dependencias instaladas` | `workers\.venv\Scripts\pip install -r workers/requirements.txt` |
-| `no se pudo conectar a Ollama` | Corré `ollama serve` (o confirmá que corre como servicio). |
-| `el modelo '...' no está descargado en Ollama` | `ollama pull qwen2.5:7b` (o el modelo que hayas configurado). |
+| `no se pudo conectar a Ollama` | Con `llm.ollama.auto_serve: true` (default) Jarvis intenta levantarlo solo; si aun así falla, corré `ollama serve` a mano y revisá que el puerto 11434 esté libre. |
+| `el modelo '...' no está descargado en Ollama` | `ollama pull <modelo>` con el nombre exacto que indica el error. |
 | `no se pudo conectar a LM Studio` | Abrí LM Studio, cargá un modelo y activá el servidor local (pestaña Developer → Start Server). |
 | `el modelo '...' no está cargado en LM Studio` | Cargá el modelo desde LM Studio, o ajustá `llm.lmstudio.model` al identificador exacto que aparece ahí. |
 | `faltan archivos de voz Piper` | `workers\.venv\Scripts\python.exe -m piper.download_voices <voz>` y moveé los `.onnx`/`.onnx.json` a `voices/`. |

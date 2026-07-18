@@ -229,11 +229,16 @@ Qué modelo genera las respuestas.
   `tts.elevenlabs`) **no es la API key en sí**, es el *nombre* de la
   variable de entorno que la contiene (ver `.env.example`). Así la key real
   nunca queda en este archivo, que sí se versiona en git.
-- `ollama.think` / nota sobre modelos con razonamiento: `qwen3` y
-  `deepseek-r1` emiten tokens de "pensamiento" antes de la respuesta, que
+- `ollama.think` / nota sobre modelos con razonamiento: `qwen3`, `qwen3.5`
+  y `deepseek-r1` emiten tokens de "pensamiento" antes de la respuesta, que
   el TTS hablaría en voz alta si no se filtran, poné `think: false`. Con
   `qwen2.5` dejá `null` (el modelo rechaza la request si le mandás el
-  campo).
+  campo). Con `model: "auto"` esto se ajusta solo.
+- `ollama.auto_serve`: si `true` (default) y `base_url` apunta a esta
+  máquina, Jarvis levanta `ollama serve` al arrancar cuando el servidor no
+  responde. El proceso lanzado nace dentro del Job Object de Jarvis, así
+  que se cierra automáticamente junto con él; si Ollama ya estaba corriendo
+  (por ejemplo la app de bandeja), no se toca.
 - `max_history_messages`: cuántos mensajes de la conversación actual se
   conservan (además de los 2 mensajes `system` fijos) antes de recortar los
   más viejos. Más alto = Jarvis recuerda más de la charla en curso, pero
