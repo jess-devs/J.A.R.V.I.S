@@ -48,6 +48,7 @@ pub async fn run(config: &Config) -> Result<()> {
 
     match config.llm.provider {
         LlmProviderKind::Ollama => {
+            ensure_ollama_serve(config).await;
             if let Err(e) = check_ollama(config).await {
                 problems.push(e);
             } else if config.agent.enabled {
@@ -246,6 +247,100 @@ fn warn_model_tool_support(provider: &str, model: &str) {
     } else {
         tracing::info!(provider, model, "modo agéntico activo con {provider}");
     }
+}
+
+/// Con `llm.ollama.auto_serve: true` y un `base_url` local, levanta
+/// `ollama serve` si el servidor no responde, y espera a que esté listo.
+/// Nunca falla: cualquier problema se loguea y se deja que `check_ollama`
+/// produzca después su error accionable de siempre. El proceso lanzado nace
+/// como hijo dentro del Job Object de Jarvis (ver `ipc::job_object`), así
+/// que el kernel lo mata automáticamente cuando Jarvis muere — no hace
+/// falta guardar el `Child` ni limpiarlo a mano.
+async fn ensure_ollama_serve(config: &Config) {
+    let ollama = &config.llm.ollama;
+    if !ollama.auto_serve {
+        return;
+    }
+
+    let is_local = url::Url::parse(&ollama.base_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .is_some_and(|h| matches!(h.as_str(), "localhost" | "127.0.0.1" | "::1" | "[::1]"));
+    if !is_local {
+        tracing::debug!(
+            base_url = %ollama.base_url,
+            "auto_serve activo pero base_url no es local; no se levanta ollama serve"
+        );
+        return;
+    }
+
+    let url = format!("{}/api/version", ollama.base_url);
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "no se pudo crear el cliente HTTP para sondear Ollama");
+            return;
+        }
+    };
+
+    if client.get(&url).send().await.is_ok() {
+        tracing::debug!("Ollama ya está corriendo; no hace falta levantarlo");
+        return;
+    }
+
+    // `println!`/`eprintln!` además del log de tracing a propósito: este
+    // chequeo corre antes de que la TUI (si está activa) tome la pantalla,
+    // así que es seguro imprimir acá, y es el único punto en el que
+    // `ui.enabled: true` desviaría el aviso a `logs/jarvis.log` en vez de
+    // mostrarlo — el usuario debe enterarse en consola de que Jarvis está
+    // lanzando un proceso externo.
+    println!("Ollama no responde; iniciando `ollama serve` automáticamente...");
+    tracing::info!("Ollama no responde; levantando `ollama serve`...");
+
+    let mut command = tokio::process::Command::new("ollama");
+    command
+        .arg("serve")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    // El Child se dropea a propósito (sin kill_on_drop): el proceso sigue
+    // vivo como hijo y el Job Object garantiza su limpieza al salir Jarvis.
+    if let Err(e) = command.spawn() {
+        eprintln!("No se pudo iniciar `ollama serve` automáticamente: {e}");
+        tracing::warn!(
+            error = %e,
+            "no se pudo lanzar `ollama serve` (¿está Ollama instalado y en el PATH?)"
+        );
+        return;
+    }
+
+    const READY_TIMEOUT: Duration = Duration::from_secs(15);
+    let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
+    while tokio::time::Instant::now() < deadline {
+        if client.get(&url).send().await.is_ok() {
+            println!("Ollama listo.");
+            tracing::info!("`ollama serve` levantado y respondiendo");
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    eprintln!(
+        "`ollama serve` no respondió tras {} segundos; revisá si Ollama arrancó correctamente.",
+        READY_TIMEOUT.as_secs()
+    );
+    tracing::warn!(
+        "`ollama serve` no respondió tras {} segundos; el preflight reportará el detalle",
+        READY_TIMEOUT.as_secs()
+    );
 }
 
 async fn check_ollama(config: &Config) -> std::result::Result<(), String> {

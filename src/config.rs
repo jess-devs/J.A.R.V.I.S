@@ -349,14 +349,19 @@ pub struct OllamaConfig {
     /// hablaría en voz alta. null = no enviar el campo (obligatorio para
     /// modelos que no lo soportan, como qwen2.5 — Ollama rechaza la request).
     pub think: Option<bool>,
+    /// Si true y `base_url` apunta a esta máquina, Jarvis levanta
+    /// `ollama serve` cuando no está corriendo. El servidor lanzado nace
+    /// dentro del Job Object de Jarvis, así que muere junto con él.
+    pub auto_serve: bool,
 }
 
 impl Default for OllamaConfig {
     fn default() -> Self {
         Self {
             base_url: "http://localhost:11434".to_string(),
-            model: "qwen2.5:7b".to_string(),
+            model: "auto".to_string(),
             think: None,
+            auto_serve: true,
         }
     }
 }
