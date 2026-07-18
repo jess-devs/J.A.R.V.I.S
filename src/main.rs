@@ -99,14 +99,22 @@ async fn run(mut config: Config) -> errors::Result<()> {
     // el Orchestrator: este spawnea los workers Python en su constructor, y
     // solo heredan la membresía del job si el proceso Jarvis ya es miembro
     // en el momento del spawn.
-    let _job_object = ipc::job_object::JobObject::create_and_assign_current_process()
-        .map_err(|e| {
+    //
+    // El handle se "olvida" a propósito: con KILL_ON_JOB_CLOSE, cerrar el
+    // último handle del job (el Drop al salir de esta función) mata a TODOS
+    // sus miembros — incluido este mismo proceso, en silencio y con código
+    // 0, antes de que `main` pueda imprimir el error que `run` retorna. Al
+    // olvidarlo, el kernel lo cierra recién cuando el proceso termina, que
+    // es el único momento en el que debe arrastrar a los workers.
+    match ipc::job_object::JobObject::create_and_assign_current_process() {
+        Ok(job) => std::mem::forget(job),
+        Err(e) => {
             tracing::error!(
                 error = %e,
                 "no se pudo crear el Job Object de aislamiento; si Jarvis muere de forma anómala los workers Python podrían quedar huérfanos"
             );
-        })
-        .ok();
+        }
+    }
 
     let mut console_shutdown_rx = ipc::console_handler::install()
         .map_err(

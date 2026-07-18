@@ -20,8 +20,12 @@ use windows::Win32::System::JobObjects::{
 use windows::Win32::System::Threading::GetCurrentProcess;
 
 /// Handle al Job Object. Debe mantenerse vivo durante toda la vida del
-/// proceso: soltarlo (Drop) no deshace el efecto kill-on-close, que ya
-/// quedó registrado en el kernel al asignar el proceso.
+/// proceso — y como el proceso actual es miembro del job, NUNCA debe
+/// dropearse antes de terminar: cerrar el último handle es exactamente lo
+/// que dispara kill-on-close, y mataría a todos los miembros del job,
+/// incluido este mismo proceso (en silencio y con código de salida 0). Por
+/// eso `main` lo `std::mem::forget`-ea: el kernel cierra el handle al morir
+/// el proceso, y recién ahí arrastra a los workers.
 pub struct JobObject {
     handle: HANDLE,
 }
