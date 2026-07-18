@@ -96,13 +96,13 @@ if ($hasGpu -and $vramGb -ge 24)
     $recommended = "qwen3:8b"
 } elseif ($hasGpu -and $vramGb -ge 4)
 {
-    $recommended = "qwen3.5:0.8b"
+    $recommended = "qwen3.5:4b"
 } elseif (-not $hasGpu -and $ramGb -ge 16)
 {
     $recommended = "qwen3.5:4b"
 } else
 {
-    $recommended = "qwen2.5:3b-instruct"
+    $recommended = "qwen3.5:0.8b"
     if (-not $hasGpu -and $ramGb -lt 8)
     {
         Write-Warn "RAM total por debajo de 8 GB: incluso '$recommended' puede rendir con lentitud."

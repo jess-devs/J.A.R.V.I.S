@@ -77,11 +77,11 @@ elif $has_gpu && [[ "$vram_gb" -ge 16 ]]; then
 elif $has_gpu && [[ "$vram_gb" -ge 8 ]]; then
     recommended="qwen3:8b"
 elif $has_gpu && [[ "$vram_gb" -ge 4 ]]; then
-    recommended="qwen2.5:7b"
+    recommended="qwen3.5:4b"
 elif ! $has_gpu && [[ "$ram_gb" -ge 16 ]]; then
-    recommended="qwen2.5:7b"
+    recommended="qwen3.5:4b"
 else
-    recommended="qwen2.5:3b-instruct"
+    recommended="qwen3.5:0.8b"
     if ! $has_gpu && [[ "$ram_gb" -lt 8 ]]; then
         warn "RAM total por debajo de 8 GB: incluso '$recommended' puede rendir con lentitud."
     fi

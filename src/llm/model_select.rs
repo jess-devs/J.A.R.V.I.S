@@ -64,9 +64,11 @@ async fn detect_nvidia_vram() -> (bool, f64) {
 
 /// Tabla de tiers curada a mano: todos modelos de la familia qwen, ya
 /// excluida de la lista negra de `warn_model_tool_support` en
-/// `startup_checks.rs`, así que el modo agéntico queda garantizado. Mismos
-/// umbrales de 4GB/16GB que ya usan `scripts/setup.ps1`/`setup.sh`, más los
-/// dos tiers superiores de GPU que esos scripts no cubrían.
+/// `startup_checks.rs`, así que el modo agéntico queda garantizado.
+/// ATENCIÓN: esta tabla vive por triplicado — acá, en `scripts/setup.ps1`
+/// y en `scripts/setup.sh` — y las tres copias deben mantenerse
+/// sincronizadas a mano, o el setup baja un modelo distinto del que Jarvis
+/// exige al arrancar.
 pub fn recommend_model(hw: &HardwareProfile) -> &'static str {
     if hw.has_gpu {
         if hw.vram_gb >= 24.0 {
@@ -76,14 +78,14 @@ pub fn recommend_model(hw: &HardwareProfile) -> &'static str {
         } else if hw.vram_gb >= 8.0 {
             "qwen3:8b"
         } else if hw.vram_gb >= 4.0 {
-            "qwen2.5:7b"
+            "qwen3.5:4b"
         } else {
-            "qwen2.5:3b-instruct"
+            "qwen3.5:0.8b"
         }
     } else if hw.ram_gb >= 16.0 {
-        "qwen2.5:7b"
+        "qwen3.5:4b"
     } else {
-        "qwen2.5:3b-instruct"
+        "qwen3.5:0.8b"
     }
 }
 
@@ -138,21 +140,23 @@ mod tests {
         assert_eq!(recommend_model(&hw(true, 24.0, 0.0)), "qwen3:32b");
         assert_eq!(recommend_model(&hw(true, 16.0, 0.0)), "qwen3:14b");
         assert_eq!(recommend_model(&hw(true, 8.0, 0.0)), "qwen3:8b");
-        assert_eq!(recommend_model(&hw(true, 4.0, 0.0)), "qwen2.5:7b");
-        assert_eq!(recommend_model(&hw(true, 2.0, 0.0)), "qwen2.5:3b-instruct");
+        assert_eq!(recommend_model(&hw(true, 4.0, 0.0)), "qwen3.5:4b");
+        assert_eq!(recommend_model(&hw(true, 2.0, 0.0)), "qwen3.5:0.8b");
     }
 
     #[test]
     fn cpu_only_tiers_by_ram() {
-        assert_eq!(recommend_model(&hw(false, 0.0, 16.0)), "qwen2.5:7b");
-        assert_eq!(recommend_model(&hw(false, 0.0, 32.0)), "qwen2.5:7b");
-        assert_eq!(recommend_model(&hw(false, 0.0, 8.0)), "qwen2.5:3b-instruct");
+        assert_eq!(recommend_model(&hw(false, 0.0, 16.0)), "qwen3.5:4b");
+        assert_eq!(recommend_model(&hw(false, 0.0, 32.0)), "qwen3.5:4b");
+        assert_eq!(recommend_model(&hw(false, 0.0, 8.0)), "qwen3.5:0.8b");
     }
 
     #[test]
     fn think_false_for_reasoning_models() {
         assert!(model_needs_think_false("qwen3:8b"));
         assert!(model_needs_think_false("qwen3:32b"));
+        assert!(model_needs_think_false("qwen3.5:4b"));
+        assert!(model_needs_think_false("qwen3.5:0.8b"));
         assert!(model_needs_think_false("deepseek-r1:14b"));
         assert!(!model_needs_think_false("qwen2.5:7b"));
         assert!(!model_needs_think_false("qwen2.5:3b-instruct"));
