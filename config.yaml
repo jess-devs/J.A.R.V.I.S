@@ -210,7 +210,7 @@ llm:
 
     # Modelo a usar. "auto" detecta VRAM/RAM y elige un modelo qwen acorde;
     # si no está descargado, avisa el "ollama pull" pero no lo baja solo.
-    model: "qwen3.5:0.8b"
+    model: "auto"
 
     # null = no envía el campo (qwen2.5 lo rechaza); false para qwen3/qwen3.5/deepseek-r1.
     think: null
@@ -595,4 +595,4 @@ ui:
 
 # Nivel de detalle del log: trace, debug, info, warn, error.
 # "debug" muestra telemetría de VAD, transcripción y barge-in.
-log_level: debug
+log_level: info
