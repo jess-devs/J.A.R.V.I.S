@@ -44,6 +44,13 @@ struct Cli {
 #[tokio::main]
 async fn main() {
     std::panic::set_hook(Box::new(|info| {
+        // `eprintln!` además de `tracing::error!` a propósito: con
+        // `ui.enabled: true` el subscriber de tracing escribe a
+        // `logs/jarvis.log`, no a la consola, así que un panic ahí sería
+        // invisible en pantalla si solo se logueara. Esto garantiza que
+        // cualquier muerte anómala se anuncie en la terminal sin importar
+        // el sink de tracing configurado.
+        eprintln!("Panic no controlado en Jarvis: {info}");
         tracing::error!(panic = %info, "panic no controlado en Jarvis");
         // Un panic en una tarea `tokio::spawn` no termina el proceso (no hay
         // `panic = "abort"` en el perfil): en ese caso Jarvis sigue vivo y
