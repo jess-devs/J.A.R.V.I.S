@@ -202,6 +202,38 @@ if (-not $voicePathMatch)
 }
 
 Write-Step "Descargando el modelo de Ollama ($modelToPull)..."
+
+# El pull necesita el servidor de Ollama corriendo, no solo el binario en
+# PATH. Si no responde, se intenta levantarlo en segundo plano (queda
+# corriendo tras el setup, que es lo deseable: el paso siguiente del usuario
+# es arrancar Jarvis).
+function Test-OllamaServer
+{
+    try
+    {
+        Invoke-RestMethod "http://127.0.0.1:11434/api/version" -TimeoutSec 2 | Out-Null
+        return $true
+    } catch
+    {
+        return $false
+    }
+}
+
+if (-not (Test-OllamaServer))
+{
+    Write-Host "El servidor de Ollama no responde; levantando 'ollama serve' en segundo plano..."
+    Start-Process ollama -ArgumentList "serve" -WindowStyle Hidden
+    $deadline = (Get-Date).AddSeconds(15)
+    while (-not (Test-OllamaServer) -and (Get-Date) -lt $deadline)
+    {
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not (Test-OllamaServer))
+    {
+        Write-Warn "No se pudo levantar el servidor de Ollama. Arrancalo a mano ('ollama serve' o la app de Ollama)."
+    }
+}
+
 ollama pull $modelToPull
 if ($LASTEXITCODE -ne 0)
 {

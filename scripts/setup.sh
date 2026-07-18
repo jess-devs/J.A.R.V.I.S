@@ -161,6 +161,27 @@ else
 fi
 
 step "Descargando el modelo de Ollama ($model_to_pull)..."
+
+# El pull necesita el servidor de Ollama corriendo, no solo el binario en
+# PATH. Si no responde, se intenta levantarlo en segundo plano (queda
+# corriendo tras el setup, que es lo deseable: el paso siguiente del usuario
+# es arrancar Jarvis).
+ollama_server_up() {
+    curl -sf --max-time 2 "http://127.0.0.1:11434/api/version" >/dev/null 2>&1
+}
+
+if ! ollama_server_up; then
+    echo "El servidor de Ollama no responde; levantando 'ollama serve' en segundo plano..."
+    nohup ollama serve >/dev/null 2>&1 &
+    deadline=$((SECONDS + 15))
+    until ollama_server_up || [[ $SECONDS -ge $deadline ]]; do
+        sleep 0.5
+    done
+    if ! ollama_server_up; then
+        warn "No se pudo levantar el servidor de Ollama. Arrancalo a mano ('ollama serve')."
+    fi
+fi
+
 if ! ollama pull "$model_to_pull"; then
     warn "No se pudo hacer pull de '$model_to_pull'. Confirma que Ollama este corriendo ('ollama serve') y volve a intentar con 'ollama pull $model_to_pull'."
 fi
