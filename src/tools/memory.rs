@@ -30,7 +30,9 @@ impl Tool for Remember {
     fn description(&self) -> &'static str {
         "Guarda un hecho en la memoria permanente para futuras sesiones \
          (preferencias, fechas, datos del usuario). Redacta el hecho completo \
-         y autocontenido, p.ej. 'el cumpleaños del usuario es el 3 de marzo'."
+         y autocontenido, p.ej. 'el cumpleaños del usuario es el 3 de marzo'. \
+         Indica siempre en 'reason' qué dijo o hizo el usuario que motivó \
+         guardarlo."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -44,9 +46,15 @@ impl Tool for Remember {
                 "category": {
                     "type": "string",
                     "description": "Categoría opcional: personal, preferencias, trabajo..."
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Por qué guardás esto: qué dijo o hizo el usuario que lo \
+                        motivó, p.ej. 'el usuario me pidió recordarlo' o 'lo mencionó al \
+                        pedir música'"
                 }
             },
-            "required": ["content"]
+            "required": ["content", "reason"]
         })
     }
 
@@ -62,7 +70,11 @@ impl Tool for Remember {
     async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let content = required_str(&args, "content")?;
         let category = args.get("category").and_then(Value::as_str);
-        self.store.remember(content, category).await?;
+        let reason = args
+            .get("reason")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty());
+        self.store.remember(content, category, reason).await?;
         Ok(ToolOutput::text(format!("Memorizado: {content}")))
     }
 }
@@ -85,7 +97,10 @@ impl Tool for Recall {
 
     fn description(&self) -> &'static str {
         "Busca en la memoria permanente hechos guardados en sesiones \
-         anteriores que no aparezcan ya en tu contexto."
+         anteriores que no aparezcan ya en tu contexto. Cada memoria incluye \
+         el motivo por el que se guardó: usa esta herramienta cuando el \
+         usuario pregunte por qué recordás algo, y respondé solo con el \
+         motivo guardado."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -125,8 +140,12 @@ impl Tool for Recall {
                 .as_deref()
                 .map(|c| format!(" [{c}]"))
                 .unwrap_or_default();
+            let motivo = match m.reason.as_deref() {
+                Some(r) => format!(" — motivo: {r}"),
+                None => " — motivo: no quedó registrado".to_string(),
+            };
             out.push_str(&format!(
-                "- {}{cat} (guardado: {})\n",
+                "- {}{cat} (guardado: {}){motivo}\n",
                 m.content, m.created_at
             ));
         }

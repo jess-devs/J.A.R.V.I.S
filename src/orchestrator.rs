@@ -21,6 +21,7 @@ use crate::audio::{AudioPlayer, MusicPlayer, PlaybackMeter};
 use crate::config::{AgentConfig, BargeInConfig, BargeInMode, Config, SttEngineKind};
 use crate::echo_gate::EchoGate;
 use crate::errors::{Result, WorkerError};
+use crate::habits::{self, HabitStore, HabitSuggestion};
 use crate::llm::{self, ChatMessage, LlmProvider, Role};
 use crate::memory::MemoryStore;
 use crate::pipeline;
@@ -74,6 +75,20 @@ pub struct Orchestrator {
     /// confirmación en curso; se hablan al volver a `Idle` (`finish_turn`)
     /// para no pisar el barge-in/la confirmación en marcha.
     pending_reminders: Vec<DueReminder>,
+    /// Canal por el que el scanner de hábitos (`habits::run_scanner`,
+    /// corriendo en su propia tarea) avisa sugerencias listas para ofrecer.
+    /// Mismo contrato que `reminder_rx`.
+    habit_rx: tokio::sync::mpsc::Receiver<HabitSuggestion>,
+    /// Extremo emisor del mismo canal: `finish_turn` lo usa para
+    /// re-encolar una sugerencia que llegó mientras había un turno en
+    /// curso, en vez de entregarla ella misma (evitaría una recursión
+    /// `finish_turn → deliver_suggestion → handle_utterance → finish_turn`).
+    /// La siguiente vuelta del loop de `run()` la recibe con el estado ya
+    /// en `Idle` y la entrega con normalidad.
+    habit_tx: tokio::sync::mpsc::Sender<HabitSuggestion>,
+    /// Sugerencias de hábito que llegaron mientras había un turno o una
+    /// confirmación en curso.
+    pending_suggestions: Vec<HabitSuggestion>,
     /// Frases que Jarvis dijo hace poco, para descartar como eco propio
     /// transcripciones que lleguen mientras habla (barge-in). `Arc<Mutex<_>>`
     /// porque también lo necesita `pipeline::run_speaking_turn`, que corre
@@ -146,6 +161,11 @@ impl Orchestrator {
             &config.agent.scripted_tools.db_path,
         )?);
         let silence_requested = Arc::new(AtomicBool::new(false));
+        let habit_store = if config.agent.habits.enabled {
+            Some(Arc::new(HabitStore::open(&config.agent.habits.db_path)?))
+        } else {
+            None
+        };
         let registry = ToolRegistry::build(
             &config.agent,
             memory.clone(),
@@ -157,6 +177,7 @@ impl Orchestrator {
                 None
             },
             silence_requested.clone(),
+            habit_store.clone(),
         )
         .await;
         let echo_gate = Arc::new(Mutex::new(EchoGate::new(
@@ -169,6 +190,15 @@ impl Orchestrator {
             reminder_tx,
             Duration::from_secs(config.agent.reminders.poll_interval_secs),
         ));
+
+        let (habit_tx, habit_rx) = tokio::sync::mpsc::channel(4);
+        if let Some(store) = &habit_store {
+            tokio::spawn(habits::run_scanner(
+                store.clone(),
+                config.agent.habits.clone(),
+                habit_tx.clone(),
+            ));
+        }
 
         let test_cancel_slot = if std::env::var_os("JARVIS_TEST_CANCEL").is_some() {
             tracing::warn!(
@@ -203,6 +233,9 @@ impl Orchestrator {
             memory,
             reminder_rx,
             pending_reminders: Vec::new(),
+            habit_rx,
+            habit_tx,
+            pending_suggestions: Vec::new(),
             echo_gate,
             system_static_cache: None,
             state: AgentState::Idle,
@@ -391,6 +424,12 @@ impl Orchestrator {
                     }
                     continue;
                 }
+                suggestion = self.habit_rx.recv() => {
+                    if let Some(suggestion) = suggestion {
+                        self.handle_suggestion(suggestion).await;
+                    }
+                    continue;
+                }
                 event = self.stt.next_event() => event,
             };
             let Some(event) = event else { break };
@@ -473,6 +512,34 @@ impl Orchestrator {
         )
         .await;
         self.end_speaking().await;
+    }
+
+    /// Una sugerencia de hábito quedó lista. A diferencia de un recordatorio
+    /// no se habla directo: entra como evento del sistema al LLM
+    /// (`deliver_suggestion`), que la propone con su tono y decide junto al
+    /// usuario — nunca se aplica sola. Si Jarvis está ocupado, se encola
+    /// para `finish_turn`, igual que con los recordatorios.
+    async fn handle_suggestion(&mut self, suggestion: HabitSuggestion) {
+        if matches!(self.state, AgentState::Idle) {
+            self.deliver_suggestion(suggestion).await;
+        } else {
+            self.pending_suggestions.push(suggestion);
+        }
+    }
+
+    async fn deliver_suggestion(&mut self, suggestion: HabitSuggestion) {
+        tracing::info!(id = suggestion.id, description = %suggestion.description, "sugerencia de hábito lista");
+        let prompt = format!(
+            "[Evento del sistema: detectaste un patrón de uso del usuario. Patrón: {desc}. \
+             Proponéselo en UNA frase, con tu tono habitual, como una oferta — nunca lo \
+             apliques sin que el usuario acepte. Si acepta, llamá a accept_suggestion con \
+             suggestion_id={id} y una frase que describa la adaptación aceptada. Si lo \
+             rechaza, llamá a dismiss_suggestion con suggestion_id={id}. Si duda o lo \
+             posterga, no llames ninguna herramienta.]",
+            desc = suggestion.description,
+            id = suggestion.id,
+        );
+        self.handle_utterance(prompt).await;
     }
 
     /// El worker de STT murió (crash real, o se auto-terminó porque su propio
@@ -1012,6 +1079,15 @@ impl Orchestrator {
         let due = std::mem::take(&mut self.pending_reminders);
         for reminder in due {
             self.speak_reminder(&reminder).await;
+        }
+
+        // Sugerencias que llegaron mientras el turno estaba en curso: se
+        // re-encolan al canal en vez de entregarlas acá mismo, porque
+        // entregarlas implica un turno completo (`deliver_suggestion` →
+        // `handle_utterance` → `finish_turn`) y eso recursaría. La próxima
+        // vuelta del loop de `run()` las recibe con el estado ya en `Idle`.
+        for suggestion in std::mem::take(&mut self.pending_suggestions) {
+            let _ = self.habit_tx.try_send(suggestion);
         }
     }
 

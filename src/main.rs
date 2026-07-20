@@ -3,6 +3,7 @@ mod audio;
 mod config;
 mod echo_gate;
 mod errors;
+mod habits;
 mod http;
 mod ipc;
 mod llm;

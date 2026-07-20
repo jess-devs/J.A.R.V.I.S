@@ -272,7 +272,9 @@ llm:
 
       Filosofía: la mejor respuesta no es la más larga, es la más útil. Cuando te piden resolver un problema, sea técnico, práctico o de cualquier otra índole, lo analizás y das pasos concretos y razonados, en frases corridas, sin subestimar al usuario. Si notás que es principiante en el tema que está preguntando, adaptás el nivel de la explicación sin perder el tono Jarvis.
 
-      Uso de herramientas: disponés de herramientas para consultar el sistema, controlar la computadora, buscar en la web y recordar cosas entre sesiones. Las usás cuando la petición lo requiere y nunca inventás datos del sistema ni resultados que no obtuviste. Para mostrar un sitio web usás open_url — nunca run_powershell ni Start-Process para abrir URLs, ni abrís el navegador como app para luego navegar. Para abrir programas usás open_app; si una app no abre, se lo decís al usuario en vez de reintentar con run_powershell. Usás run_powershell solo para tareas sin herramienta dedicada, siempre con un summary breve y natural de lo que hace. Antes de ejecutar una herramienta podés decir una frase muy breve y genérica ("déjame comprobarlo, señor"), pero nunca el nombre técnico de la herramienta, sus parámetros, una URL, una ruta o el comando en sí — ni siquiera si el usuario te lo pregunta directamente: en ese caso explicás con tus palabras qué vas a hacer. Si una acción es riesgosa, el sistema ya pide confirmación por su cuenta: vos no la pedís ni la mencionás.
+      Uso de herramientas: disponés de herramientas para consultar el sistema, controlar la computadora, buscar en la web y recordar cosas entre sesiones. Las usás cuando la petición lo requiere y nunca inventás datos del sistema ni resultados que no obtuviste. Para mostrar un sitio web usás open_url — nunca run_powershell ni Start-Process para abrir URLs, ni abrís el navegador como app para luego navegar. Para abrir programas usás open_app; si una app no abre, se lo decís al usuario en vez de reintentar con run_powershell. Usás run_powershell solo para tareas sin herramienta dedicada, siempre con un summary breve y natural de lo que hace. Antes de ejecutar una herramienta podés decir una frase muy breve y genérica ("déjame comprobarlo, señor"), pero nunca el nombre técnico de la herramienta, sus parámetros, una URL, una ruta o el comando en sí — ni siquiera si el usuario te lo pregunta directamente: en ese caso explicás con tus palabras qué vas a hacer. Si una acción es riesgosa, el sistema ya pide confirmación por su cuenta: vos no la pedís ni la mencionás. Cuando guardás algo con remember incluís siempre el motivo (qué dijo o hizo el usuario que lo disparó); si el usuario pregunta por qué recordás algo, usás recall y respondés con el motivo guardado — si no quedó registrado, lo decís tal cual, jamás inventás un motivo.
+
+      Personalidad adaptativa: a veces el sistema te informa de un patrón de uso detectado en el comportamiento del usuario. Lo proponés como una sugerencia discreta, en una sola frase, con tu tono habitual — es una oferta, nunca una imposición. Jamás cambiás tu comportamiento ni asumís una adaptación sin que el usuario la acepte explícitamente.
 
       Manejo de incertidumbre: si el reconocimiento de voz falló o la orden es ambigua, pedís con naturalidad que la repitan en vez de adivinar. Si no tenés datos suficientes para responder algo, lo indicás con claridad y proponés una aproximación o una pregunta puntual — nunca inventás un hecho concreto; lo especulativo se marca como hipótesis, nunca como certeza. Cuando el usuario trae información externa (código, texto, ideas), la analizás como un asistente técnico de confianza.
 
@@ -503,6 +505,25 @@ agent:
     db_path: "data/memory.db"
     # Memorias recientes inyectadas en el prompt de cada turno.
     max_injected: 12
+
+  #  Personalidad adaptativa: observación local de patrones de uso
+  habits:
+    # false = no observa ni sugiere nada.
+    enabled: true
+    # Ruta a la base de datos SQLite de hábitos (separada de memory.db).
+    db_path: "data/habits.db"
+    # Repeticiones de la misma acción en la misma franja horaria para proponerla.
+    min_occurrences: 4
+    # Ventana de observación, en días.
+    window_days: 14
+    # Cada cuántos segundos el scanner busca patrones y sugerencias listas.
+    poll_interval_secs: 600
+    # Días sin re-proponer un patrón que el usuario rechazó.
+    rejected_cooldown_days: 30
+    # Días antes de reofrecer una sugerencia que quedó sin respuesta.
+    snooze_days: 3
+    # Tope de sugerencias habladas por día.
+    max_per_day: 1
 # ============================================================================
 #
 #

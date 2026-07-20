@@ -53,6 +53,8 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "create_tool",
     "list_custom_tools",
     "delete_custom_tool",
+    "accept_suggestion",
+    "dismiss_suggestion",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

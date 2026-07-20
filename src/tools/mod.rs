@@ -8,6 +8,7 @@
 
 pub mod apps;
 pub mod files;
+pub mod habits;
 pub mod input;
 pub mod media;
 pub mod memory;
@@ -33,6 +34,7 @@ use self::scripted_store::ScriptedToolStore;
 use crate::audio::MusicShared;
 use crate::config::{AgentConfig, ScriptedToolsConfig};
 use crate::errors::ToolError;
+use crate::habits::HabitStore;
 use crate::llm::{ImageBlock, ToolSpec};
 use crate::memory::MemoryStore;
 use crate::reminders::ReminderStore;
@@ -116,6 +118,10 @@ pub struct ToolRegistry {
     scripted_cfg: ScriptedToolsConfig,
     disabled_tools: Vec<String>,
     max_result_chars: usize,
+    /// `None` si `agent.habits.enabled` es false: en ese caso no hay
+    /// observación de patrones de uso. `execute_and_record` (`agent/turn.rs`)
+    /// lo usa para registrar cada tool call exitoso.
+    habits: Option<Arc<HabitStore>>,
 }
 
 impl ToolRegistry {
@@ -126,6 +132,7 @@ impl ToolRegistry {
         scripted_store: Arc<ScriptedToolStore>,
         music: Option<Arc<MusicShared>>,
         silence_flag: Arc<AtomicBool>,
+        habit_store: Option<Arc<HabitStore>>,
     ) -> Self {
         let mut static_tools: Vec<Arc<dyn Tool>> = Vec::new();
         if cfg.enabled {
@@ -179,6 +186,15 @@ impl ToolRegistry {
             static_tools.push(Arc::new(silence::EnterSilenceMode {
                 flag: silence_flag,
             }));
+            if let Some(habit_store) = &habit_store {
+                static_tools.push(Arc::new(habits::AcceptSuggestion::new(
+                    habit_store.clone(),
+                    memory.clone(),
+                )));
+                static_tools.push(Arc::new(habits::DismissSuggestion::new(
+                    habit_store.clone(),
+                )));
+            }
         }
 
         let registry = Self {
@@ -193,6 +209,7 @@ impl ToolRegistry {
             scripted_cfg: cfg.scripted_tools.clone(),
             disabled_tools: cfg.disabled_tools.clone(),
             max_result_chars: cfg.max_tool_result_chars,
+            habits: habit_store,
         };
         if let Err(e) = registry.reload_scripted().await {
             tracing::warn!(error = %e, "no se pudieron cargar las tools personalizadas al arrancar");
@@ -246,6 +263,12 @@ impl ToolRegistry {
 
     pub fn is_empty(&self) -> bool {
         self.tools.read().unwrap().is_empty()
+    }
+
+    /// `None` si la observación de patrones de uso está deshabilitada
+    /// (`agent.habits.enabled: false`).
+    pub fn habits(&self) -> Option<&Arc<HabitStore>> {
+        self.habits.as_ref()
     }
 
     /// Recorta un resultado en una frontera de carácter válida, anotando el

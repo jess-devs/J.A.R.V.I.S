@@ -311,6 +311,17 @@ pub async fn execute_and_record(
             tracing::warn!(error = %e, "no se pudo recargar el registro de tools tras {}", call.name);
         }
     }
+    // Observación local para la personalidad adaptativa (ver `crate::habits`):
+    // solo tool calls exitosos, y solo cuenta para detectar patrones si la
+    // tool tiene una firma de argumentos automatizable.
+    if succeeded {
+        if let Some(habits) = registry.habits() {
+            let signature = crate::habits::args_signature(&call.name, &call.arguments);
+            if let Err(e) = habits.record_event(&call.name, signature.as_deref()).await {
+                tracing::warn!(error = %e, "no se pudo registrar el evento de uso");
+            }
+        }
+    }
     tracing::info!(tool = %call.name, args = %call.arguments, result = %result, "herramienta ejecutada");
     history.push(ChatMessage::tool_result_with_images(
         &call.id, &call.name, result, images,

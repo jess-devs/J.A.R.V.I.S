@@ -481,7 +481,13 @@ impl Default for LlmConfig {
                 rutas ni comandos técnicos en voz alta. Tras recibir resultados, responde con lo \
                 esencial en una o dos frases; nunca leas listas largas, datos crudos ni JSON. Si \
                 una acción es riesgosa, el sistema pedirá la confirmación por su cuenta: no la \
-                pidas tú ni la menciones."
+                pidas tú ni la menciones. Cuando guardes algo con remember incluye siempre el \
+                motivo (qué dijo o hizo el usuario que lo disparó); si el usuario pregunta por \
+                qué recuerdas algo, usa recall y responde con el motivo guardado — si no quedó \
+                registrado, dilo tal cual, jamás inventes un motivo. A veces el sistema te \
+                informa de un patrón de uso detectado: proponlo como una sugerencia discreta, \
+                en una sola frase, y jamás cambies tu comportamiento sin que el usuario lo \
+                acepte explícitamente."
                 .to_string(),
             max_history_messages: 20,
             request_timeout_secs: 60,
@@ -701,6 +707,7 @@ pub struct AgentConfig {
     pub translate: TranslateConfig,
     pub reminders: RemindersConfig,
     pub scripted_tools: ScriptedToolsConfig,
+    pub habits: HabitsConfig,
 }
 
 impl Default for AgentConfig {
@@ -762,6 +769,7 @@ impl Default for AgentConfig {
             translate: TranslateConfig::default(),
             reminders: RemindersConfig::default(),
             scripted_tools: ScriptedToolsConfig::default(),
+            habits: HabitsConfig::default(),
         }
     }
 }
@@ -841,6 +849,47 @@ impl Default for MemoryConfig {
         Self {
             db_path: PathBuf::from("data/memory.db"),
             max_injected: 12,
+        }
+    }
+}
+
+/// Personalidad adaptativa: observación local (conteo, sin entrenamiento ni
+/// servicios externos) de patrones de uso repetidos, para proponerlos como
+/// sugerencia hablada — nunca aplicarlos en silencio.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct HabitsConfig {
+    /// false = no se observa nada ni se sugiere nada.
+    pub enabled: bool,
+    /// Ruta del archivo SQLite de hábitos (separado de memory.db).
+    pub db_path: PathBuf,
+    /// Repeticiones de la misma acción en la misma franja horaria para
+    /// proponerla.
+    pub min_occurrences: usize,
+    /// Ventana de observación, en días.
+    pub window_days: u32,
+    /// Cada cuántos segundos el scanner busca patrones nuevos y sugerencias
+    /// listas para ofrecer.
+    pub poll_interval_secs: u64,
+    /// Días sin re-proponer un patrón que el usuario rechazó.
+    pub rejected_cooldown_days: u32,
+    /// Días antes de reofrecer una sugerencia que quedó sin respuesta.
+    pub snooze_days: u32,
+    /// Tope de sugerencias habladas por día, para no acosar al usuario.
+    pub max_per_day: usize,
+}
+
+impl Default for HabitsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            db_path: PathBuf::from("data/habits.db"),
+            min_occurrences: 4,
+            window_days: 14,
+            poll_interval_secs: 600,
+            rejected_cooldown_days: 30,
+            snooze_days: 3,
+            max_per_day: 1,
         }
     }
 }
