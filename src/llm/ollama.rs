@@ -30,6 +30,10 @@ pub struct OllamaProvider {
     /// desactiva los tokens de "pensamiento" (que el TTS hablaría en voz
     /// alta). No enviar para modelos que no lo soportan (Ollama lo rechaza).
     think: Option<bool>,
+    /// Cuánto mantiene Ollama el modelo cargado tras esta respuesta ("30s",
+    /// "5m", etc.). Ver `OllamaConfig::keep_alive` — resuelto por hardware
+    /// en `llm::model_select::resolve` si quedó en null.
+    keep_alive: Option<String>,
 }
 
 impl OllamaProvider {
@@ -40,6 +44,7 @@ impl OllamaProvider {
             base_url: config.base_url.clone(),
             model: config.model.clone(),
             think: config.think,
+            keep_alive: config.keep_alive.clone(),
         }
     }
 }
@@ -90,6 +95,8 @@ struct OllamaChatRequest<'a> {
     tools: Vec<OllamaTool<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     think: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    keep_alive: Option<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -176,6 +183,7 @@ impl LlmProvider for OllamaProvider {
                 })
                 .collect(),
             think: self.think,
+            keep_alive: self.keep_alive.as_deref(),
         };
 
         let response = match self.client.post(&url).json(&body).send().await {

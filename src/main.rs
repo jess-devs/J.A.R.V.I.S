@@ -130,7 +130,7 @@ async fn run(mut config: Config) -> errors::Result<()> {
         )
         .ok();
 
-    llm::model_select::resolve(&mut config).await;
+    let ollama_model_was_auto = llm::model_select::resolve(&mut config).await;
 
     //verifica si el archivo welcome.mp3 se encuentra dentro de assets\musci
     // En caso de no haber desahbilita el booleano responsable de la funcion
@@ -145,6 +145,13 @@ async fn run(mut config: Config) -> errors::Result<()> {
     }
 
     startup_checks::run(&config).await?;
+
+    // Necesita `ollama serve` arriba y el modelo ya confirmado por
+    // `startup_checks::run` de arriba, así que corre después (no se puede
+    // adelantar a `model_select::resolve`).
+    if ollama_model_was_auto {
+        llm::model_select::verify_vram_fit(&mut config).await;
+    }
 
     let ui_config = config.ui.clone();
     let (ui_state, ui_state_rx) = UiState::new();

@@ -76,7 +76,10 @@ elif $has_gpu && [[ "$vram_gb" -ge 16 ]]; then
     recommended="qwen3:14b"
 elif $has_gpu && [[ "$vram_gb" -ge 8 ]]; then
     recommended="qwen3:8b"
-elif $has_gpu && [[ "$vram_gb" -ge 4 ]]; then
+elif $has_gpu && [[ "$vram_gb" -ge 5 ]]; then
+    # Margen de seguridad: una GPU de 4GB "nominales" casi nunca tiene esos
+    # 4GB libres de verdad (compositor, otros procesos), así que el modelo
+    # de 4B rara vez entra entero. Debe coincidir con model_select.rs.
     recommended="qwen3.5:4b"
 elif ! $has_gpu && [[ "$ram_gb" -ge 16 ]]; then
     recommended="qwen3.5:4b"

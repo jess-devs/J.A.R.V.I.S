@@ -216,7 +216,10 @@ pub struct SttConfig {
     /// Modelo Silero VAD en ONNX (mismo asset que descarga el setup).
     pub vad_model_path: PathBuf,
     pub input_device_index: Option<u32>,
-    /// null = auto (~núcleos físicos).
+    /// Hilos de CPU para Whisper (transcripción). null = se autocalcula
+    /// junto con el hilo del VAD y con `llm.ollama.num_thread` según los
+    /// núcleos reales de la máquina (ver `compute_thread_budget`), para que
+    /// ninguno pida "todos los núcleos" por separado.
     pub cpu_threads: Option<u8>,
     /// Segundos que el hilo de STT tolera trabado en un estado ocupado
     /// ("recording"/"transcribing", nunca debería tardar más de unos pocos
@@ -240,6 +243,88 @@ impl Default for SttConfig {
             cpu_threads: None,
             stuck_state_timeout_secs: 30,
         }
+    }
+}
+
+/// Hilos para la sesión ONNX del VAD Silero: modelo minúsculo cuyo costo no
+/// escala con núcleos disponibles, así que pedirle tantos hilos como a
+/// Whisper solo suma contención sin beneficio real.
+pub const VAD_THREADS: i32 = 2;
+
+/// Reparto de hilos de CPU entre los tres consumidores que corren juntos en
+/// la máquina del usuario: el VAD (siempre encendido), Whisper (solo
+/// durante transcripción) y Ollama (solo durante generación). Sin esto,
+/// cada uno pide independientemente "todos los núcleos disponibles" — la
+/// causa real de que STT + Ollama saturen la CPU al correr juntos.
+pub struct ThreadBudget {
+    pub vad: i32,
+    pub whisper: i32,
+    pub ollama: u32,
+}
+
+/// Calcula el reparto a partir de `available_parallelism()`, escalando con
+/// los núcleos reales de cada máquina (débil o potente). `whisper_override`
+/// es `stt.cpu_threads`: si el usuario lo fijó a mano, se respeta tal cual
+/// y no se recorta.
+pub fn compute_thread_budget(whisper_override: Option<u8>) -> ThreadBudget {
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get() as i32)
+        .unwrap_or(4);
+    thread_budget_for(cores, whisper_override)
+}
+
+fn thread_budget_for(cores: i32, whisper_override: Option<u8>) -> ThreadBudget {
+    let whisper = whisper_override
+        .map(|n| n as i32)
+        .unwrap_or_else(|| (cores / 2).clamp(2, 8));
+
+    let ollama = (cores - VAD_THREADS - whisper).max(2) as u32;
+
+    ThreadBudget {
+        vad: VAD_THREADS,
+        whisper,
+        ollama,
+    }
+}
+
+#[cfg(test)]
+mod thread_budget_tests {
+    use super::thread_budget_for;
+
+    #[test]
+    fn scales_whisper_and_ollama_with_core_count() {
+        let weak = thread_budget_for(2, None);
+        assert_eq!(weak.vad, 2);
+        assert_eq!(weak.whisper, 2); // (2/2).clamp(2,8) = 2
+        assert_eq!(weak.ollama, 2); // floor, aunque 2-2-2 dé negativo
+
+        let laptop = thread_budget_for(4, None);
+        assert_eq!(laptop.whisper, 2); // (4/2).clamp(2,8) = 2
+        assert_eq!(laptop.ollama, 2); // (4-2-2).max(2) = 2
+
+        let desktop = thread_budget_for(8, None);
+        assert_eq!(desktop.whisper, 4); // (8/2).clamp(2,8) = 4
+        assert_eq!(desktop.ollama, 2); // (8-2-4).max(2) = 2
+
+        let workstation = thread_budget_for(32, None);
+        assert_eq!(workstation.whisper, 8); // (32/2).clamp(2,8) tope en 8
+        assert_eq!(workstation.ollama, 22); // (32-2-8).max(2) = 22
+    }
+
+    #[test]
+    fn never_exceeds_cores_and_ollama_never_below_floor() {
+        for cores in [2, 3, 4, 6, 8, 12, 16, 32, 64] {
+            let budget = thread_budget_for(cores, None);
+            assert!(budget.ollama >= 2, "cores={cores}");
+            assert!(budget.whisper >= 2, "cores={cores}");
+        }
+    }
+
+    #[test]
+    fn respects_explicit_whisper_override() {
+        let budget = thread_budget_for(8, Some(3));
+        assert_eq!(budget.whisper, 3);
+        assert_eq!(budget.ollama, 3); // (8-2-3).max(2) = 3
     }
 }
 
@@ -319,6 +404,19 @@ pub struct OllamaConfig {
     /// `ollama serve` cuando no está corriendo. El servidor lanzado nace
     /// dentro del Job Object de Jarvis, así que muere junto con él.
     pub auto_serve: bool,
+    /// Cuánto mantiene Ollama el modelo cargado en VRAM/RAM tras la última
+    /// respuesta (formato de Ollama: "30s", "5m", etc.). null = se
+    /// autocalcula según el hardware detectado (ver
+    /// `llm::model_select::recommend_keep_alive`) — más agresivo en
+    /// máquinas justas de VRAM/RAM, más relajado si sobra.
+    pub keep_alive: Option<String>,
+    /// Hilos de CPU que Ollama puede usar (vía `OLLAMA_NUM_THREAD`). Solo
+    /// tiene efecto si `auto_serve: true` (si Ollama corre como proceso
+    /// externo, Jarvis no puede inyectarle variables de entorno). null = se
+    /// autocalcula junto con `stt.cpu_threads` para que STT y Ollama no se
+    /// pisen pidiendo cada uno "todos los núcleos" (ver
+    /// `config::compute_thread_budget`).
+    pub num_thread: Option<u32>,
 }
 
 impl Default for OllamaConfig {
@@ -328,6 +426,8 @@ impl Default for OllamaConfig {
             model: "auto".to_string(),
             think: None,
             auto_serve: true,
+            keep_alive: None,
+            num_thread: None,
         }
     }
 }

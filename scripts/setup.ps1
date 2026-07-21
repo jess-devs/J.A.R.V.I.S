@@ -94,8 +94,11 @@ if ($hasGpu -and $vramGb -ge 24)
 } elseif ($hasGpu -and $vramGb -ge 8)
 {
     $recommended = "qwen3:8b"
-} elseif ($hasGpu -and $vramGb -ge 4)
+} elseif ($hasGpu -and $vramGb -ge 5)
 {
+    # Margen de seguridad: una GPU de 4GB "nominales" casi nunca tiene esos
+    # 4GB libres de verdad (compositor, otros procesos), así que el modelo
+    # de 4B rara vez entra entero. Debe coincidir con model_select.rs.
     $recommended = "qwen3.5:4b"
 } elseif (-not $hasGpu -and $ramGb -ge 16)
 {

@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, oneshot};
 
-use crate::config::{BargeInConfig, SttConfig, SttFiltersConfig};
+use crate::config::{compute_thread_budget, BargeInConfig, SttConfig, SttFiltersConfig};
 use crate::errors::SttError;
 use crate::stt::asr::Asr;
 use crate::stt::capture::AudioCapture;
@@ -107,13 +107,6 @@ pub struct AudioReady {
     pub energy_floor_dbfs: f32,
 }
 
-fn default_num_threads() -> i32 {
-    std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(8) as i32
-}
-
 fn provider_for(device: &str) -> &'static str {
     match device {
         "cuda" => "cuda",
@@ -180,6 +173,10 @@ pub fn spawn(stt: SttConfig, barge_in: BargeInConfig) -> SpawnResult {
     let shutdown = Arc::new(AtomicBool::new(false));
     let heartbeats = Arc::new(Heartbeats::new());
     let stuck_timeout = Duration::from_secs(stt.stuck_state_timeout_secs);
+    // Repartido una sola vez entre VAD, Whisper y Ollama (ver
+    // `config::compute_thread_budget`) para que ninguno pida "todos los
+    // núcleos" por separado.
+    let thread_budget = compute_thread_budget(stt.cpu_threads);
 
     let audio = {
         let mode = mode.clone();
@@ -188,14 +185,10 @@ pub fn spawn(stt: SttConfig, barge_in: BargeInConfig) -> SpawnResult {
         let event_tx = event_tx.clone();
         let stt = stt.clone();
         let barge_in = barge_in.clone();
+        let vad_threads = thread_budget.vad;
         thread::Builder::new()
             .name("stt-audio".to_string())
             .spawn(move || {
-                let num_threads = stt
-                    .cpu_threads
-                    .map(|n| n as i32)
-                    .unwrap_or_else(default_num_threads);
-
                 let mut capture = match AudioCapture::new(stt.input_device_index) {
                     Ok(c) => c,
                     Err(e) => {
@@ -207,7 +200,7 @@ pub fn spawn(stt: SttConfig, barge_in: BargeInConfig) -> SpawnResult {
                     &stt.vad,
                     &barge_in,
                     &stt.vad_model_path,
-                    num_threads,
+                    vad_threads,
                     &mut capture,
                 ) {
                     Ok(s) => s,
@@ -240,13 +233,10 @@ pub fn spawn(stt: SttConfig, barge_in: BargeInConfig) -> SpawnResult {
         let heartbeats = heartbeats.clone();
         let event_tx = event_tx.clone();
         let stt = stt.clone();
+        let num_threads = thread_budget.whisper;
         thread::Builder::new()
             .name("stt-transcribe".to_string())
             .spawn(move || {
-                let num_threads = stt
-                    .cpu_threads
-                    .map(|n| n as i32)
-                    .unwrap_or_else(default_num_threads);
                 let provider = provider_for(&stt.device);
 
                 let asr = match Asr::new(&stt.model_dir, &stt.language, provider, num_threads) {

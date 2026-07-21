@@ -324,9 +324,19 @@ async fn ensure_ollama_serve(config: &Config) {
     println!("Ollama no responde; iniciando `ollama serve` automáticamente...");
     tracing::info!("Ollama no responde; levantando `ollama serve`...");
 
+    // Hilos de Ollama coordinados con los de STT (ver
+    // `config::compute_thread_budget`) para que no se pisen pidiendo cada
+    // uno "todos los núcleos" — solo posible acá porque somos nosotros
+    // quienes lanzamos el proceso; si `num_thread` viene fijado a mano en
+    // config.yaml, se respeta tal cual.
+    let ollama_num_thread = ollama
+        .num_thread
+        .unwrap_or_else(|| crate::config::compute_thread_budget(config.stt.cpu_threads).ollama);
+
     let mut command = tokio::process::Command::new("ollama");
     command
         .arg("serve")
+        .env("OLLAMA_NUM_THREAD", ollama_num_thread.to_string())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
