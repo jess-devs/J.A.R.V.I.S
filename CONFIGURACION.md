@@ -12,46 +12,44 @@ entorno (ver [`.env.example`](.env.example)).
 
 ## `workers`
 
-Cómo Rust arranca los dos procesos Python (`stt_worker.py`, `tts_worker.py`)
-y qué tan tolerante es a que se caigan.
+Cómo Rust arranca el único proceso Python que queda (`tts_worker.py`) y qué
+tan tolerante es a que se caiga. El STT ya no es un worker Python: corre
+nativo dentro de `jarvis` en hilos propios (sherpa-onnx + Whisper, ver
+[`src/stt/`](src/stt/)) — sin subproceso, sin IPC.
 
 | Clave | Qué hace |
 |---|---|
 | `python_executable` | Ruta al intérprete del venv de `workers/`. |
-| `stt_script` / `tts_script` | Rutas a los scripts que se spawnean. |
-| `stt_init_timeout_secs` | Tiempo máximo esperando el mensaje `ready` del STT. Generoso (60s) porque cargar/calibrar Whisper la primera vez puede tardar, sobre todo en CPU. |
-| `tts_init_timeout_secs` | Ídem para Piper, mucho más rápido de cargar. |
-| `shutdown_timeout_secs` | Cuánto se espera a que un worker cierre solo antes de matarlo. |
-| `restart_on_crash` | Si el worker de STT muere o queda colgado (su propio watchdog lo detecta), se reemplaza por uno nuevo en caliente en vez de tumbar Jarvis entero. |
+| `tts_script` | Ruta al script de TTS que se spawnea. |
+| `stt_init_timeout_secs` | Tiempo máximo esperando a que el motor STT nativo abra el micrófono y cargue los modelos (VAD + Whisper). |
+| `tts_init_timeout_secs` | Ídem para Piper. |
+| `shutdown_timeout_secs` | Cuánto se espera a que un worker/hilo cierre solo antes de darlo por perdido. |
+| `restart_on_crash` | Si el motor de STT muere (panic de alguno de sus hilos), se reemplaza por uno nuevo en caliente en vez de tumbar Jarvis entero. |
 | `max_restarts` | Tope de reinicios por corrida. Al agotarse, Jarvis termina, evita un loop de reinicios infinito si el problema es persistente (driver de audio roto, modelo corrupto, etc.). |
 
 ## `stt`
 
-Todo lo relacionado con transcribir lo que decís. Desde la Fase 1 del
-rediseño de detección de voz, hay **dos motores** intercambiables con
-`stt.engine`:
+Todo lo relacionado con transcribir lo que decís. El motor es nativo
+(sherpa-onnx + Whisper small, corriendo en dos hilos dentro del propio
+proceso de Jarvis): captura con `cpal`, VAD Silero, y reconocimiento con
+Whisper forzado a `language: "es"` (ver `stt.language` más abajo). Se probó
+primero con NVIDIA Parakeet-TDT v3 (mejor WER en benchmarks generales),
+pero ese modelo detecta el idioma solo por audio y el binding de
+sherpa-onnx no tiene forma de fijarlo — en frases cortas sin contexto (la
+wake word: "Jarvis" no es palabra real en ningún idioma) terminaba
+adivinando inglés, confirmado en pruebas reales. El modelo (~640MB) no se
+versiona — lo descarga `scripts/setup.ps1`/`setup.sh` a `models/stt/`.
 
-- **`native`** (default): motor propio, PyAudio captura audio, Silero VAD
-  detecta habla frame por frame, faster-whisper transcribe directo. Sin las
-  limitaciones de RealtimeSTT (ver abajo). Es el único que soporta
-  `barge_in` (interrumpir a Jarvis hablando).
-- **`realtimestt`**: envuelve la librería [RealtimeSTT](https://github.com/KoljaB/RealtimeSTT).
-  Queda como respaldo por si el motor nativo da problemas en tu hardware —
-  cambiar a este valor no requiere recompilar, es solo esta línea. Tiene un
-  bug conocido (`min_gap_between_recordings` puede dejar el recorder sordo)
-  parcheado por un watchdog, y no puede dar eventos de voz continuos
-  mientras Jarvis habla, así que con este motor **`barge_in` no tiene
-  efecto** sin importar cómo lo configures, el mic simplemente se mutea
-  físicamente mientras Jarvis responde, como antes de la Fase 1.
+### `stt.vad`
 
-### `stt.vad` (solo `engine: native`)
-
-Controla cómo se detecta el inicio y el fin de una frase.
+Controla cómo se detecta el inicio y el fin de una frase. Esta lógica vive
+enteramente en Rust (`src/stt/vad.rs`) — el VAD de sherpa-onnx solo aporta
+un booleano de "hay voz en este frame", el resto (pre-roll, histéresis,
+silencio adaptativo) lo maneja Jarvis.
 
 | Clave | Qué hace |
 |---|---|
-| `threshold` | Probabilidad de Silero (0-1) a partir de la que se considera que empezaste a hablar. Más bajo = detecta voz más floja, pero más sensible a ruido. |
-| `neg_threshold` | Probabilidad por debajo de la que se considera que dejaste de hablar. Deliberadamente **menor** que `threshold` (histéresis): una vez que empezó a grabar, hace falta una caída más marcada para cortar, así que las micro-pausas de respiración no parten la frase en dos. |
+| `threshold` | Probabilidad de Silero (0-1) a partir de la que se considera que empezaste a hablar. Más bajo = detecta voz más floja, pero más sensible a ruido. No hay un `neg_threshold` separado (a diferencia del motor anterior): la robustez a micro-pausas la dan `silence_long_ms`/`silence_short_ms` de abajo. |
 | `pre_roll_ms` | Audio previo que se antepone al buffer apenas se detecta voz, para no perder la primera sílaba (el VAD siempre tarda unos frames en confirmar que empezaste a hablar). |
 | `min_speech_ms` | Si la voz detectada dura menos que esto, se descarta como blip (tos, golpe, clic) sin llegar a transcribir. |
 | `silence_long_ms` / `silence_short_ms` / `long_utterance_ms` | El silencio necesario para cerrar la frase **cambia según cuánto llevás hablando**: por debajo de `long_utterance_ms` de locución exige `silence_long_ms` de silencio (para no cortar una pausa natural a mitad de una frase corta); superado ese umbral, exige solo `silence_short_ms` (para no hacerte esperar de más al final de frases largas). |
@@ -64,29 +62,23 @@ reaccionar cuando dejás de hablar**, bajalos. **Si no te detecta al hablar
 bajo**, bajá `threshold`; **si detecta ruido de fondo como si fuera voz**,
 subilo (o subí `energy_floor_dbfs` a mano).
 
-### `stt.filters` (solo `engine: native`)
+### `stt.filters`
 
-Filtros anti-alucinación sobre la salida de Whisper, Whisper a veces
-"transcribe" algo con silencio o ruido puro. Cada segmento trae sus propias
-métricas de confianza; si alguna se pasa del umbral, la transcripción se
-descarta antes de llegar a Jarvis (queda un evento `discarded` en los logs
-con la razón, visible con `log_level: debug`).
+Red de seguridad mínima contra alucinaciones. El binding de sherpa-onnx no
+expone las métricas de confianza por segmento que sí tenía la integración
+Python directa de Whisper (`no_speech_prob`/`avg_logprob`/
+`compression_ratio`), así que lo único que queda acá es un filtro de
+repetición degenerada — los descartes por duración/energía viven en
+`stt.vad` de arriba.
 
 | Clave | Qué hace |
 |---|---|
-| `max_no_speech_prob` | Se descarta si la probabilidad de "esto no es habla" que calcula Whisper supera este valor. |
-| `min_avg_logprob` | Se descarta si la confianza promedio del decoder cae por debajo (más negativo = menos confianza). |
-| `max_compression_ratio` | Se descarta si el texto es demasiado repetitivo (síntoma clásico de alucinación en bucle). |
-
-Si notás transcripciones inventadas que se cuelan, hacé estos umbrales más
-estrictos (`max_no_speech_prob` más bajo, `min_avg_logprob` más alto,
-`max_compression_ratio` más bajo). Si al revés Jarvis descarta cosas que sí
-dijiste, aflojalos.
+| `max_word_repeat` | Descarta la transcripción si una palabra se repite esta cantidad de veces seguidas o más (alucinación típica en ruido/silencio). |
 
 ### `stt.clap` (detector de doble aplauso)
 
-Corre siempre sobre cada frame en el motor nativo, en el mismo hilo que el
-VAD (`workers/clap_detector.py`), independientemente de si el [modo
+Corre siempre sobre cada frame, en el mismo hilo que el VAD
+(`src/stt/clap.rs`), independientemente de si el [modo
 bienvenida](README.md#modo-bienvenida-doble-aplauso) está activo:
 `welcome.enabled` decide si Jarvis reacciona al evento, no esta sección.
 Es una máquina de estados por frame: **onset** (la energía sube de golpe,
@@ -101,51 +93,32 @@ disparan el evento una sola vez, seguido de un refractario).
 | `min_peak_dbfs` | dBFS mínimo del pico para considerar un posible aplauso. |
 | `min_rise_db` | Subida mínima sobre el fondo (`bg_db`) para considerarlo onset. |
 | `decay_ms` | Ventana en la que el onset debe volver a caer bajo su propio umbral para confirmarse como aplauso (y no como voz o música sostenida). |
-| `max_vad_prob` | Rechaza el onset si Silero cree que es voz sonora por encima de este umbral. |
+| `reject_if_speech_active` | Rechaza el onset si el VAD detecta voz sostenida en ese frame. |
 | `min_zcr` | Tasa mínima de cruces por cero, timbre de banda ancha, filtra golpes de teclado/trackpad. |
 | `double_min_gap_ms` | Gap mínimo entre los dos aplausos (evita contar la reverb del mismo golpe como un segundo aplauso). |
 | `double_max_gap_ms` | Gap máximo entre los dos aplausos. |
 | `refractory_ms` | Tras confirmar el doble aplauso, ignora nuevos aplausos por este tiempo. |
 
-Para calibrar estos umbrales en vivo con tu micrófono: `python
-workers/stt_worker.py --test-clap` (ver [`workers/README.md`](workers/README.md)).
+### Dispositivo y modelo: `language`, `device`, `model_dir`, `vad_model_path`
 
-### Detección de hardware: `device`, `whisper_model`, `compute_type`
+`language`: código ISO 639-1 (`"es"` por defecto) que Whisper respeta
+siempre — a diferencia de Parakeet-TDT (que se probó primero), acá sí hay
+un parámetro de idioma explícito, así que no hace falta preocuparse por que
+confunda español con otro idioma.
 
-Aplican a **ambos motores**. Con los tres en `auto` (default):
+`device`: `auto` | `cpu` | `cuda` — provider de sherpa-onnx. `auto` usa
+`cpu` hoy (no hay build con CUDA embebida todavía; correr en CPU con el
+decoder int8 es razonablemente rápido y evita el problema clásico de
+versiones de CUDA desalineadas entre driver y librería). `model_dir` y
+`vad_model_path` apuntan a los archivos que descarga
+`scripts/setup.ps1`/`setup.sh` — normalmente no hace falta tocarlos.
 
-- **Con GPU CUDA** (detectada vía `ctranslate2`, no vía `torch`, el venv
-  trae la build CPU-only de torch, más liviana): se elige el modelo por
-  tiers de VRAM sin medir nada (con 4GB, por ejemplo, `small` en
-  `float16`, más preciso y más rápido que `base` en CPU).
-- **Sin GPU** (o si forzás `device: cpu`): el primer arranque **calibra de
-  verdad**, transcribe un audio de referencia con distintos modelos y mide
-  el RTF (tiempo de transcripción / duración del audio) real de tu máquina,
-  y elige modelo y `beam_size` según qué tan holgada vaya. El resultado
-  queda cacheado en `workers/.cache/stt_profile.json`: los arranques
-  siguientes son instantáneos, y solo se vuelve a medir si cambia el
-  hardware o ponés `recalibrate: true`.
-
-`compute_type: auto` usa `int8_float16` en GPU (funciona en cualquier CUDA,
-mientras que `float16` puro falla sin tensor cores) e `int8` en CPU.
-
-Otras claves de esta sección: `language` (código ISO para Whisper),
-`input_device_index` (índice de PyAudio del micrófono, `null` = el
-default del sistema; usá `python workers/stt_worker.py --list-devices` para
-ver los índices reales, o `--calibrate` para un vúmetro en vivo),
-`beam_size`/`cpu_threads` (override manual de lo que decidiría la
-calibración), `initial_prompt` (contexto que se le da a Whisper para que
-transcriba mejor "Jarvis"), `recalibrate`, y `stuck_state_timeout_secs`
-(si el worker queda trabado grabando/transcribiendo más de esto, se
-reinicia solo, aplica a los dos motores).
-
-### Claves solo de `engine: realtimestt`
-
-`silero_sensitivity`, `webrtc_sensitivity`, `post_speech_silence_duration`,
-`min_length_of_recording`, `min_gap_between_recordings`,
-`silero_deactivity_detection` son parámetros propios de RealtimeSTT, sin
-efecto alguno con `engine: native` (que usa `stt.vad`/`stt.filters` en su
-lugar). Se conservan para cuando necesites el camino de respaldo.
+Otras claves: `input_device_index` (índice del micrófono dentro del
+enumerado de `cpal`, `null` = el default del sistema), `cpu_threads`
+(`null` = automático, ~núcleos físicos), y `stuck_state_timeout_secs` (si
+alguno de los hilos del motor queda sin dar señales de vida más de esto, se
+loguea un error — no hay reinicio automático de un hilo colgado, a
+diferencia de un worker Python que Rust podía matar y reemplazar).
 
 ## `wake`
 
@@ -165,9 +138,7 @@ ignora.
 ## `barge_in`
 
 Permite interrumpir a Jarvis mientras habla, dejó de ser half-duplex
-estricto desde la Fase 3 del rediseño. **Solo funciona con `stt.engine:
-native`**; con `realtimestt` este bloque entero no tiene efecto (ver
-arriba).
+estricto desde la Fase 3 del rediseño.
 
 | Clave | Qué hace |
 |---|---|
