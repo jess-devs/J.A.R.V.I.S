@@ -18,9 +18,9 @@ use crate::agent::{
     AgentTurnResult, PendingConfirmation, TurnContext,
 };
 use crate::audio::{AudioPlayer, MusicPlayer, PlaybackMeter};
-use crate::config::{AgentConfig, BargeInConfig, BargeInMode, Config, SttEngineKind};
+use crate::config::{AgentConfig, BargeInConfig, BargeInMode, Config};
 use crate::echo_gate::EchoGate;
-use crate::errors::{Result, WorkerError};
+use crate::errors::{Result, SttError};
 use crate::habits::{self, HabitStore, HabitSuggestion};
 use crate::llm::{self, ChatMessage, LlmProvider, Role};
 use crate::memory::MemoryStore;
@@ -277,12 +277,8 @@ impl Orchestrator {
         token
     }
 
-    /// Barge-in solo funciona con el motor nativo: RealtimeSTT no puede dar
-    /// eventos de voz continuos mientras suena el TTS (`recorder.text()` es
-    /// bloqueante), así que con `engine: realtimestt` siempre se usa el mute
-    /// físico de siempre, sin importar `barge_in.enabled`.
     fn barge_in_supported(&self) -> bool {
-        self.config.barge_in.enabled && self.config.stt.engine == SttEngineKind::Native
+        self.config.barge_in.enabled
     }
 
     /// Al empezar a hablar: con barge-in soportado, pasa el STT a modo
@@ -440,8 +436,6 @@ impl Orchestrator {
                             speech_ms = ?meta.speech_ms,
                             transcribe_ms = ?meta.transcribe_ms,
                             rms_dbfs = ?meta.rms_dbfs,
-                            no_speech_prob = ?meta.no_speech_prob,
-                            avg_logprob = ?meta.avg_logprob,
                             "telemetría de transcripción"
                         );
                     }
@@ -553,7 +547,7 @@ impl Orchestrator {
         if !self.config.workers.restart_on_crash
             || self.stt_restarts >= self.config.workers.max_restarts
         {
-            return Err(WorkerError::Crashed(None).into());
+            return Err(SttError::Crashed(None).into());
         }
         self.stt_restarts += 1;
         tracing::warn!(
@@ -1148,7 +1142,7 @@ impl Orchestrator {
         self.history = trimmed;
     }
 
-    pub async fn shutdown(&self) {
+    pub async fn shutdown(&mut self) {
         self.stt.shutdown().await;
         self.tts.shutdown().await;
     }

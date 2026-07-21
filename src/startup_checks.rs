@@ -20,6 +20,10 @@ pub async fn run(config: &Config) -> Result<()> {
         problems.push(e);
     }
 
+    if let Err(e) = check_stt_model_files(config) {
+        problems.push(e);
+    }
+
     if let Err(e) = check_input_device_present(config) {
         problems.push(e);
     }
@@ -106,13 +110,15 @@ fn check_python_executable(config: &Config) -> std::result::Result<(), String> {
     }
 }
 
+/// El STT ya no depende de Python (motor nativo, ver `src/stt/`); lo único
+/// que queda del venv es el worker de TTS (Piper).
 async fn check_python_imports(config: &Config) -> std::result::Result<(), String> {
     let path = config.workers.python_executable.clone();
     let output = tokio::time::timeout(
         Duration::from_secs(15),
         tokio::process::Command::new(&path)
             .arg("-c")
-            .arg("import RealtimeSTT, piper, torch, faster_whisper, silero_vad")
+            .arg("import piper")
             .output(),
     )
     .await;
@@ -131,6 +137,31 @@ async fn check_python_imports(config: &Config) -> std::result::Result<(), String
             path.display()
         )),
     }
+}
+
+/// Los archivos del modelo de reconocimiento (Whisper + Silero VAD) no se
+/// versionan (~640MB) — los descarga `scripts/setup.ps1`/`setup.sh`.
+fn check_stt_model_files(config: &Config) -> std::result::Result<(), String> {
+    let stt = &config.stt;
+    let mut missing = Vec::new();
+    for name in ["small-encoder.onnx", "small-decoder.int8.onnx", "small-tokens.txt"] {
+        let path = stt.model_dir.join(name);
+        if !path.exists() {
+            missing.push(path.display().to_string());
+        }
+    }
+    if !stt.vad_model_path.exists() {
+        missing.push(stt.vad_model_path.display().to_string());
+    }
+
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "faltan archivos del modelo de reconocimiento de voz: {}. Corré scripts/setup.ps1 \
+         (o scripts/setup.sh) para descargarlos",
+        missing.join(", ")
+    ))
 }
 
 fn check_piper_voice_files(config: &Config) -> std::result::Result<(), String> {
@@ -159,13 +190,10 @@ fn check_piper_voice_files(config: &Config) -> std::result::Result<(), String> {
 }
 
 /// Comprobación genérica: hace falta que exista al menos un micrófono en el
-/// sistema. No valida el `input_device_index` específico configurado — los
-/// índices de cpal (usado acá) y de PyAudio (usado por el worker de STT) no
-/// tienen por qué coincidir, así que una validación cruzada podría dar tanto
-/// falsos positivos como falsos negativos. La validación real de ese índice
-/// ocurre en el worker Python al abrir el stream (reporta `fatal_error` con
-/// un mensaje accionable si el índice no existe para PyAudio); acá solo se
-/// deja una pista hacia `--list-devices` cuando hay un índice configurado.
+/// sistema. No valida el `input_device_index` específico configurado (índice
+/// dentro de `host.input_devices()`, ver `src/stt/capture.rs`) — si el
+/// índice no existe, el motor STT lo reporta con un mensaje accionable al
+/// arrancar.
 fn check_input_device_present(config: &Config) -> std::result::Result<(), String> {
     let host = rodio::cpal::default_host();
     match host.input_devices() {
@@ -174,11 +202,7 @@ fn check_input_device_present(config: &Config) -> std::result::Result<(), String
                 Ok(())
             } else {
                 let hint = match config.stt.input_device_index {
-                    Some(idx) => format!(
-                        " (configuraste input_device_index: {idx} — corré \
-                         `python workers/stt_worker.py --list-devices` para ver \
-                         los índices reales de PyAudio)"
-                    ),
+                    Some(idx) => format!(" (configuraste input_device_index: {idx})"),
                     None => String::new(),
                 };
                 Err(format!(

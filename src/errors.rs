@@ -13,8 +13,8 @@ pub enum JarvisError {
     #[error("preflight: {0}")]
     Preflight(String),
 
-    #[error("worker STT: {0}")]
-    Stt(#[from] WorkerError),
+    #[error("STT: {0}")]
+    Stt(#[from] SttError),
 
     #[error("TTS: {0}")]
     Tts(#[from] TtsError),
@@ -74,6 +74,30 @@ pub enum WorkerError {
 
     #[error("tiempo de espera agotado ({0}s) esperando una respuesta del worker")]
     Timeout(u64),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SttError {
+    #[error(
+        "no se encontró el modelo de reconocimiento en '{0}'. Corré scripts/setup.ps1 \
+         (o scripts/setup.sh) para descargarlo"
+    )]
+    ModelNotFound(PathBuf),
+
+    #[error("no se pudo cargar el modelo de reconocimiento de voz: {0}")]
+    ModelLoad(String),
+
+    #[error("no se encontró ningún micrófono disponible")]
+    NoInputDevice,
+
+    #[error("error del backend de audio: {0}")]
+    Backend(String),
+
+    #[error("el motor STT no quedó listo dentro de {0} segundos")]
+    InitTimeout(u64),
+
+    #[error("el motor STT terminó inesperadamente{}", .0.as_ref().map(|m| format!(": {m}")).unwrap_or_default())]
+    Crashed(Option<String>),
 }
 
 #[derive(Debug, thiserror::Error)]

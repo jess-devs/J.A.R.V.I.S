@@ -2,11 +2,10 @@
 # Workers — Procesos hijo de STT y TTS
 workers:
   python_executable: "workers/.venv/Scripts/python.exe"
-  # Script del worker de speech-to-text.
-  stt_script: "workers/stt_worker.py"
-  # Script del worker de text-to-speech.
+  # Script del worker de text-to-speech. El STT ya no es un worker Python:
+  # corre nativo dentro de Jarvis (ver la sección stt más abajo).
   tts_script: "workers/tts_worker.py"
-  # Tiempo máximo para carga/calibración de Whisper. Puede tardar en CPU.
+  # Tiempo máximo para que el motor STT nativo cargue el modelo Whisper.
   stt_init_timeout_secs: 60
   # Tiempo máximo para carga de Piper (más rápida que Whisper).
   tts_init_timeout_secs: 20
@@ -22,17 +21,16 @@ workers:
 #
 # # ============================================================================
 # Stt — Reconocimiento de voz (Speech-to-Text)
+# Motor nativo en Rust: captura con cpal, VAD Silero y reconocimiento con
+# Whisper (ambos vía sherpa-onnx), todo dentro del proceso de Jarvis, sin
+# subproceso ni IPC.
 stt:
-  # Motor de STT. native: PyAudio + Silero VAD + faster-whisper.
-  # realtimestt: respaldo alternativo.
-  engine: native
-
-  # VAD (solo aplica con engine: native)
+  # VAD
   vad:
-    # Probabilidad de Silero para marcar inicio de voz.
+    # Probabilidad de Silero para marcar inicio de voz. sherpa-onnx no expone
+    # un umbral de histéresis separado para el fin de voz; silence_long_ms/
+    # silence_short_ms de abajo son los que amortiguan micro-pausas.
     threshold: 0.3
-    # Probabilidad para marcar fin de voz (histéresis anti micro-pausas).
-    neg_threshold: 0.35
     # Audio previo antepuesto al detectar voz (ms).
     pre_roll_ms: 400
     # Duración mínima de voz para no descartarla como blip (ms).
@@ -52,21 +50,19 @@ stt:
   #
   #
   # ============================================================================
-  # Filtros anti-alucinación sobre la salida de Whisper (engine: native)
+  # Filtros anti-alucinación. El binding de sherpa-onnx no expone métricas
+  # de confianza por segmento (no_speech_prob/avg_logprob/etc, sin importar
+  # el modelo), así que solo queda esta red de seguridad mínima además de
+  # duración/energía (ver vad arriba).
   filters:
-    # Descarta si no_speech_prob lo supera.
-    max_no_speech_prob: 0.6
-    # Descarta si avg_logprob cae por debajo.
-    min_avg_logprob: -1.0
-    # Descarta si compression_ratio lo supera (texto repetitivo).
-    max_compression_ratio: 2.4
+    # Descarta la transcripción si una palabra se repite más de N veces seguidas.
+    max_word_repeat: 4
   # ============================================================================
   #
   #
   #
   # ============================================================================
-  # Detector de doble aplauso (engine: native)
-  # Corre siempre; welcome.enabled decide si dispara la escena.
+  # Detector de doble aplauso. Corre siempre; welcome.enabled decide si dispara la escena.
   clap:
     # dBFS mínimo del pico para considerar un posible aplauso.
     min_peak_dbfs: -30.0
@@ -74,8 +70,8 @@ stt:
     min_rise_db: 7.0
     # Ventana en la que el onset debe volver a caer bajo su umbral para confirmarse (ms).
     decay_ms: 220
-    # Rechaza el onset si Silero cree que es voz sonora por encima de esto.
-    max_vad_prob: 0.45
+    # Rechaza el onset si el VAD detecta voz sostenida durante el pico.
+    reject_if_speech_active: true
     # Tasa mínima de cruces por cero (timbre de banda ancha; filtra clics de teclado/trackpad).
     min_zcr: 0.14
     # Gap mínimo entre los dos aplausos (evita contar la reverb del mismo golpe) (ms).
@@ -89,46 +85,25 @@ stt:
   #
   #
   # ============================================================================
-  # Código de idioma para Whisper.
+  # Código de idioma para Whisper (ISO 639-1). Whisper sí respeta esto
+  # siempre (a diferencia de Parakeet-TDT, que se probó primero pero detecta
+  # el idioma solo y sin forma de fijarlo — confundía español con inglés en
+  # frases cortas como la wake word).
   language: "es"
-  # Dispositivo de cómputo: auto, cuda o cpu.
+  # Provider de sherpa-onnx: auto, cpu o cuda. "auto" usa cpu hoy (no hay
+  # build con CUDA embebida todavía, ver plan de mejora futura en README).
   device: auto
-  # Modelo Whisper: auto, tiny, base, small, medium, large-v2, large-v3-turbo.
-  # "auto": con GPU CUDA elige tier por VRAM sin calibrar; en CPU calibra midiendo
-  # velocidad real y cachea el resultado en workers/.cache/stt_profile.json.
-  whisper_model: auto
-  # Tipo de cómputo: auto, float16, int8_float16, int8.
-  # auto usa int8_float16 en GPU, int8 en CPU.
-  compute_type: auto
-  # Índice de PyAudio del micrófono. null = micrófono por defecto.
+  # Carpeta con small-encoder.onnx/small-decoder.int8.onnx/small-tokens.txt
+  # de Whisper small. La descarga scripts/setup.ps1 (o setup.sh).
+  model_dir: "models/stt/sherpa-onnx-whisper-small"
+  # Modelo Silero VAD en ONNX. También lo descarga el script de setup.
+  vad_model_path: "models/stt/silero_vad.onnx"
+  # Índice del micrófono (cpal). null = dispositivo por defecto.
   input_device_index: null
-  # Tamaño de beam para decodificación. null = automático (5 en GPU, calibración en CPU).
-  beam_size: null
-  # Hilos de CPU para Whisper. null = automático (~núcleos físicos).
+  # Hilos de CPU para el reconocimiento. null = automático (~núcleos físicos).
   cpu_threads: null
-  # Prompt inicial para ayudar a Whisper con nombres propios y contexto.
-  initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis."
-  # Si true, ignora el caché y vuelve a medir en este arranque.
-  recalibrate: true
-  # ============================================================================
-  #
-  #
-  #
-  # ============================================================================
-  #Opciones exclusivas de engine: realtimestt (native usa stt.vad/stt.filters)
-  # Sensibilidad VAD Silero (0-1).
-  silero_sensitivity: 0.4
-  # Sensibilidad VAD WebRTC (0-3).
-  webrtc_sensitivity: 3
-  # Segundos de silencio antes de cerrar frase.
-  post_speech_silence_duration: 0.6
-  # Segundos mínimos de grabación para contarla como habla.
-  min_length_of_recording: 1.0
-  # Segundos mínimos entre grabaciones.
-  min_gap_between_recordings: 1.0
-  # Usa Silero para detectar fin del habla.
-  silero_deactivity_detection: true
-  # Reinicia el worker si queda trabado más de este tiempo (segundos).
+  # Segundos que el hilo de STT tolera trabado antes de asumir que se colgó
+  # (v1: solo se detecta y loguea, no hay reinicio automático).
   stuck_state_timeout_secs: 30
 # ============================================================================
 #
@@ -168,7 +143,7 @@ wake:
 barge_in:
   # Si false, mic muteado real mientras Jarvis habla, sin interrupciones.
   enabled: true
-  # Modo de interrupción (solo aplica con stt.engine: native; realtimestt usa mute real).
+  # Modo de interrupción.
   # wake_word: exige el nombre (fiable con altavoces). any_voice: recomendado con auriculares.
   mode: wake_word
   # Milisegundos de voz sostenida para confirmar interrupción real.

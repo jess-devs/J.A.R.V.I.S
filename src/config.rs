@@ -63,8 +63,9 @@ impl Config {
 #[serde(default)]
 pub struct WorkersConfig {
     pub python_executable: PathBuf,
-    pub stt_script: PathBuf,
     pub tts_script: PathBuf,
+    /// Tiempo máximo para que el motor STT nativo (en proceso, sin IPC) cargue
+    /// el modelo y quede listo.
     pub stt_init_timeout_secs: u64,
     pub tts_init_timeout_secs: u64,
     pub shutdown_timeout_secs: u64,
@@ -81,7 +82,6 @@ impl Default for WorkersConfig {
         };
         Self {
             python_executable,
-            stt_script: PathBuf::from("workers/stt_worker.py"),
             tts_script: PathBuf::from("workers/tts_worker.py"),
             stt_init_timeout_secs: 60,
             tts_init_timeout_secs: 20,
@@ -92,24 +92,15 @@ impl Default for WorkersConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SttEngineKind {
-    /// Motor propio: PyAudio + Silero VAD + faster-whisper directo.
-    #[default]
-    Native,
-    /// RealtimeSTT — camino de respaldo si el motor nativo falla.
-    Realtimestt,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct VadConfig {
     /// Probabilidad de Silero a partir de la cual se considera que empezó a hablar.
+    /// El binding de sherpa-onnx no expone un umbral de histéresis separado
+    /// para "dejó de hablar" (a diferencia del paquete `silero-vad` de Python
+    /// que usaba el motor anterior) — la robustez a micro-pausas la da
+    /// `silence_long_ms`/`silence_short_ms` más abajo, no un segundo umbral.
     pub threshold: f32,
-    /// Probabilidad de Silero por debajo de la cual se considera que dejó de hablar
-    /// (histéresis: menor que `threshold` para que las micro-pausas no corten).
-    pub neg_threshold: f32,
     /// Audio previo a la detección de voz que se antepone al buffer, para no
     /// perder el inicio de la frase.
     pub pre_roll_ms: u32,
@@ -133,7 +124,6 @@ impl Default for VadConfig {
     fn default() -> Self {
         Self {
             threshold: 0.5,
-            neg_threshold: 0.35,
             pre_roll_ms: 400,
             min_speech_ms: 250,
             silence_long_ms: 800,
@@ -145,38 +135,39 @@ impl Default for VadConfig {
     }
 }
 
+/// El binding de sherpa-onnx no expone métricas de confianza por segmento
+/// (`no_speech_prob`/`avg_logprob`/`compression_ratio`, sin importar el
+/// modelo) — los filtros que quedan son agnósticos al motor: duración/
+/// energía (ver `VadConfig`) más esta red de seguridad mínima contra texto
+/// degenerado.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct SttFiltersConfig {
-    /// Se descarta la transcripción si `no_speech_prob` de Whisper la supera.
-    pub max_no_speech_prob: f32,
-    /// Se descarta la transcripción si `avg_logprob` de Whisper cae por debajo.
-    pub min_avg_logprob: f32,
-    /// Se descarta la transcripción si `compression_ratio` de Whisper la supera
-    /// (indicio de texto repetitivo/alucinado).
-    pub max_compression_ratio: f32,
+    /// Se descarta la transcripción si alguna palabra se repite más de esta
+    /// cantidad de veces seguidas (alucinación típica en ruido/silencio).
+    pub max_word_repeat: u32,
 }
 
 impl Default for SttFiltersConfig {
     fn default() -> Self {
-        Self {
-            max_no_speech_prob: 0.6,
-            min_avg_logprob: -1.0,
-            max_compression_ratio: 2.4,
-        }
+        Self { max_word_repeat: 4 }
     }
 }
 
-/// Parámetros del detector de doble aplauso (modo bienvenida, solo motor
-/// nativo). Corre siempre sobre cada frame — `WelcomeConfig.enabled` es el
-/// que decide si Jarvis reacciona al evento, no esto.
+/// Parámetros del detector de doble aplauso (modo bienvenida). Corre siempre
+/// sobre cada frame — `WelcomeConfig.enabled` es el que decide si Jarvis
+/// reacciona al evento, no esto.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct ClapConfig {
     pub min_peak_dbfs: f32,
     pub min_rise_db: f32,
     pub decay_ms: u32,
-    pub max_vad_prob: f32,
+    /// El VAD no debe estar detectando voz sostenida durante el pico: un
+    /// aplauso dura 1-2 frames (32-64ms), muy por debajo de
+    /// `VadConfig::min_speech_ms`, así que esto casi siempre se cumple para
+    /// un aplauso real y descarta voz/ruido continuo.
+    pub reject_if_speech_active: bool,
     pub min_zcr: f32,
     pub double_min_gap_ms: u32,
     pub double_max_gap_ms: u32,
@@ -189,7 +180,7 @@ impl Default for ClapConfig {
             min_peak_dbfs: -30.0,
             min_rise_db: 7.0,
             decay_ms: 220,
-            max_vad_prob: 0.45,
+            reject_if_speech_active: true,
             min_zcr: 0.14,
             double_min_gap_ms: 150,
             double_max_gap_ms: 900,
@@ -198,80 +189,55 @@ impl Default for ClapConfig {
     }
 }
 
+/// El motor probó primero con NVIDIA Parakeet-TDT v3 (mejor WER en
+/// benchmarks generales), pero ese modelo detecta el idioma solo por audio
+/// y el binding de sherpa-onnx no tiene forma de fijarlo — en frases muy
+/// cortas sin contexto (la wake word: "Jarvis" no es palabra real en ningún
+/// idioma) terminaba adivinando inglés, confirmado en pruebas reales. Por
+/// eso el motor activo es Whisper (sí tiene `language` explícito, ver
+/// `Asr::new`) — mismo mecanismo que usaba el motor Python anterior.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct SttConfig {
-    /// native (motor propio) | realtimestt (respaldo).
-    pub engine: SttEngineKind,
     pub vad: VadConfig,
     pub filters: SttFiltersConfig,
     pub clap: ClapConfig,
+    /// Código de idioma para Whisper (ISO 639-1, ej. "es"). A diferencia de
+    /// Parakeet-TDT, Whisper sí tiene este parámetro y lo respeta siempre
+    /// (no intenta autodetectar).
     pub language: String,
-    /// "auto" | cuda | cpu — override manual de la detección automática de hardware.
+    /// "auto" | "cpu" | "cuda" — provider de sherpa-onnx. "auto" usa cpu hoy
+    /// (no hay build con CUDA embebida todavía, ver Cargo.toml).
     pub device: String,
-    /// "auto" | tiny | base | small | medium | large-v2 | large-v3-turbo.
-    /// Con "auto", el worker calibra midiendo la velocidad real de la máquina
-    /// (una sola vez, se cachea en workers/.cache/stt_profile.json).
-    pub whisper_model: String,
-    /// "auto" | float16 | int8 | ...
-    pub compute_type: String,
+    /// Carpeta con small-encoder.onnx/small-decoder.int8.onnx/
+    /// small-tokens.txt de Whisper (ver `scripts/setup.ps1`/`setup.sh` para
+    /// descargarlo).
+    pub model_dir: PathBuf,
+    /// Modelo Silero VAD en ONNX (mismo asset que descarga el setup).
+    pub vad_model_path: PathBuf,
     pub input_device_index: Option<u32>,
-    /// null = elegido por la calibración (5 con máquina holgada, 3 si va justa).
-    pub beam_size: Option<u8>,
-    /// null = auto (~núcleos físicos). Fija OMP_NUM_THREADS para ctranslate2,
-    /// que por defecto usa solo 4 hilos.
+    /// null = auto (~núcleos físicos).
     pub cpu_threads: Option<u8>,
-    /// Contexto en español para el decoder de Whisper — mejora la precisión.
-    pub initial_prompt: String,
-    /// true = ignora el caché de calibración y vuelve a medir en este arranque.
-    pub recalibrate: bool,
-    /// Las siguientes claves solo se usan con `engine: realtimestt` (camino de
-    /// respaldo) — el motor nativo tiene sus propios parámetros bajo `vad`.
-    pub silero_sensitivity: f32,
-    pub webrtc_sensitivity: u8,
-    pub post_speech_silence_duration: f32,
-    /// Segundos mínimos de grabación para considerarla habla válida: filtra
-    /// blips muy cortos que Whisper convertiría en alucinaciones.
-    pub min_length_of_recording: f32,
-    /// Segundos mínimos entre grabaciones: evita grabaciones fantasma
-    /// consecutivas.
-    pub min_gap_between_recordings: f32,
-    /// true = usa Silero también para detectar el fin del habla (más robusto
-    /// que solo el silencio; reduce cortes espurios que Whisper rellenaría con
-    /// alucinaciones).
-    pub silero_deactivity_detection: bool,
-    /// Segundos que el worker de STT tolera trabado en un estado ocupado
-    /// ("recording"/"transcribing", nunca deberían tardar más de unos pocos
-    /// segundos) antes de asumir que quedó irrecuperablemente colgado y
-    /// forzar su propia salida (para que Rust lo reinicie). Aplica a ambos
-    /// motores.
+    /// Segundos que el hilo de STT tolera trabado en un estado ocupado
+    /// ("recording"/"transcribing", nunca debería tardar más de unos pocos
+    /// segundos) antes de asumir que quedó colgado. v1: solo se detecta y
+    /// se loguea (no hay forma de matar un hilo in-process de forma segura,
+    /// a diferencia del proceso Python que reemplaza esto).
     pub stuck_state_timeout_secs: u64,
 }
 
 impl Default for SttConfig {
     fn default() -> Self {
         Self {
-            engine: SttEngineKind::default(),
             vad: VadConfig::default(),
             filters: SttFiltersConfig::default(),
             clap: ClapConfig::default(),
             language: "es".to_string(),
             device: "auto".to_string(),
-            whisper_model: "auto".to_string(),
-            compute_type: "auto".to_string(),
+            model_dir: PathBuf::from("models/stt/sherpa-onnx-whisper-small"),
+            vad_model_path: PathBuf::from("models/stt/silero_vad.onnx"),
             input_device_index: None,
-            beam_size: None,
             cpu_threads: None,
-            initial_prompt: "Conversación en español con un asistente de voz llamado \
-                Jarvis. El usuario a veces lo llama por su nombre: Jarvis."
-                .to_string(),
-            recalibrate: false,
-            silero_sensitivity: 0.4,
-            webrtc_sensitivity: 3,
-            post_speech_silence_duration: 0.6,
-            min_length_of_recording: 1.0,
-            min_gap_between_recordings: 1.0,
-            silero_deactivity_detection: true,
             stuck_state_timeout_secs: 30,
         }
     }
@@ -1012,8 +978,8 @@ impl Default for EchoGuardConfig {
 pub struct BargeInConfig {
     pub enabled: bool,
     pub mode: BargeInMode,
-    /// Milisegundos de voz sostenida (modo `speaking` del motor STT nativo)
-    /// para confirmar una interrupción real y no un ruido puntual.
+    /// Milisegundos de voz sostenida (modo `speaking` del motor STT) para
+    /// confirmar una interrupción real y no un ruido puntual.
     pub min_speech_ms: u32,
     pub echo_guard: EchoGuardConfig,
     /// Solo aplica con `mode: any_voice`. Al llegar la transcripción de lo
