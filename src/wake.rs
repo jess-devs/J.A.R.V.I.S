@@ -157,12 +157,65 @@ impl AttentionGate {
     /// flujo normal de `decide()` (que también mira la ventana de atención).
     pub(crate) fn contains_wake_word(&self, text: &str) -> bool {
         tokens(text).iter().any(|token| {
-            self.config
-                .words
-                .iter()
-                .any(|word| levenshtein(token, &normalize(word)) <= 1)
+            self.config.words.iter().any(|word| {
+                let normalized_word = normalize(word);
+                let max_distance = wake_word_tolerance(normalized_word.chars().count());
+                levenshtein(token, &normalized_word) <= max_distance
+            })
         })
     }
+
+    /// `true` si `text` es solo la wake word (más algún filler corto como
+    /// "oye"/"eh"), sin ningún pedido real detrás. A diferencia de
+    /// `contains_wake_word` (que solo confirma que ALGÚN token matchea),
+    /// esto mira lo que sobra después de sacar los tokens que matchearon:
+    /// distingue "Jarvis" puro de "Jarvis, enciende la luz" contando el
+    /// resto, no el total — sobrevive a wake words de más de una palabra.
+    /// Lo usa `orchestrator::dispatch_by_gate` para cortocircuitar antes de
+    /// llamar al LLM (un modelo chico improvisando un turno agéntico entero
+    /// a partir de solo el nombre produce respuestas incoherentes).
+    pub(crate) fn is_bare_wake_word(&self, text: &str) -> bool {
+        let toks = tokens(text);
+        if toks.is_empty() {
+            return false;
+        }
+        let mut matched_any = false;
+        let leftover: Vec<&String> = toks
+            .iter()
+            .filter(|token| {
+                let is_wake = self.config.words.iter().any(|word| {
+                    let normalized_word = normalize(word);
+                    let max_distance = wake_word_tolerance(normalized_word.chars().count());
+                    levenshtein(token, &normalized_word) <= max_distance
+                });
+                if is_wake {
+                    matched_any = true;
+                }
+                !is_wake
+            })
+            .collect();
+        matched_any && leftover.iter().all(|t| is_filler_word(t))
+    }
+}
+
+/// Muletillas cortas que no cambian el hecho de que la frase es solo la
+/// wake word — "oye Jarvis" sigue sin pedido real detrás.
+const FILLER_WORDS: &[&str] = &["oye", "eh", "ey", "che", "ah", "oh"];
+
+fn is_filler_word(token: &str) -> bool {
+    FILLER_WORDS.contains(&token)
+}
+
+/// Cuánta distancia de edición tolerar contra la wake word configurada,
+/// según su largo. Una tolerancia fija de 1 (como antes) es demasiado
+/// estricta para transcripciones ruidosas de Whisper en setups con
+/// dispositivos de audio virtuales: "Jarvis" salía transcrito como "Harbis"
+/// (distancia 2) y quedaba afuera. Escala con el largo de la palabra
+/// configurada para no aflojar de más palabras cortas (donde el riesgo de
+/// matchear algo no relacionado es mayor), con un tope en 2 para no abrir
+/// demasiado el margen de falsos positivos en palabras largas.
+fn wake_word_tolerance(word_len: usize) -> usize {
+    (word_len / 3).clamp(1, 2)
 }
 
 /// Minúsculas, sin tildes ni puntuación, pero CONSERVANDO los espacios entre
@@ -304,6 +357,16 @@ mod tests {
     }
 
     #[test]
+    fn is_bare_wake_word_distingue_nombre_solo_de_pedido_real() {
+        let g = default_gate();
+        assert!(g.is_bare_wake_word("Jarvis"));
+        assert!(g.is_bare_wake_word("¡Dervis!"));
+        assert!(g.is_bare_wake_word("oye Jarvis"));
+        assert!(!g.is_bare_wake_word("Jarvis enciende la luz"));
+        assert!(!g.is_bare_wake_word("voy a pedir una pizza"));
+    }
+
+    #[test]
     fn descarta_repeticion_inmediata() {
         let mut g = default_gate();
         g.open_window();
@@ -315,10 +378,21 @@ mod tests {
     }
 
     #[test]
-    fn no_acepta_palabras_a_distancia_dos() {
+    fn acepta_distancia_dos_pero_no_tres() {
         let g = default_gate();
+        // "harbis" está a distancia 2 de "jarvis" (h/j, b/v) — transcripción
+        // real de Whisper observada en uso, ahora tolerada.
+        assert_eq!(g.decide("harbis enciende la luz"), GateDecision::Respond);
+        // Estas siguen a distancia 3+, fuera de la tolerancia.
         assert_eq!(g.decide("javier ven acá"), GateDecision::Ignore);
         assert_eq!(g.decide("qué buen servicio"), GateDecision::Ignore);
+    }
+
+    #[test]
+    fn wake_word_tolerance_escala_con_el_largo() {
+        assert_eq!(wake_word_tolerance(3), 1);
+        assert_eq!(wake_word_tolerance(6), 2); // "jarvis"
+        assert_eq!(wake_word_tolerance(12), 2); // tope en 2
     }
 
     #[test]

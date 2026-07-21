@@ -132,6 +132,10 @@ pub struct Orchestrator {
     /// reabrirla, dejando a Jarvis exigiendo la wake word hasta que lo
     /// llamen de nuevo.
     silence_requested: Arc<AtomicBool>,
+    /// Índice rotativo de la próxima línea enlatada para el cortocircuito
+    /// de wake-word-solo (ver `dispatch_by_gate`) — evita repetir siempre
+    /// la misma frase cuando el usuario solo dice el nombre de activación.
+    bare_wake_greeting_idx: usize,
 }
 
 impl Orchestrator {
@@ -250,6 +254,7 @@ impl Orchestrator {
             // visualmente antes de que llegue el primer `SttEvent::Level`.
             mic_level_tx: watch::channel(-100.0).0,
             silence_requested,
+            bare_wake_greeting_idx: 0,
         })
     }
 
@@ -628,9 +633,28 @@ impl Orchestrator {
             GateDecision::Respond => {
                 tracing::info!(text = %text, "usuario dijo");
                 self.gate.mark_responded(&text);
-                self.handle_utterance(text).await;
+                if self.gate.is_bare_wake_word(&text) {
+                    self.respond_to_bare_wake_word().await;
+                } else {
+                    self.handle_utterance(text).await;
+                }
             }
         }
+    }
+
+    /// Cortocircuito para cuando lo único que se reconoció fue el nombre de
+    /// activación, sin pedido real detrás (ej. "Jarvis", "¡Dervis!"). Habla
+    /// una línea enlatada corta sin llamar al LLM: con un modelo local chico
+    /// (poca VRAM), improvisar un turno agéntico entero a partir de casi
+    /// nada produce respuestas incoherentes (ver alucinaciones reportadas).
+    async fn respond_to_bare_wake_word(&mut self) {
+        const GREETINGS: &[&str] = &["A la orden, señor.", "Dígame.", "Le escucho."];
+        let phrase = GREETINGS[self.bare_wake_greeting_idx % GREETINGS.len()];
+        self.bare_wake_greeting_idx = self.bare_wake_greeting_idx.wrapping_add(1);
+
+        self.begin_speaking().await;
+        agent::speak(&self.tts, &mut self.player, &self.echo_gate, phrase).await;
+        self.end_speaking().await;
     }
 
     /// Procesa una frase del usuario y, si `barge_in` está activo, encadena
