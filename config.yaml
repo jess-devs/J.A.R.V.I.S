@@ -100,7 +100,10 @@ stt:
   vad_model_path: "models/stt/silero_vad.onnx"
   # Índice del micrófono (cpal). null = dispositivo por defecto.
   input_device_index: null
-  # Hilos de CPU para el reconocimiento. null = automático (~núcleos físicos).
+  # Hilos de CPU para Whisper (reconocimiento). null = se autocalcula junto
+  # con el VAD y con llm.ollama.num_thread según los núcleos reales de esta
+  # máquina, para que STT y Ollama no se pisen pidiendo cada uno "todos los
+  # núcleos" (causa típica de que ambos corriendo juntos saturen la CPU).
   cpu_threads: null
   # Segundos que el hilo de STT tolera trabado antes de asumir que se colgó
   # (v1: solo se detecta y loguea, no hay reinicio automático).
@@ -193,6 +196,18 @@ llm:
     # Si true y base_url apunta a esta máquina, Jarvis levanta `ollama serve`
     # cuando no está corriendo. El servidor lanzado muere junto con Jarvis.
     auto_serve: true
+
+    # Cuánto mantiene Ollama el modelo cargado en VRAM/RAM tras la última
+    # respuesta ("30s", "5m", etc.). null = se autocalcula según el hardware
+    # detectado (más agresivo en VRAM/RAM justas, más relajado si sobra) —
+    # evita que el modelo quede residente indefinidamente sin uso.
+    keep_alive: null
+
+    # Hilos de CPU que puede usar Ollama (vía OLLAMA_NUM_THREAD). Solo tiene
+    # efecto si auto_serve: true (si Ollama corre externo, esta env var no
+    # se le puede inyectar). null = se autocalcula junto con stt.cpu_threads
+    # para que STT y Ollama no compitan pidiendo cada uno todos los núcleos.
+    num_thread: null
 
   #  LM Studio (provider: lmstudio)
   lmstudio:
