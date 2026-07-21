@@ -206,6 +206,24 @@ pub async fn run_speaking_turn(
         .await
         .map_err(|e| JarvisError::Pipeline(format!("tarea de síntesis falló: {e}")))?;
 
+    // Telemetría (no bloquea audio): un modelo local chico a veces afirma
+    // haber completado una acción que nunca ejecutó (ver el bug reportado:
+    // "se ha suspendido la actividad" sin haber llamado enter_silence_mode).
+    // Si no hubo ningún tool call este turno, revisamos si alguna frase
+    // suena a un reclamo de acción ya hecha — solo se loguea por ahora, para
+    // medir cuán seguido pasa antes de arriesgar falsos positivos activos.
+    if tool_calls.is_empty() {
+        for sentence in spoken_text.split(['.', '!', '?']) {
+            let sentence = sentence.trim();
+            if !sentence.is_empty() && crate::text::looks_like_completed_action_claim(sentence) {
+                tracing::warn!(
+                    frase = %sentence,
+                    "reclamo_de_accion_sin_tool_call: el modelo afirma haber hecho algo pero no llamó ninguna herramienta este turno"
+                );
+            }
+        }
+    }
+
     Ok(TurnOutput {
         spoken_text,
         tool_calls,
