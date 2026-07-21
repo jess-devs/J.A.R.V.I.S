@@ -1,6 +1,3 @@
-# faster-whisper: motor de transcripcion pedido explicitamente (extra opcional de RealtimeSTT).
-# silero-onnx: variante ONNX Runtime del VAD Silero -- evita que RealtimeSTT caiga al
-# backend legacy via torch.hub, que pide confirmacion interactiva ("trust this repo? y/N")
-# y cuelga el proceso al correr como worker sin terminal.
-RealtimeSTT[faster-whisper,silero-onnx]>=1.0.2,<2
+# El STT ya no depende de Python (motor nativo, ver src/stt/): el unico
+# worker que queda es el de TTS.
 piper-tts>=1.3,<2
