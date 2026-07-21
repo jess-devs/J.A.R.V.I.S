@@ -365,8 +365,8 @@ tts:
 audio:
   # Dispositivo de salida. null = dispositivo por defecto.
   output_device: null
-  # Volumen global (0.0 a 1.0).
-  volume: 1.0
+  # Volumen global (1 a 100).
+  volume: 65
   # Límite esperando a que termine de sonar una respuesta (segundos).
   drain_timeout_secs: 60
 # ============================================================================

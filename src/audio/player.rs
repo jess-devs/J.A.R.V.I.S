@@ -68,9 +68,18 @@ impl PlaybackMeter {
 impl AudioPlayer {
     pub fn new(
         output_device: Option<&str>,
-        volume: f32,
+        volume_pct: u8,
         drain_timeout_secs: u64,
     ) -> Result<Self, AudioError> {
+        let clamped_pct = volume_pct.clamp(1, 100);
+        if clamped_pct != volume_pct {
+            tracing::warn!(
+                volume_pct,
+                clamped_pct,
+                "audio.volume fuera de rango (1-100), ajustado al límite más cercano"
+            );
+        }
+        let volume = clamped_pct as f32 / 100.0;
         let host = rodio::cpal::default_host();
         let device = match output_device {
             Some(name) => host

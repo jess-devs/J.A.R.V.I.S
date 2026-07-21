@@ -698,7 +698,9 @@ impl Default for TtsConfig {
 #[serde(default)]
 pub struct AudioConfig {
     pub output_device: Option<String>,
-    pub volume: f32,
+    /// Volumen global, de 1 a 100. Se clampea a ese rango en
+    /// `AudioPlayer::new`.
+    pub volume: u8,
     /// Límite de seguridad para esperar a que el buffer de reproducción se
     /// vacíe. Solo actúa si el dispositivo de salida se cuelga o el sistema
     /// suspende el stream (ej. PC inactiva); no debería afectar respuestas
@@ -710,7 +712,7 @@ impl Default for AudioConfig {
     fn default() -> Self {
         Self {
             output_device: None,
-            volume: 1.0,
+            volume: 65,
             drain_timeout_secs: 60,
         }
     }
