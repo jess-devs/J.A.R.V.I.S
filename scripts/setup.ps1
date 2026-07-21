@@ -201,6 +201,76 @@ if (-not $voicePathMatch)
     }
 }
 
+# Modelo de reconocimiento de voz (Whisper small + Silero VAD)
+Write-Step "Verificando el modelo de reconocimiento de voz..."
+
+$sttModelDir = Join-Path $RepoRoot "models/stt/sherpa-onnx-whisper-small"
+$sttVadPath = Join-Path $RepoRoot "models/stt/silero_vad.onnx"
+$sttModelFiles = @("small-encoder.onnx", "small-decoder.int8.onnx", "small-tokens.txt")
+$sttModelComplete = (Test-Path $sttModelDir) -and -not ($sttModelFiles | Where-Object { -not (Test-Path (Join-Path $sttModelDir $_)) })
+$sttVadComplete = Test-Path $sttVadPath
+
+if ($sttModelComplete -and $sttVadComplete)
+{
+    Write-Host "OK: el modelo de reconocimiento de voz ya esta en models/stt/."
+} else
+{
+    $downloadStt = $Yes
+    if (-not $Yes)
+    {
+        $answer = Read-Host "Descargar el modelo de reconocimiento de voz (~640MB)? [S/n]"
+        $downloadStt = ($answer -eq "" -or $answer -match '^[sS]')
+    }
+    if ($downloadStt)
+    {
+        New-Item -ItemType Directory -Force (Join-Path $RepoRoot "models/stt") | Out-Null
+        # Invoke-WebRequest con la barra de progreso por defecto es muchisimo
+        # mas lenta para archivos grandes en PowerShell 5/7 sobre Windows.
+        $prevProgressPreference = $ProgressPreference
+        $ProgressPreference = "SilentlyContinue"
+        try
+        {
+            if (-not $sttVadComplete)
+            {
+                Write-Host "Descargando silero_vad.onnx..."
+                Invoke-WebRequest -Uri "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx" -OutFile $sttVadPath
+            }
+
+            if (-not $sttModelComplete)
+            {
+                Write-Host "Descargando Whisper small (~640MB comprimido, puede tardar unos minutos)..."
+                $tarPath = Join-Path $RepoRoot "models/stt/sherpa-onnx-whisper-small.tar.bz2"
+                Invoke-WebRequest -Uri "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2" -OutFile $tarPath
+                tar -xf $tarPath -C (Join-Path $RepoRoot "models/stt")
+                Remove-Item $tarPath -Force -ErrorAction SilentlyContinue
+                # El tarball trae ademas small-encoder.int8.onnx y
+                # small-decoder.onnx (las variantes que NO usamos: preferimos
+                # encoder fp32 + decoder int8, mejor precision/velocidad que
+                # cuantizar el encoder) y una carpeta test_wavs vacia -- se
+                # descartan para no duplicar ~300MB sin uso.
+                Remove-Item (Join-Path $sttModelDir "small-encoder.int8.onnx") -Force -ErrorAction SilentlyContinue
+                Remove-Item (Join-Path $sttModelDir "small-decoder.onnx") -Force -ErrorAction SilentlyContinue
+                Remove-Item (Join-Path $sttModelDir "test_wavs") -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        } finally
+        {
+            $ProgressPreference = $prevProgressPreference
+        }
+
+        $sttModelComplete = (Test-Path $sttModelDir) -and -not ($sttModelFiles | Where-Object { -not (Test-Path (Join-Path $sttModelDir $_)) })
+        if ($sttModelComplete -and (Test-Path $sttVadPath))
+        {
+            Write-Host "OK: modelo de reconocimiento de voz listo en models/stt/."
+        } else
+        {
+            Write-Warn "No se pudo confirmar la descarga del modelo de reconocimiento de voz. Revisa manualmente (ver README.md, seccion 'Modelo de reconocimiento de voz')."
+        }
+    } else
+    {
+        Write-Warn "Sin el modelo de reconocimiento de voz, Jarvis no va a poder arrancar el STT. Volve a correr este script cuando quieras descargarlo."
+    }
+}
+
 Write-Step "Descargando el modelo de Ollama ($modelToPull)..."
 
 # El pull necesita el servidor de Ollama corriendo, no solo el binario en

@@ -160,6 +160,57 @@ else
     fi
 fi
 
+# Modelo de reconocimiento de voz (Whisper small + Silero VAD)
+step "Verificando el modelo de reconocimiento de voz..."
+
+stt_model_dir="$REPO_ROOT/models/stt/sherpa-onnx-whisper-small"
+stt_vad_path="$REPO_ROOT/models/stt/silero_vad.onnx"
+
+stt_model_complete() {
+    [[ -f "$stt_model_dir/small-encoder.onnx" && -f "$stt_model_dir/small-decoder.int8.onnx" \
+        && -f "$stt_model_dir/small-tokens.txt" ]]
+}
+
+if stt_model_complete && [[ -f "$stt_vad_path" ]]; then
+    echo "OK: el modelo de reconocimiento de voz ya esta en models/stt/."
+else
+    download_stt=$ASSUME_YES
+    if ! $ASSUME_YES; then
+        read -r -p "Descargar el modelo de reconocimiento de voz (~640MB)? [S/n] " answer
+        [[ -z "$answer" || "$answer" =~ ^[sS] ]] && download_stt=true || download_stt=false
+    fi
+    if $download_stt; then
+        mkdir -p "$REPO_ROOT/models/stt"
+
+        if [[ ! -f "$stt_vad_path" ]]; then
+            echo "Descargando silero_vad.onnx..."
+            curl -sL -o "$stt_vad_path" "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"
+        fi
+
+        if ! stt_model_complete; then
+            echo "Descargando Whisper small (~640MB comprimido, puede tardar unos minutos)..."
+            tar_path="$REPO_ROOT/models/stt/sherpa-onnx-whisper-small.tar.bz2"
+            curl -sL -o "$tar_path" "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-small.tar.bz2"
+            tar -xjf "$tar_path" -C "$REPO_ROOT/models/stt"
+            rm -f "$tar_path"
+            # El tarball trae ademas small-encoder.int8.onnx y
+            # small-decoder.onnx (variantes que no usamos: preferimos encoder
+            # fp32 + decoder int8) y una carpeta test_wavs vacia -- se
+            # descartan para no duplicar ~300MB sin uso.
+            rm -f "$stt_model_dir/small-encoder.int8.onnx" "$stt_model_dir/small-decoder.onnx"
+            rm -rf "$stt_model_dir/test_wavs"
+        fi
+
+        if stt_model_complete && [[ -f "$stt_vad_path" ]]; then
+            echo "OK: modelo de reconocimiento de voz listo en models/stt/."
+        else
+            warn "No se pudo confirmar la descarga del modelo de reconocimiento de voz. Revisa manualmente (ver README.md, seccion 'Modelo de reconocimiento de voz')."
+        fi
+    else
+        warn "Sin el modelo de reconocimiento de voz, Jarvis no va a poder arrancar el STT. Volve a correr este script cuando quieras descargarlo."
+    fi
+fi
+
 step "Descargando el modelo de Ollama ($model_to_pull)..."
 
 # El pull necesita el servidor de Ollama corriendo, no solo el binario en
