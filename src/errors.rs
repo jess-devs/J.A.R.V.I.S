@@ -117,17 +117,8 @@ pub enum LlmError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum TtsError {
-    #[error("falta la variable de entorno {0}. Definila en tu .env")]
-    MissingApiKey(String),
-
     #[error("worker de síntesis: {0}")]
     Worker(#[from] WorkerError),
-
-    #[error("error de red hablando con el proveedor TTS: {0}")]
-    Network(#[from] reqwest::Error),
-
-    #[error("respuesta inesperada del proveedor TTS: {0}")]
-    UnexpectedResponse(String),
 }
 
 #[derive(Debug, thiserror::Error)]

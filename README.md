@@ -8,7 +8,7 @@ También reacciona a un doble aplauso, ver [Modo bienvenida](#modo-bienvenida-do
 
 ## Arquitectura
 
-- **Rust** (`src/`) es el orquestador: el loop principal, la configuración, todas las llamadas de red (Ollama, LM Studio, Anthropic, OpenAI, DeepSeek, ElevenLabs, Cartesia), la reproducción de audio, **el reconocimiento de voz** y el pipeline de streaming LLM→frases→TTS→reproducción.
+- **Rust** (`src/`) es el orquestador: el loop principal, la configuración, todas las llamadas de red (Ollama, LM Studio, Anthropic, OpenAI, DeepSeek), la reproducción de audio, **el reconocimiento de voz** y el pipeline de streaming LLM→frases→TTS→reproducción.
   - El STT (`src/stt/`) es nativo: captura de micrófono (`cpal`), VAD y reconocimiento con Whisper (small, forzado a español) vía [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), corriendo en hilos propios dentro del mismo proceso — sin subproceso ni IPC. Se probó primero con NVIDIA Parakeet-TDT v3 (mejor WER en benchmarks generales), pero ese modelo detecta el idioma solo por audio y confundía español con inglés en frases cortas como la wake word; Whisper sí tiene un parámetro de idioma explícito. También corre ahí, frame a frame, el detector de doble aplauso que dispara el [modo bienvenida](#modo-bienvenida-doble-aplauso).
 - **Python** (`workers/`) queda reducido a un solo proceso, spawneado por Rust y hablado por stdio (no HTTP): `tts_worker.py`, que envuelve [Piper](https://github.com/OHF-voice/piper1-gpl) para síntesis de voz local offline en español.
 
@@ -115,8 +115,8 @@ Todas las claves son opcionales:
 - **`wake`**: el "gate" de atención, qué palabra activa a Jarvis y por cuánto tiempo sigue atento sin repetirla.
 - **`barge_in`**: interrumpir a Jarvis mientras habla, modo `wake_word` vs `any_voice`, y el `echo_guard` que evita que se autointerrumpa con sus propios parlantes.
 - **`llm`**: `provider: ollama | anthropic | openai | deepseek | lmstudio`, configuración de cada uno (modelo, variable de entorno de la API key), prompt de sistema, cuántos mensajes de historial conservar.
-- **`tts`**: `provider: piper | elevenlabs | cartesia`, ruta a la voz de Piper o config de ElevenLabs/Cartesia (`voice_id`, `output_format`).
-- **`audio`**: dispositivo de salida (`null` = default del sistema) y volumen.
+- **`tts`**: único proveedor `piper` (offline, local); ruta al modelo de voz (`voice_path`/`config_path`).
+- **`audio`**: dispositivo de salida (`null` = default del sistema) y volumen (1 a 100).
 - **`pipeline`**: longitud mínima/máxima de las frases que se mandan a sintetizar.
 - **`agent`**: capa agéntica,activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, y sub-config de `files`/`apps`/`web`/`memory`/`translate`/`reminders`/`scripted_tools`. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`welcome`**: la escena de bienvenida disparada por doble aplauso,activar/desactivar, música, frase de saludo, volúmenes. Ver [Modo bienvenida](#modo-bienvenida-doble-aplauso).
@@ -225,13 +225,13 @@ El default es **100% local y no necesita ninguna API key**: `llm.provider: ollam
 
 Como alternativa local a Ollama, si preferís [LM Studio](https://lmstudio.ai) (por ejemplo porque ya tenés un modelo cargado ahí, o Ollama te resulta lento), poné `llm.provider: lmstudio` y activá el servidor local de LM Studio (pestaña Developer → Start Server, expone `http://localhost:1234/v1` por defecto). Tampoco necesita API key.
 
-Para usar un LLM o TTS en la nube:
+Para usar un LLM en la nube (el TTS solo soporta `piper`, local):
 
-1. Cambiá `llm.provider` a `anthropic` / `openai` / `deepseek`, o `tts.provider` a `elevenlabs` / `cartesia`, en `config.yaml`.
-2. Copiá `.env.example` a `.env` y completá la API key correspondiente (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `ELEVENLABS_API_KEY` o `CARTESIA_API_KEY`). `.env` nunca se versiona.
+1. Cambiá `llm.provider` a `anthropic` / `openai` / `deepseek` en `config.yaml`.
+2. Copiá `.env.example` a `.env` y completá la API key correspondiente (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY` o `DEEPSEEK_API_KEY`). `.env` nunca se versiona.
 3. No hace falta tocar ningún código,el cambio de modo es enteramente por configuración.
 
-Los cinco proveedores de nube están completamente implementados (streaming incluido para los LLM). DeepSeek y LM Studio usan el mismo cliente HTTP que OpenAI porque su API es explícitamente (DeepSeek) o por diseño (LM Studio) compatible con ese formato,solo cambia `base_url`, modelo y, si aplica, API key. Cartesia (TTS) usa WebSocket por defecto (`tts.cartesia.transport`) para menor latencia; también soporta `rest`.
+Los tres proveedores de LLM en la nube están completamente implementados con streaming. DeepSeek y LM Studio usan el mismo cliente HTTP que OpenAI porque su API es explícitamente (DeepSeek) o por diseño (LM Studio) compatible con ese formato,solo cambia `base_url`, modelo y, si aplica, API key.
 
 ## Estilo de conversación
 

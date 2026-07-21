@@ -1,8 +1,5 @@
-//! Interfaz común de TTS: `PiperWorkerProvider` (local, foco principal) y
-//! `ElevenLabsProvider` (nube).
+//! Interfaz común de TTS: `PiperWorkerProvider` (local, único proveedor).
 
-pub mod cartesia;
-pub mod elevenlabs;
 pub mod piper_worker;
 mod protocol;
 
@@ -35,14 +32,6 @@ pub async fn build_provider(config: &Config) -> Result<Arc<dyn TtsProvider>, Tts
         TtsProviderKind::Piper => {
             let provider =
                 piper_worker::PiperWorkerProvider::spawn(&config.workers, &config.tts).await?;
-            Ok(Arc::new(provider))
-        }
-        TtsProviderKind::Elevenlabs => {
-            let provider = elevenlabs::ElevenLabsProvider::new(&config.tts.elevenlabs)?;
-            Ok(Arc::new(provider))
-        }
-        TtsProviderKind::Cartesia => {
-            let provider = cartesia::CartesiaProvider::new(&config.tts.cartesia)?;
             Ok(Arc::new(provider))
         }
     }

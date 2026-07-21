@@ -566,8 +566,6 @@ impl Default for LlmConfig {
 pub enum TtsProviderKind {
     #[default]
     Piper,
-    Elevenlabs,
-    Cartesia,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -599,86 +597,9 @@ impl Default for PiperConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
-pub struct ElevenLabsConfig {
-    pub voice_id: String,
-    pub model_id: String,
-    /// Formato pedido a la API, ej. "pcm_22050"/"pcm_44100" -- debe ser un
-    /// formato "pcm_*" (PCM crudo), no mp3/opus, para evitar depender de
-    /// ffmpeg para decodificar la respuesta.
-    pub output_format: String,
-    pub api_key_env: String,
-}
-
-impl Default for ElevenLabsConfig {
-    fn default() -> Self {
-        Self {
-            voice_id: String::new(),
-            model_id: "eleven_multilingual_v2".to_string(),
-            output_format: "pcm_22050".to_string(),
-            api_key_env: "ELEVENLABS_API_KEY".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CartesiaTransport {
-    #[default]
-    Rest,
-    WebSocket,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct CartesiaOutputFormat {
-    pub container: String,
-    pub encoding: String,
-    pub sample_rate: u32,
-}
-
-impl Default for CartesiaOutputFormat {
-    fn default() -> Self {
-        Self {
-            container: "raw".to_string(),
-            encoding: "pcm_s16le".to_string(),
-            sample_rate: 22050,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct CartesiaConfig {
-    pub model_id: String,
-    pub voice_id: String,
-    pub language: Option<String>,
-    pub output_format: CartesiaOutputFormat,
-    pub api_key_env: String,
-    pub cartesia_version: String,
-    pub transport: CartesiaTransport,
-}
-
-impl Default for CartesiaConfig {
-    fn default() -> Self {
-        Self {
-            model_id: "sonic-3.5".to_string(),
-            voice_id: String::new(),
-            language: Some("es".to_string()),
-            output_format: CartesiaOutputFormat::default(),
-            api_key_env: "CARTESIA_API_KEY".to_string(),
-            cartesia_version: "2026-03-01".to_string(),
-            transport: CartesiaTransport::default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
 pub struct TtsConfig {
     pub provider: TtsProviderKind,
     pub piper: PiperConfig,
-    pub elevenlabs: ElevenLabsConfig,
-    pub cartesia: CartesiaConfig,
     pub synth_timeout_secs: u64,
 }
 
@@ -687,8 +608,6 @@ impl Default for TtsConfig {
         Self {
             provider: TtsProviderKind::default(),
             piper: PiperConfig::default(),
-            elevenlabs: ElevenLabsConfig::default(),
-            cartesia: CartesiaConfig::default(),
             synth_timeout_secs: 10,
         }
     }

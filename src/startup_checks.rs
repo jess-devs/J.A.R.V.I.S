@@ -38,16 +38,6 @@ pub async fn run(config: &Config) -> Result<()> {
                 problems.push(e);
             }
         }
-        TtsProviderKind::Elevenlabs => {
-            if let Err(e) = check_cloud_api_key(&config.tts.elevenlabs.api_key_env) {
-                problems.push(e);
-            }
-        }
-        TtsProviderKind::Cartesia => {
-            if let Err(e) = check_cloud_api_key(&config.tts.cartesia.api_key_env) {
-                problems.push(e);
-            }
-        }
     }
 
     match config.llm.provider {

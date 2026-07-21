@@ -196,8 +196,8 @@ Qué modelo genera las respuestas.
 - Cada proveedor tiene su propio sub-bloque (`ollama:`, `anthropic:`,
   etc.), pero **solo se lee el del `provider` activo**, no hace falta
   comentar los demás.
-- `api_key_env` (en `anthropic`, `openai`, `deepseek`, `lmstudio`,
-  `tts.elevenlabs`) **no es la API key en sí**, es el *nombre* de la
+- `api_key_env` (en `anthropic`, `openai`, `deepseek`, `lmstudio`)
+  **no es la API key en sí**, es el *nombre* de la
   variable de entorno que la contiene (ver `.env.example`). Así la key real
   nunca queda en este archivo, que sí se versiona en git.
 - `ollama.think` / nota sobre modelos con razonamiento: `qwen3`, `qwen3.5`
@@ -225,9 +225,7 @@ Qué modelo genera las respuestas.
 
 Qué voz habla.
 
-- `provider`: `piper` (offline, local, gratis) | `elevenlabs` | `cartesia`
-  (nube, requieren API key y consumen créditos de la cuenta, pero suenan
-  más naturales).
+- `provider`: `piper` — único proveedor soportado (offline, local, gratis).
 - `tts.piper`: `voice_path`/`config_path` apuntan al modelo `.onnx` de
   Piper y su `.json` de config (ver `voices/`, hay varias descargadas para
   comparar, comentadas). `use_cuda: true` sintetiza en GPU (más rápido,
@@ -235,26 +233,16 @@ Qué voz habla.
   `length_scale` (ritmo: `<1` más rápido, `>1` más lento, `null` = original
   de la voz) y `noise_w_scale` (variación en la duración de los fonemas)
   son afinado fino por voz, retocalos después de escuchar la que elegiste.
-- `tts.elevenlabs`: `voice_id` (desde tu cuenta, pestaña Voices → ⋮ → Copy
-  Voice ID), `model_id`, `output_format` (formato PCM que exige la API —
-  no tocar salvo necesidad concreta), `api_key_env`.
-- `tts.cartesia`: `model_id` (`sonic-3.5` | `sonic-3` | `sonic-latest`),
-  `voice_id` (desde tu cuenta de Cartesia), `language` (`null` =
-  autodetectar), `output_format` (`container`: `raw` | `wav` | `mp3`;
-  `encoding`: `pcm_s16le` | `pcm_f32le` | `pcm_mulaw` | `pcm_alaw`;
-  `sample_rate`), `api_key_env`, `cartesia_version` (fecha de versión de la
-  API, formato `AAAA-MM-DD`), `transport`: `websocket` (default, menor
-  latencia, mantiene la conexión abierta entre frases) | `rest`.
 - `synth_timeout_secs`: si sintetizar una frase tarda más que esto, se
   aborta el resto de la respuesta (mejor cortar que colgarse).
 
 ## `audio`
 
 Reproducción de la voz de Jarvis. `output_device` (`null` = default del
-sistema), `volume` (multiplicador, `1.0` = sin cambios),
-`drain_timeout_secs` (límite de seguridad esperando a que termine de sonar
-una respuesta, protege contra un dispositivo de audio caído o suspendido
-por el SO).
+sistema), `volume` (1 a 100; más alto = más fuerte, valores fuera de rango
+se ajustan al límite más cercano), `drain_timeout_secs` (límite de
+seguridad esperando a que termine de sonar una respuesta, protege contra
+un dispositivo de audio caído o suspendido por el SO).
 
 ## `pipeline`
 
