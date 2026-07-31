@@ -7,6 +7,7 @@ workers/.venv/
 workers/__pycache__/
 **/__pycache__/
 *.pyc
+.pytest_cache/
 
 # Caché de calibración de hardware del STT (específico de cada máquina)
 workers/.cache/

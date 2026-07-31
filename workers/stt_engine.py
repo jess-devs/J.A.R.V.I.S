@@ -33,6 +33,7 @@ import torch
 
 import ipc
 from clap_detector import ClapDetector
+from filters import classify_discard_reason
 
 FRAME_SAMPLES = 512  # tamaño de frame que exige Silero VAD a 16kHz (32 ms)
 SAMPLE_RATE = 16000
@@ -374,16 +375,16 @@ class _Engine:
                 "avg_logprob": round(avg_logprob, 3),
             }
 
-            if no_speech_prob > self.max_no_speech_prob:
-                ipc.send(
-                    {"type": "discarded", "reason": "no_speech_prob", "meta": meta}
-                )
-            elif avg_logprob < self.min_avg_logprob:
-                ipc.send({"type": "discarded", "reason": "avg_logprob", "meta": meta})
-            elif compression_ratio > self.max_compression_ratio:
-                ipc.send(
-                    {"type": "discarded", "reason": "compression_ratio", "meta": meta}
-                )
+            reason = classify_discard_reason(
+                no_speech_prob,
+                avg_logprob,
+                compression_ratio,
+                max_no_speech_prob=self.max_no_speech_prob,
+                min_avg_logprob=self.min_avg_logprob,
+                max_compression_ratio=self.max_compression_ratio,
+            )
+            if reason is not None:
+                ipc.send({"type": "discarded", "reason": reason, "meta": meta})
             else:
                 ipc.send(
                     {

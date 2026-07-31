@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    # windows-latest: plataforma principal, con más tests (ej. clasificación
+    # de riesgo de run_powershell). ubuntu-latest: valida el soporte Linux/Mac
+    # del ítem 1 de MEJORAS.md (Stage A) — compila con `windows` excluido vía
+    # cfg y corre los tests cfg(unix) (ej. run_shell). macOS no está en la
+    # matriz por ahora (sin runner propio del proyecto para justificar el
+    # costo/tiempo extra de CI; el código unix-genérico ya se ejercita en
+    # ubuntu-latest).
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Rust estable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cachear dependencias de cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo build
+        run: cargo build --verbose
+
+      - name: cargo test
+        run: cargo test --verbose
+
+  python:
+    # Los workers reales (STT/TTS) necesitan hardware de audio y modelos
+    # pesados (torch, faster-whisper) — no se corren en CI. Este job solo
+    # ejercita la lógica pura y testeable (ver workers/tests/), que no
+    # depende de RealtimeSTT/PyAudio.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias de test
+        run: pip install -r workers/requirements-dev.txt
+
+      - name: pytest
+        run: python -m pytest workers/tests -v
