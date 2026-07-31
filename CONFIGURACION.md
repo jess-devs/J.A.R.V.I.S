@@ -239,6 +239,14 @@ Qué modelo genera las respuestas.
   responde. El proceso lanzado nace dentro del Job Object de Jarvis, así
   que se cierra automáticamente junto con él; si Ollama ya estaba corriendo
   (por ejemplo la app de bandeja), no se toca.
+- `ollama.vision_model`: modelo con capacidad de visión (ej. `qwen2.5vl`,
+  `llava`) que se usa en lugar de `model` solo cuando el turno lleva
+  imágenes (por ejemplo, un resultado de `take_screenshot`). `null`
+  (default) = seguir usando `model` siempre, aunque no soporte imágenes.
+  No hay detección automática de hardware para este campo — si lo
+  configurás, hace falta `ollama pull <modelo>` aparte y asumís que entra
+  en tu VRAM/RAM (los modelos de visión suelen pesar más que su
+  equivalente solo-texto).
 - `max_history_messages`: cuántos mensajes de la conversación actual se
   conservan (además de los 2 mensajes `system` fijos) antes de recortar los
   más viejos. Más alto = Jarvis recuerda más de la charla en curso, pero

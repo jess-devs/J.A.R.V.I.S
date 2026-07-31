@@ -376,6 +376,13 @@ pub struct OllamaConfig {
     /// `ollama serve` cuando no está corriendo. El servidor lanzado nace
     /// dentro del Job Object de Jarvis, así que muere junto con él.
     pub auto_serve: bool,
+    /// Modelo con capacidad de visión (ej. "qwen2.5vl", "llava") usado en
+    /// vez de `model` solo cuando el mensaje que se envía lleva imágenes
+    /// (ej. un `take_screenshot`). `null` (default) = seguir usando `model`
+    /// siempre, aunque no soporte imágenes (Ollama las ignora o falla según
+    /// el modelo). No hay detección de hardware para este campo: si lo
+    /// seteás, asumís que el modelo entra en tu VRAM/RAM.
+    pub vision_model: Option<String>,
 }
 
 impl Default for OllamaConfig {
@@ -385,6 +392,7 @@ impl Default for OllamaConfig {
             model: "auto".to_string(),
             think: None,
             auto_serve: true,
+            vision_model: None,
         }
     }
 }

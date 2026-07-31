@@ -219,6 +219,13 @@ llm:
     # cuando no está corriendo. El servidor lanzado muere junto con Jarvis.
     auto_serve: true
 
+    # Modelo con capacidad de visión (ej. "qwen2.5vl", "llava"), usado en
+    # vez de `model` solo cuando el turno lleva imágenes (ej. un
+    # take_screenshot). null (default) = seguir usando `model` siempre. Sin
+    # detección de hardware para este campo: si lo seteás, asumís que el
+    # modelo entra en tu VRAM/RAM. Requiere `ollama pull <modelo>` aparte.
+    vision_model: null
+
   #  LM Studio (provider: lmstudio)
   lmstudio:
     # URL base del servidor LM Studio.

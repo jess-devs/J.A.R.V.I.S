@@ -26,6 +26,9 @@ pub struct OllamaProvider {
     client: reqwest::Client,
     base_url: String,
     model: String,
+    /// Modelo con capacidad de visión, usado en su lugar cuando el request
+    /// lleva imágenes. `None` = siempre usar `model`.
+    vision_model: Option<String>,
     /// Solo para modelos con razonamiento (qwen3, deepseek-r1): `false`
     /// desactiva los tokens de "pensamiento" (que el TTS hablaría en voz
     /// alta). No enviar para modelos que no lo soportan (Ollama lo rechaza).
@@ -39,8 +42,21 @@ impl OllamaProvider {
             client,
             base_url: config.base_url.clone(),
             model: config.model.clone(),
+            vision_model: config.vision_model.clone(),
             think: config.think,
         }
+    }
+
+    /// `vision_model` si el turno lleva imágenes y hay uno configurado;
+    /// si no, el modelo de texto normal.
+    fn model_for(&self, history: &[ChatMessage]) -> &str {
+        let has_images = history.iter().any(|m| !m.images.is_empty());
+        if has_images {
+            if let Some(vision_model) = &self.vision_model {
+                return vision_model;
+            }
+        }
+        &self.model
     }
 }
 
@@ -161,7 +177,7 @@ impl LlmProvider for OllamaProvider {
             })
             .collect();
         let body = OllamaChatRequest {
-            model: &self.model,
+            model: self.model_for(history),
             messages,
             stream: true,
             tools: tools
@@ -261,5 +277,56 @@ impl LlmProvider for OllamaProvider {
 
         let _ = tx.send(Ok(LlmEvent::Done)).await;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::ImageBlock;
+
+    fn provider(model: &str, vision_model: Option<&str>) -> OllamaProvider {
+        OllamaProvider::new(
+            &OllamaConfig {
+                base_url: "http://localhost:11434".to_string(),
+                model: model.to_string(),
+                think: None,
+                auto_serve: false,
+                vision_model: vision_model.map(str::to_string),
+            },
+            30,
+        )
+    }
+
+    fn image() -> ImageBlock {
+        ImageBlock {
+            media_type: "image/png".to_string(),
+            base64_data: "AA==".to_string(),
+        }
+    }
+
+    #[test]
+    fn sin_imagenes_usa_el_modelo_de_texto() {
+        let p = provider("qwen3:8b", Some("qwen2.5vl"));
+        let history = [ChatMessage::user("hola")];
+        assert_eq!(p.model_for(&history), "qwen3:8b");
+    }
+
+    #[test]
+    fn con_imagenes_usa_el_modelo_de_vision_si_esta_configurado() {
+        let p = provider("qwen3:8b", Some("qwen2.5vl"));
+        let mut msg = ChatMessage::user("mira esto");
+        msg.images.push(image());
+        let history = [msg];
+        assert_eq!(p.model_for(&history), "qwen2.5vl");
+    }
+
+    #[test]
+    fn con_imagenes_sin_vision_model_configurado_usa_el_modelo_de_texto() {
+        let p = provider("qwen3:8b", None);
+        let mut msg = ChatMessage::user("mira esto");
+        msg.images.push(image());
+        let history = [msg];
+        assert_eq!(p.model_for(&history), "qwen3:8b");
     }
 }
