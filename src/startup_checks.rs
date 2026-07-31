@@ -12,6 +12,18 @@ use crate::config::{Config, LlmProviderKind, TtsProviderKind};
 use crate::errors::{JarvisError, Result};
 
 pub async fn run(config: &Config) -> Result<()> {
+    run_inner(config, false).await
+}
+
+/// `skip_mic_check`: modo texto (`--text-mode`) no usa el micrófono en
+/// absoluto (STT ni se levanta), así que exigirlo en el preflight sería un
+/// falso bloqueo — el resto de los chequeos (Python, voz de TTS, LLM/API
+/// keys) sigue aplicando igual, TTS sigue activo en modo texto v1.
+pub async fn run_text_mode(config: &Config) -> Result<()> {
+    run_inner(config, true).await
+}
+
+async fn run_inner(config: &Config, skip_mic_check: bool) -> Result<()> {
     let mut problems = Vec::new();
 
     if let Err(e) = check_python_executable(config) {
@@ -20,8 +32,10 @@ pub async fn run(config: &Config) -> Result<()> {
         problems.push(e);
     }
 
-    if let Err(e) = check_input_device_present(config) {
-        problems.push(e);
+    if !skip_mic_check {
+        if let Err(e) = check_input_device_present(config) {
+            problems.push(e);
+        }
     }
 
     if let Err(e) = check_welcome_music(config) {

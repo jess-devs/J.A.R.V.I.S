@@ -124,6 +124,14 @@ INFO Jarvis listo. Escuchando...
 
 Hablá una frase en español y esperá la pausa,vas a ver la transcripción, la respuesta en streaming y escuchar el audio.
 
+#### Modo texto
+
+```bash
+cargo run --release -- --text-mode
+```
+
+Alternativa a hablarle: escribís el pedido y apretás Enter en vez de usar el micrófono. Jarvis sigue respondiendo por voz (TTS) y pidiendo confirmación de las acciones de riesgo — solo cambia cómo escucha, no cómo responde. Útil para debugging, ambientes ruidosos, o cuando no es práctico hablarle en voz alta. El preflight de este modo no exige micrófono, pero sigue necesitando el venv de Python y la voz de Piper (o un proveedor de TTS en la nube) para poder hablar las respuestas.
+
 ## Configuración (`config.yaml`)
 
 Todas las claves son opcionales:

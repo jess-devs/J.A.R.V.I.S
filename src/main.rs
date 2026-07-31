@@ -16,6 +16,7 @@ mod reminders;
 mod startup_checks;
 mod stt;
 mod text;
+mod text_mode;
 mod tools;
 mod tts;
 mod tui;
@@ -42,6 +43,12 @@ struct Cli {
     /// Sobreescribe el nivel de log de config.yaml (ej. "debug", "jarvis=trace").
     #[arg(long)]
     log_level: Option<String>,
+
+    /// Modo texto: lee pedidos por stdin en vez de por voz (STT). Jarvis
+    /// sigue respondiendo por TTS y pidiendo confirmación de voz-por-texto
+    /// para acciones de riesgo. Útil para debugging o ambientes ruidosos.
+    #[arg(long)]
+    text_mode: bool,
 }
 
 #[tokio::main]
@@ -98,13 +105,13 @@ async fn main() {
         None
     };
 
-    if let Err(e) = run(config).await {
+    if let Err(e) = run(config, cli.text_mode).await {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }
 
-async fn run(mut config: Config) -> errors::Result<()> {
+async fn run(mut config: Config, text_mode: bool) -> errors::Result<()> {
     // El Job Object y el handler de consola deben instalarse ANTES de crear
     // el Orchestrator: este spawnea los workers Python en su constructor, y
     // solo heredan la membresía del job si el proceso Jarvis ya es miembro
@@ -155,6 +162,17 @@ async fn run(mut config: Config) -> errors::Result<()> {
         );
 
         config.welcome.enabled = false;
+    }
+
+    if text_mode {
+        startup_checks::run_text_mode(&config).await?;
+        return tokio::select! {
+            r = text_mode::run(config) => r,
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Señal de interrupción recibida, cerrando...");
+                Ok(())
+            }
+        };
     }
 
     startup_checks::run(&config).await?;
