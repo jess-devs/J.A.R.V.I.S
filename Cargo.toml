@@ -41,7 +41,6 @@ walkdir = "2"
 scraper = "0.22"
 url = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
-windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_Security", "Win32_System_Com", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 base64 = "0.22"
 futures-util = "0.3"
@@ -50,3 +49,17 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 ratatui = "0.30.2"
 crossterm = "0.29.0"
 tracing-appender = "0.2.5"
+# Mouse/teclado simulado (mouse_move, mouse_click, media_control):
+# cross-platform (Windows/macOS/Linux X11) por diseño, así que va acá y no
+# en el target Windows-only de abajo. En Linux/Wayland puede no funcionar
+# sin soporte explícito del compositor (limitación conocida de enigo).
+enigo = "0.2"
+# Cliente MCP (Model Context Protocol): SDK oficial, en vez de implementar
+# JSON-RPC + negociación de capacidades a mano. Solo el transporte stdio
+# (proceso hijo local) por ahora — HTTP/SSE queda para una etapa posterior.
+rmcp = { version = "3", default-features = false, features = ["client", "transport-child-process", "which-command"] }
+
+# Solo se usa en Windows (Core Audio, Job Objects, SendInput histórico,
+# consola) — en otras plataformas ni se descarga ni se compila.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_Security", "Win32_System_Com", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
