@@ -6,6 +6,7 @@ mod errors;
 mod http;
 mod ipc;
 mod llm;
+mod mcp;
 mod memory;
 mod net_guard;
 mod orchestrator;

@@ -25,6 +25,10 @@ pub struct Config {
     pub welcome: WelcomeConfig,
     pub ui: UiConfig,
     pub log_level: String,
+    /// Servidores MCP externos a los que Jarvis se conecta como cliente
+    /// (complementa `create_tool`, no lo reemplaza — ver README). Vacío por
+    /// defecto: sin servidores configurados, sin cambios de comportamiento.
+    pub mcp: Vec<McpServerConfig>,
 }
 
 impl Default for Config {
@@ -42,8 +46,27 @@ impl Default for Config {
             welcome: WelcomeConfig::default(),
             ui: UiConfig::default(),
             log_level: "info".to_string(),
+            mcp: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct McpServerConfig {
+    /// Nombre corto del servidor, solo para logs/mensajes de error (no se
+    /// antepone a los nombres de tool salvo colisión, ver `src/mcp/`).
+    pub name: String,
+    /// Comando a ejecutar para levantar el servidor (stdio). Único
+    /// transporte soportado hoy — HTTP/SSE queda para una etapa posterior.
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: std::collections::HashMap<String, String>,
+    /// Nombres de tools de este server (tal como las expone, sin prefijo)
+    /// que se clasifican `Safe` en vez del default `Confirm`. Las tools MCP
+    /// nunca son `Code`: Jarvis no sabe de antemano qué tan destructiva es
+    /// una tool de un tercero, así que el techo de riesgo es `Confirm`.
+    pub trusted_tools: Vec<String>,
 }
 
 impl Config {

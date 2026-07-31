@@ -137,6 +137,7 @@ Todas las claves son opcionales:
 - **`audio`**: dispositivo de salida (`null` = default del sistema) y volumen.
 - **`pipeline`**: longitud mínima/máxima de las frases que se mandan a sintetizar.
 - **`agent`**: capa agéntica,activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, y sub-config de `files`/`apps`/`web`/`memory`/`translate`/`reminders`/`scripted_tools`. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
+- **`mcp`**: lista de servidores MCP externos a los que Jarvis se conecta como cliente (vacía por defecto). Complementa `create_tool`, no lo reemplaza. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`welcome`**: la escena de bienvenida disparada por doble aplauso,activar/desactivar, música, frase de saludo, volúmenes. Ver [Modo bienvenida](#modo-bienvenida-doble-aplauso).
 
 Guía completa de configuración: [`CONFIGURACION.md`](CONFIGURACION.md).
@@ -181,6 +182,17 @@ Cuando `agent.enabled: true` (el default), Jarvis dispone de un conjunto de herr
 Con `agent.confirm_mode: free` ("mano libre"), las acciones de riesgo **Confirmación** se ejecutan directo, sin preguntar. Las de riesgo **Código** siempre piden el código de aceptación, en cualquier modo — es la red de seguridad final y no se puede desactivar por config.
 
 La memoria persistente vive en `data/memory.db`. Las memorias recientes se inyectan en el prompt de cada turno, así que Jarvis "recuerda" sin necesitar `recall` para lo habitual. Ejemplo: decile "recuerda que mi cumpleaños es el 3 de marzo", reiniciá Jarvis, y preguntá "¿cuándo es mi cumpleaños?".
+
+### Servidores MCP (cliente)
+
+Además de las herramientas de arriba, Jarvis puede conectarse como **cliente MCP** (Model Context Protocol) a servidores externos ya existentes (Home Assistant, GitHub, Notion, calendarios, Slack, el servidor de referencia `@modelcontextprotocol/server-everything`, etc.), configurados en `mcp:` (`config.yaml`, vacío por defecto — ver [CONFIGURACION.md](CONFIGURACION.md#mcp)). Sus tools se pliegan al mismo registro y al mismo sistema de riesgo determinista que las de arriba: `Confirm` por defecto, o `Safe` si las marcás explícitamente en `trusted_tools`.
+
+Esto **no reemplaza** `create_tool`, lo complementa:
+
+- `create_tool` es para automatización personal instantánea: pedís algo por voz y queda disponible ese mismo turno, sin infraestructura previa. Es lo que conviene para "pegale a mi webhook casero" o una receta de PowerShell puntual.
+- Un servidor MCP es una integración curada y mantenida por terceros que resuelve autenticación OAuth, paginación y estado — cosas que una receta HTTP con placeholders no maneja bien. Es lo que conviene para integraciones complejas y de uso recurrente.
+
+La conexión a cada servidor es best-effort (transporte stdio, proceso hijo local): uno que falla al conectar solo genera un warning en el log, nunca bloquea el arranque de Jarvis.
 
 Para búsqueda de archivos instantánea sobre todo el disco, instalá [Everything](https://www.voidtools.com/) y apuntá `agent.files.everything_cli` a `es.exe`; si no, se usa un recorrido acotado de las carpetas en `agent.files.search_roots`.
 

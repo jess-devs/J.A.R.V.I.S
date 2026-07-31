@@ -360,6 +360,32 @@ Sub-secciones:
   como defensa en profundidad — igual que `agent.web.allow_private_network`
   pero para las recetas `http` de `create_tool`).
 
+## `mcp`
+
+Lista de servidores MCP (Model Context Protocol) externos a los que Jarvis
+se conecta como cliente — sus tools se pliegan al mismo `ToolRegistry` que
+las built-in y las de `create_tool`. Vacía por defecto (sin servidores, sin
+cambio de comportamiento). Complementa `create_tool`, no lo reemplaza: ver
+[Capacidades agénticas](README.md#capacidades-agénticas-herramientas) del
+README para la diferencia entre ambos.
+
+Cada entrada de la lista:
+
+| Clave | Qué hace |
+|---|---|
+| `name` | Nombre corto del servidor, solo para logs/mensajes de error. |
+| `command` | Comando a ejecutar para levantar el servidor (transporte stdio, proceso hijo local — es el único transporte soportado hoy, HTTP/SSE queda para más adelante). Se resuelve contra el PATH del sistema, así que sirve tanto una ruta absoluta como `npx`, `uvx`, etc. |
+| `args` | Argumentos para `command`. |
+| `env` | Variables de entorno extra para el proceso del servidor (ej. una API key que el servidor necesite — no la de Jarvis). |
+| `trusted_tools` | Nombres de tools de ese servidor (tal como las expone, sin prefijo) que se ejecutan sin pedir confirmación (`Safe`). Las tools MCP no confiadas son `Confirm` por defecto; ninguna tool MCP es `Code` — Jarvis no tiene forma de saber de antemano qué tan destructiva es una tool de un tercero, así que ese es el techo de riesgo. |
+
+La conexión es best-effort: un servidor que falla al conectar o listar
+tools solo genera un `warning` en el log y se ignora, nunca bloquea el
+arranque de Jarvis (a diferencia de los workers Python de STT/TTS, que sí
+son críticos). Si el nombre de una tool de un servidor MCP choca con una
+tool ya registrada (built-in, `scripted`, u otro servidor MCP), se descarta
+con un warning en vez de pisar la existente.
+
 ## `welcome`
 
 La escena de bienvenida disparada por doble aplauso (ver

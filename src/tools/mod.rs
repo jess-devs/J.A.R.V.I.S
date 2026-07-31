@@ -23,6 +23,7 @@ pub mod translate;
 pub mod volume;
 pub mod web;
 
+use std::collections::HashSet;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 
@@ -31,7 +32,7 @@ use serde_json::Value;
 
 use self::scripted_store::ScriptedToolStore;
 use crate::audio::MusicShared;
-use crate::config::{AgentConfig, ScriptedToolsConfig};
+use crate::config::{AgentConfig, McpServerConfig, ScriptedToolsConfig};
 use crate::errors::ToolError;
 use crate::llm::{ImageBlock, ToolSpec};
 use crate::memory::MemoryStore;
@@ -126,6 +127,7 @@ impl ToolRegistry {
         scripted_store: Arc<ScriptedToolStore>,
         music: Option<Arc<MusicShared>>,
         silence_flag: Arc<AtomicBool>,
+        mcp_servers: &[McpServerConfig],
     ) -> Self {
         let mut static_tools: Vec<Arc<dyn Tool>> = Vec::new();
         if cfg.enabled {
@@ -182,6 +184,15 @@ impl ToolRegistry {
             static_tools.push(Arc::new(silence::EnterSilenceMode {
                 flag: silence_flag,
             }));
+
+            if !mcp_servers.is_empty() {
+                let reserved: HashSet<String> = scripted::BUILTIN_NAMES
+                    .iter()
+                    .map(|s| s.to_string())
+                    .chain(static_tools.iter().map(|t| t.name().to_string()))
+                    .collect();
+                static_tools.extend(crate::mcp::discover_tools(mcp_servers, &reserved).await);
+            }
         }
 
         let registry = Self {

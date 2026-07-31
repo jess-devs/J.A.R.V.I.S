@@ -157,6 +157,7 @@ impl Orchestrator {
                 None
             },
             silence_requested.clone(),
+            &config.mcp,
         )
         .await;
         let echo_gate = Arc::new(Mutex::new(EchoGate::new(

@@ -512,6 +512,24 @@ agent:
 #
 #
 # ============================================================================
+# mcp — Servidores MCP externos (cliente). Vacío por defecto: complementa
+# create_tool, no lo reemplaza (ver README, sección "Capacidades agénticas").
+# Ejemplo (comentado):
+#
+# mcp:
+#   - name: "everything"
+#     command: "npx"
+#     args: ["-y", "@modelcontextprotocol/server-everything"]
+#     env: {}
+#     # Tools de este server que se ejecutan sin pedir confirmación
+#     # (default: Confirm para todas; nunca Code).
+#     trusted_tools: ["echo"]
+mcp: []
+# ============================================================================
+#
+#
+#
+# ============================================================================
 # welcome Modo bienvenida por doble aplauso
 #
 # Música + saludo + recordatorios/noticias.
