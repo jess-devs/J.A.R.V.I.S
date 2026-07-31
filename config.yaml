@@ -496,6 +496,10 @@ agent:
     max_page_chars: 4000
     # Tope de resultados de web_search.
     max_results: 5
+    # true = fetch_page puede descargar URLs que resuelven a IPs privadas/
+    # loopback/link-local (127.0.0.1, 192.168.x.x, etc). false = se
+    # rechazan (protección anti-SSRF).
+    allow_private_network: false
 
   #  Memoria persistente
   memory:

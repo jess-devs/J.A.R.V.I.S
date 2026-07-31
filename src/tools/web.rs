@@ -312,6 +312,9 @@ impl Tool for FetchPage {
         let page_url = required_str(&args, "url")?;
         url::Url::parse(page_url)
             .map_err(|_| ToolError::InvalidArgs(format!("URL inválida: {page_url}")))?;
+        if !self.cfg.allow_private_network {
+            crate::net_guard::ensure_public_host(page_url).await?;
+        }
 
         let response = self
             .client

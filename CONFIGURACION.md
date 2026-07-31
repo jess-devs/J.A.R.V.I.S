@@ -334,7 +334,12 @@ Sub-secciones:
   `open_app`/`close_app` entiendan nombres coloquiales ("navegador" en vez
   de "brave.exe").
 - **`web`**: `max_page_chars` (tope de caracteres de una página que se le
-  pasan al LLM con `fetch_page`), `max_results` (tope de `web_search`).
+  pasan al LLM con `fetch_page`), `max_results` (tope de `web_search`),
+  `allow_private_network` (`false` por defecto: `fetch_page` resuelve el
+  host antes de descargar y rechaza si apunta a una IP loopback, privada
+  o link-local — `127.0.0.1`, `192.168.x.x`, `10.x.x.x`, `169.254.x.x` —,
+  protección anti-SSRF para que una URL devuelta por una búsqueda no le dé
+  a Jarvis acceso a tu red local; poné `true` solo si sabés lo que hacés).
 - **`memory`**: `db_path` (SQLite de memoria persistente entre sesiones),
   `max_injected` (cuántas memorias recientes se inyectan en el prompt de
   cada turno, para que Jarvis las recuerde sin tener que llamar a `recall`
@@ -346,10 +351,14 @@ Sub-secciones:
   de recordatorios pendientes simultáneos).
 - **`scripted_tools`**: `db_path` (SQLite de tools personalizadas creadas
   con `create_tool`), `max_tools` (tope de tools personalizadas
-  simultáneas), `http_timeout_secs` (timeout de las recetas `http`), y la
-  lista de hosts permitidos para esas recetas, una tool personalizada de
-  tipo `http` solo puede pegarle a un host de esa lista, para que
-  `create_tool` no se convierta en un proxy HTTP arbitrario.
+  simultáneas), `http_timeout_secs` (timeout de las recetas `http`), la
+  lista de hosts permitidos para esas recetas (`allowed_hosts`, una tool
+  personalizada de tipo `http` solo puede pegarle a un host de esa lista;
+  vacía por defecto = sin restricción de lista blanca), y
+  `allow_private_network` (`false` por defecto: además de la lista blanca,
+  se rechaza si el host resuelve a una IP privada/loopback/link-local,
+  como defensa en profundidad — igual que `agent.web.allow_private_network`
+  pero para las recetas `http` de `create_tool`).
 
 ## `welcome`
 

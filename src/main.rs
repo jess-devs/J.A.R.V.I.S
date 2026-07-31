@@ -7,6 +7,7 @@ mod http;
 mod ipc;
 mod llm;
 mod memory;
+mod net_guard;
 mod orchestrator;
 mod pipeline;
 mod platform;

@@ -101,6 +101,7 @@ pub struct ScriptedTool {
     def: ScriptedToolDef,
     http_client: reqwest::Client,
     allowed_hosts: Vec<String>,
+    allow_private_network: bool,
 }
 
 impl ScriptedTool {
@@ -109,6 +110,7 @@ impl ScriptedTool {
             def,
             http_client: crate::http::client(Duration::from_secs(cfg.http_timeout_secs)),
             allowed_hosts: cfg.allowed_hosts.clone(),
+            allow_private_network: cfg.allow_private_network,
         }
     }
 
@@ -166,6 +168,9 @@ impl Tool for ScriptedTool {
             } => {
                 let url = substitute(url_template, &args)?;
                 self.check_host_allowed(&url)?;
+                if !self.allow_private_network {
+                    crate::net_guard::ensure_public_host(&url).await?;
+                }
                 let method = reqwest::Method::from_bytes(method.to_uppercase().as_bytes())
                     .map_err(|_| {
                         ToolError::InvalidArgs(format!("método HTTP inválido: {method}"))

@@ -814,6 +814,11 @@ pub struct ScriptedToolsConfig {
     pub http_timeout_secs: u64,
     /// Hosts permitidos para recetas HTTP; vacío = sin restricción.
     pub allowed_hosts: Vec<String>,
+    /// `true` = las recetas HTTP pueden apuntar a IPs privadas/loopback/
+    /// link-local (ej. para pegarle a Home Assistant en la LAN). `false`
+    /// (default) = se rechazan como defensa en profundidad, incluso si el
+    /// host está en `allowed_hosts`.
+    pub allow_private_network: bool,
 }
 
 impl Default for ScriptedToolsConfig {
@@ -823,6 +828,7 @@ impl Default for ScriptedToolsConfig {
             max_tools: 20,
             http_timeout_secs: 15,
             allowed_hosts: Vec::new(),
+            allow_private_network: false,
         }
     }
 }
@@ -853,6 +859,10 @@ pub struct WebToolConfig {
     pub max_page_chars: usize,
     pub max_results: usize,
     pub user_agent: String,
+    /// `true` = `fetch_page` puede descargar URLs que resuelven a IPs
+    /// privadas/loopback/link-local. `false` (default) = se rechazan
+    /// (protección anti-SSRF).
+    pub allow_private_network: bool,
 }
 
 impl Default for WebToolConfig {
@@ -863,6 +873,7 @@ impl Default for WebToolConfig {
             user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
                 .to_string(),
+            allow_private_network: false,
         }
     }
 }
