@@ -1,5 +1,6 @@
 mod agent;
 mod audio;
+mod audit;
 mod config;
 mod echo_gate;
 mod errors;
@@ -149,6 +150,10 @@ async fn run(mut config: Config, text_mode: bool) -> errors::Result<()> {
         .ok();
     #[cfg(unix)]
     let mut console_shutdown_rx: Option<tokio::sync::mpsc::Receiver<()>> = None;
+
+    if config.agent.audit.enabled {
+        audit::init(&config.agent.audit.path);
+    }
 
     llm::model_select::resolve(&mut config).await;
 

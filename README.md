@@ -144,7 +144,7 @@ Todas las claves son opcionales:
 - **`tts`**: `provider: piper | elevenlabs | cartesia`, ruta a la voz de Piper o config de ElevenLabs/Cartesia (`voice_id`, `output_format`).
 - **`audio`**: dispositivo de salida (`null` = default del sistema) y volumen.
 - **`pipeline`**: longitud mínima/máxima de las frases que se mandan a sintetizar.
-- **`agent`**: capa agéntica,activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, y sub-config de `files`/`apps`/`web`/`memory`/`translate`/`reminders`/`scripted_tools`. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
+- **`agent`**: capa agéntica,activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, y sub-config de `files`/`apps`/`web`/`memory`/`translate`/`reminders`/`scripted_tools`/`audit`. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`mcp`**: lista de servidores MCP externos a los que Jarvis se conecta como cliente (vacía por defecto). Complementa `create_tool`, no lo reemplaza. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`welcome`**: la escena de bienvenida disparada por doble aplauso,activar/desactivar, música, frase de saludo, volúmenes. Ver [Modo bienvenida](#modo-bienvenida-doble-aplauso).
 

@@ -977,6 +977,11 @@ impl Orchestrator {
     /// TODO tool call recibe siempre un tool_result (aunque sea "cancelado")
     /// — OpenAI/Anthropic lo exigen y a Ollama le da coherencia.
     fn cancel_pending(&mut self, pending: PendingConfirmation, reason: &str) {
+        crate::audit::record_confirmation_denied(
+            &pending.call.name,
+            pending.requires_code,
+            reason,
+        );
         self.history.push(ChatMessage::tool_result(
             &pending.call.id,
             &pending.call.name,

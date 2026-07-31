@@ -359,7 +359,13 @@ Sub-secciones:
   se rechaza si el host resuelve a una IP privada/loopback/link-local,
   como defensa en profundidad — igual que `agent.web.allow_private_network`
   pero para las recetas `http` de `create_tool`).
-
+- **`audit`**: `enabled` (`true` por defecto: cada ejecución de una tool de
+  riesgo `Confirm`/`Code`, y cada confirmación denegada/expirada, queda
+  registrada como una línea JSON en `path` — independiente de `log_level`,
+  para que un review de qué se ejecutó y con qué confirmación no dependa de
+  tener `debug` activado), `path` (ruta del archivo, `data/audit.log` por
+  defecto, se crea si no existe; formato JSON Lines: una línea = un evento,
+  con `event` en `tool_executed` o `confirmation_denied`).
 - **`speaker_verification`**: `enabled` (`false` por defecto). Modo sombra
   del ítem 4 de MEJORAS.md — hoy el nivel de riesgo "Confirmación" acepta
   un sí/no de *cualquier* voz (Rust busca la frase en la transcripción, no

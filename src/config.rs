@@ -724,6 +724,7 @@ pub struct AgentConfig {
     pub translate: TranslateConfig,
     pub reminders: RemindersConfig,
     pub scripted_tools: ScriptedToolsConfig,
+    pub audit: AuditConfig,
     pub speaker_verification: SpeakerVerificationConfig,
 }
 
@@ -786,6 +787,7 @@ impl Default for AgentConfig {
             translate: TranslateConfig::default(),
             reminders: RemindersConfig::default(),
             scripted_tools: ScriptedToolsConfig::default(),
+            audit: AuditConfig::default(),
             speaker_verification: SpeakerVerificationConfig::default(),
         }
     }
@@ -806,6 +808,26 @@ pub struct SpeakerVerificationConfig {
     /// `workers/`) — si falta, el worker loguea un aviso y sigue andando
     /// igual que con esto desactivado.
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct AuditConfig {
+    /// `true` (default) = cada ejecución de una tool de riesgo `Confirm`/
+    /// `Code` (y cada confirmación denegada/expirada) queda registrada en
+    /// `path` como una línea JSON, independiente de `log_level` general.
+    pub enabled: bool,
+    /// Ruta del archivo de auditoría (JSON Lines, se crea si no existe).
+    pub path: PathBuf,
+}
+
+impl Default for AuditConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            path: PathBuf::from("data/audit.log"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

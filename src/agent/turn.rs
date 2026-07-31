@@ -271,6 +271,7 @@ pub async fn execute_and_record(
 ) {
     let timeout_secs = config.agent.tool_timeout_secs;
     let mut succeeded = false;
+    let mut risk_level = None;
     let (result, images) = match registry.get(&call.name) {
         None => (
             format!(
@@ -280,6 +281,7 @@ pub async fn execute_and_record(
             Vec::new(),
         ),
         Some(tool) => {
+            risk_level = Some(tool.assess_risk(&call.arguments));
             ui.set(VisualState::ToolRunning(ToolCategory::from_tool_name(
                 &call.name,
             )));
@@ -312,6 +314,18 @@ pub async fn execute_and_record(
         }
     }
     tracing::info!(tool = %call.name, args = %call.arguments, result = %result, "herramienta ejecutada");
+    match risk_level {
+        Some(RiskLevel::Confirm) => crate::audit::record_tool(
+            &call.name,
+            "confirm",
+            config.agent.confirm_mode == ConfirmMode::Free,
+            succeeded,
+        ),
+        Some(RiskLevel::Code) => {
+            crate::audit::record_tool(&call.name, "code", false, succeeded)
+        }
+        Some(RiskLevel::Safe) | None => {}
+    }
     history.push(ChatMessage::tool_result_with_images(
         &call.id, &call.name, result, images,
     ));
