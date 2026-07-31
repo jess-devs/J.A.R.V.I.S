@@ -24,6 +24,17 @@ pub struct FiltersInit {
     pub max_compression_ratio: f32,
 }
 
+/// Espeja `SpeakerVerificationConfig` (src/config.rs) — modo sombra del
+/// ítem 4 de MEJORAS.md: si `enabled`, el motor nativo calcula (en un hilo
+/// aparte, sin sumar latencia al turno) la similitud coseno de cada frase
+/// contra la voz enrolada con `--enroll-voice`, y la manda como
+/// `speaker_similarity` para quedar logueada — todavía no gatea ninguna
+/// confirmación.
+#[derive(Debug, Serialize)]
+pub struct SpeakerVerificationInit {
+    pub enabled: bool,
+}
+
 /// Espeja los campos de `BargeInConfig` que necesita el motor nativo para
 /// decidir cuándo emitir `speech_confirmed` y con qué umbral de VAD entrar
 /// en "recording" mientras Jarvis habla. La política de a qué modo (voz
@@ -58,6 +69,7 @@ pub enum SttInMessage {
         filters: FiltersInit,
         barge_in: BargeInInit,
         clap: ClapInit,
+        speaker_verification: SpeakerVerificationInit,
         language: String,
         model: String,
         device: String,
@@ -184,5 +196,15 @@ pub enum SttOutMessage {
     FatalError {
         code: String,
         message: String,
+    },
+    /// Modo sombra del ítem 4 de MEJORAS.md (ver `SpeakerVerificationInit`):
+    /// similitud coseno de la última frase contra la voz enrolada. Llega
+    /// asíncrono, después del `Transcript` correspondiente (se calcula en
+    /// un hilo aparte para no sumarle latencia al turno) — hoy solo se
+    /// loguea, no gatea ninguna confirmación.
+    SpeakerSimilarity {
+        similarity: f32,
+        #[allow(dead_code)]
+        text_preview: String,
     },
 }

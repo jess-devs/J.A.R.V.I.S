@@ -360,6 +360,22 @@ Sub-secciones:
   como defensa en profundidad — igual que `agent.web.allow_private_network`
   pero para las recetas `http` de `create_tool`).
 
+- **`speaker_verification`**: `enabled` (`false` por defecto). Modo sombra
+  del ítem 4 de MEJORAS.md — hoy el nivel de riesgo "Confirmación" acepta
+  un sí/no de *cualquier* voz (Rust busca la frase en la transcripción, no
+  valida quién habló). Con `enabled: true`, el motor STT nativo calcula (en
+  un hilo aparte, sin sumarle latencia al turno) la similitud coseno de
+  cada frase contra una voz de referencia enrolada una vez con `python
+  workers/stt_worker.py --enroll-voice`, y la manda a Rust, que la
+  **loguea** (`tracing::info!`) — **todavía no rechaza ni gatea ninguna
+  confirmación con esto**, es una etapa de recolección de datos reales de
+  umbral antes de aplicarlo a algo relevante a seguridad (ver el ítem 4 v2,
+  pendiente, en MEJORAS.md). Requiere el extra opcional `speechbrain`
+  (`pip install -r workers/requirements-speaker.txt` en el venv de
+  `workers/`, no instalado por defecto) — si falta o no enrolaste tu voz
+  todavía, el worker loguea un aviso al arrancar y sigue funcionando igual
+  que con esto desactivado.
+
 ## `mcp`
 
 Lista de servidores MCP (Model Context Protocol) externos a los que Jarvis

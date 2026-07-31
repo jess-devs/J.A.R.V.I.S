@@ -507,6 +507,17 @@ agent:
     db_path: "data/memory.db"
     # Memorias recientes inyectadas en el prompt de cada turno.
     max_injected: 12
+
+  #  Verificación de hablante (modo sombra, ítem 4 v1 de MEJORAS.md)
+  speaker_verification:
+    # false (default): sin cambios de comportamiento. true: el motor STT
+    # nativo calcula la similitud de voz de cada frase contra la referencia
+    # enrolada con `python workers/stt_worker.py --enroll-voice`, y la
+    # loguea — todavía NO se usa para gatear ninguna confirmación. Requiere
+    # el extra opcional speechbrain (pip install -r
+    # workers/requirements-speaker.txt) y haber enrolado tu voz al menos
+    # una vez.
+    enabled: false
 # ============================================================================
 #
 #

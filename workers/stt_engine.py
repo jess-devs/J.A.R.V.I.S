@@ -97,6 +97,21 @@ class _Engine:
         clap_cfg = init_msg.get("clap") or {}
         self.clap_detector = ClapDetector(clap_cfg)
 
+        speaker_cfg = init_msg.get("speaker_verification") or {}
+        self.speaker_verifier = None
+        if speaker_cfg.get("enabled"):
+            from speaker_verification import SpeakerVerifier
+
+            verifier = SpeakerVerifier()
+            if verifier.enrolled:
+                self.speaker_verifier = verifier
+            else:
+                print(
+                    "[speaker_verification] agent.speaker_verification.enabled=true pero "
+                    "no hay voz enrolada; corré: python workers/stt_worker.py --enroll-voice",
+                    flush=True,
+                )
+
         self.language = init_msg.get("language", "es")
         self.initial_prompt = init_msg.get("initial_prompt") or None
         self.input_device_index = init_msg.get("input_device_index")
@@ -395,6 +410,28 @@ class _Engine:
                         "meta": meta,
                     }
                 )
+                if self.speaker_verifier is not None:
+                    self._check_speaker_async(audio, text)
+
+    def _check_speaker_async(self, audio: np.ndarray, text: str) -> None:
+        """Calcula la similitud de hablante en un hilo aparte (modo sombra,
+        ítem 4 v1 de MEJORAS.md): no debe sumarle latencia al turno de voz,
+        así que el `transcript` ya salió antes de llamar esto — el
+        resultado llega después, como mensaje aparte, solo para logueo."""
+        verifier = self.speaker_verifier
+
+        def _run() -> None:
+            similarity = verifier.similarity(audio)
+            if similarity is not None:
+                ipc.send(
+                    {
+                        "type": "speaker_similarity",
+                        "similarity": round(similarity, 3),
+                        "text_preview": text[:40],
+                    }
+                )
+
+        threading.Thread(target=_run, daemon=True, name="speaker-verify").start()
 
     def watchdog_loop(
         self, shutdown: threading.Event, stuck_state_timeout: float

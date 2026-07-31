@@ -1,0 +1,8 @@
+# Extra opcional para agent.speaker_verification.enabled (ítem 4 v1 de
+# MEJORAS.md, modo sombra). No se instala por defecto — solo hace falta si
+# activás esa clave en config.yaml. torch ya lo trae requirements.txt.
+#
+# Nota Windows: instalar esto pide crear un venv, igual que
+# requirements.txt (ver workers/README.md); no necesita compilador C/C++
+# (a diferencia de resemblyzer, que fue evaluado y descartado por eso).
+speechbrain>=1.0,<2

@@ -7,12 +7,13 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use crate::config::{BargeInConfig, SttConfig, WorkersConfig};
+use crate::config::{BargeInConfig, SpeakerVerificationConfig, SttConfig, WorkersConfig};
 use crate::errors::WorkerError;
 use crate::ipc::{WorkerFrame, WorkerHandle};
 
 pub use protocol::{
-    BargeInInit, ClapInit, FiltersInit, SttInMessage, SttOutMessage, TranscriptMeta, VadInit,
+    BargeInInit, ClapInit, FiltersInit, SpeakerVerificationInit, SttInMessage, SttOutMessage,
+    TranscriptMeta, VadInit,
 };
 
 pub enum SttEvent {
@@ -48,6 +49,11 @@ pub enum SttEvent {
         dbfs: f32,
     },
     WorkerDied,
+    /// Modo sombra del ítem 4 de MEJORAS.md — ver
+    /// `SpeakerVerificationInit`/`SttOutMessage::SpeakerSimilarity`.
+    SpeakerSimilarity {
+        similarity: f32,
+    },
 }
 
 /// Modo del motor STT nativo (ver `workers/stt_engine.py::ModeState`). El
@@ -85,6 +91,7 @@ impl SttWorker {
         workers: &WorkersConfig,
         stt: &SttConfig,
         barge_in: &BargeInConfig,
+        speaker_verification: &SpeakerVerificationConfig,
     ) -> Result<Self, WorkerError> {
         let (handle, mut frames) =
             WorkerHandle::spawn("stt", &workers.python_executable, &workers.stt_script).await?;
@@ -114,6 +121,9 @@ impl SttWorker {
                 barge_in: BargeInInit {
                     min_speech_ms: barge_in.min_speech_ms,
                     vad_threshold_while_speaking: barge_in.echo_guard.vad_threshold_while_speaking,
+                },
+                speaker_verification: SpeakerVerificationInit {
+                    enabled: speaker_verification.enabled,
                 },
                 clap: ClapInit {
                     min_peak_dbfs: stt.clap.min_peak_dbfs,
@@ -239,6 +249,9 @@ impl SttWorker {
                         Ok(SttOutMessage::FatalError { code, message }) => {
                             tracing::error!(code = %code, message = %message, "error fatal del worker STT");
                             return Some(SttEvent::WorkerDied);
+                        }
+                        Ok(SttOutMessage::SpeakerSimilarity { similarity, .. }) => {
+                            return Some(SttEvent::SpeakerSimilarity { similarity })
                         }
                         Ok(_) => continue,
                         Err(e) => {

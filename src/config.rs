@@ -724,6 +724,7 @@ pub struct AgentConfig {
     pub translate: TranslateConfig,
     pub reminders: RemindersConfig,
     pub scripted_tools: ScriptedToolsConfig,
+    pub speaker_verification: SpeakerVerificationConfig,
 }
 
 impl Default for AgentConfig {
@@ -785,8 +786,26 @@ impl Default for AgentConfig {
             translate: TranslateConfig::default(),
             reminders: RemindersConfig::default(),
             scripted_tools: ScriptedToolsConfig::default(),
+            speaker_verification: SpeakerVerificationConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SpeakerVerificationConfig {
+    /// `false` (default): sin cambios respecto al comportamiento actual.
+    /// `true`: el motor STT nativo calcula, en un hilo aparte (sin sumar
+    /// latencia al turno), la similitud coseno de cada frase contra la voz
+    /// enrolada con `python workers/stt_worker.py --enroll-voice`, y la
+    /// loguea. Modo sombra (ítem 4 v1 de MEJORAS.md): todavía NO se usa
+    /// para gatear ninguna confirmación, solo para juntar datos reales de
+    /// umbral antes de aplicar nada de esto a algo relevante a seguridad.
+    /// Requiere el extra opcional `speechbrain`
+    /// (`pip install -r workers/requirements-speaker.txt` en el venv de
+    /// `workers/`) — si falta, el worker loguea un aviso y sigue andando
+    /// igual que con esto desactivado.
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]

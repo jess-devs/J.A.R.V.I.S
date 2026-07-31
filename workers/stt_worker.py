@@ -5,7 +5,7 @@ respaldo, `engine: realtimestt` en config.yaml).
 Protocolo (ver README.md de este directorio):
   Rust -> Python (stdin):  init | mute | unmute | shutdown
   Python -> Rust (stdout): ready | transcript | error | fatal_error
-  (motor nativo, además):  vad_start | vad_end | discarded
+  (motor nativo, además):  vad_start | vad_end | discarded | speaker_similarity
 
 Con el motor nativo, "mute"/"unmute" no apagan el micrófono físico (PyAudio
 no lo permite tan barato como RealtimeSTT.set_microphone) sino que activan
@@ -24,6 +24,10 @@ impriman donde el usuario los puede ver):
   python stt_worker.py --list-devices          enumera dispositivos de entrada de PyAudio
   python stt_worker.py --calibrate [--device N] vúmetro en vivo del RMS del dispositivo
   python stt_worker.py --test-clap [--device N] RMS/ZCR en vivo + aviso de aplauso/doble aplauso
+  python stt_worker.py --enroll-voice [--device N] [--seconds N]
+                                                graba tu voz y guarda su embedding de
+                                                referencia para agent.speaker_verification
+                                                (modo sombra, ver CONFIGURACION.md)
 """
 
 import os
@@ -102,6 +106,92 @@ def _cli_arg(flag: str) -> str | None:
         if idx + 1 < len(sys.argv):
             return sys.argv[idx + 1]
     return None
+
+
+def _cli_enroll_voice() -> None:
+    """Graba unos segundos de voz y guarda su embedding como referencia
+    para `agent.speaker_verification` (ítem 4 v1 de MEJORAS.md, modo
+    sombra — ver README/CONFIGURACION.md). Requiere el extra opcional
+    `speechbrain` (`pip install -r workers/requirements-speaker.txt`)."""
+    import numpy as np
+    import pyaudio
+
+    from speaker_verification import SpeakerVerifier
+
+    device_index = None
+    if "--device" in sys.argv:
+        device_index = int(sys.argv[sys.argv.index("--device") + 1])
+    seconds = float(_cli_arg("--seconds") or 5.0)
+
+    sample_rate = 16000
+    frame = 512
+
+    pa = pyaudio.PyAudio()
+    info = (
+        pa.get_device_info_by_index(device_index)
+        if device_index is not None
+        else pa.get_default_input_device_info()
+    )
+    resolved_index = int(info["index"])
+    native_rate = int(info.get("defaultSampleRate", sample_rate))
+    try:
+        pa.is_format_supported(
+            sample_rate,
+            input_device=resolved_index,
+            input_channels=1,
+            input_format=pyaudio.paInt16,
+        )
+        rate = sample_rate
+    except ValueError:
+        rate = native_rate
+    decimate = rate != sample_rate
+
+    stream = pa.open(
+        format=pyaudio.paInt16,
+        channels=1,
+        rate=rate,
+        input=True,
+        input_device_index=resolved_index,
+        frames_per_buffer=frame,
+    )
+    print(
+        f"Grabando {seconds:.0f}s desde '{info['name']}' para enrolar tu voz. "
+        "Hablá normal, una o dos frases."
+    )
+    n_frames = max(1, int(seconds * rate / frame))
+    chunks = []
+    try:
+        for _ in range(n_frames):
+            raw = stream.read(frame, exception_on_overflow=False)
+            chunks.append(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
+    finally:
+        stream.stop_stream()
+        stream.close()
+        pa.terminate()
+
+    audio = np.concatenate(chunks)
+    if decimate:
+        from scipy.signal import resample
+
+        audio = resample(audio, int(len(audio) * sample_rate / rate)).astype(np.float32)
+
+    print(
+        "Calculando embedding de referencia (puede tardar la primera vez, "
+        "descarga el modelo)..."
+    )
+    verifier = SpeakerVerifier()
+    if verifier.enroll(audio):
+        print(
+            f"Listo: voz de referencia guardada en {verifier.embedding_path}. "
+            "Activá agent.speaker_verification.enabled en config.yaml para que el worker "
+            "calcule speaker_similarity en cada frase (modo sombra: todavía no bloquea nada)."
+        )
+    else:
+        print(
+            "No se pudo calcular el embedding: ¿está instalado el extra opcional? "
+            "pip install -r workers/requirements-speaker.txt"
+        )
+        sys.exit(1)
 
 
 def _cli_test_clap() -> None:
@@ -216,11 +306,18 @@ def _cli_test_clap() -> None:
         pa.terminate()
 
 
-if len(sys.argv) > 1 and sys.argv[1] in ("--list-devices", "--calibrate", "--test-clap"):
+if len(sys.argv) > 1 and sys.argv[1] in (
+    "--list-devices",
+    "--calibrate",
+    "--test-clap",
+    "--enroll-voice",
+):
     if sys.argv[1] == "--list-devices":
         _cli_list_devices()
     elif sys.argv[1] == "--calibrate":
         _cli_calibrate()
+    elif sys.argv[1] == "--enroll-voice":
+        _cli_enroll_voice()
     else:
         _cli_test_clap()
     sys.exit(0)

@@ -121,7 +121,13 @@ pub struct Orchestrator {
 
 impl Orchestrator {
     pub async fn new(config: Config, ui: UiState) -> Result<Self> {
-        let stt = SttWorker::spawn(&config.workers, &config.stt, &config.barge_in).await?;
+        let stt = SttWorker::spawn(
+            &config.workers,
+            &config.stt,
+            &config.barge_in,
+            &config.agent.speaker_verification,
+        )
+        .await?;
         let llm_provider = llm::build_provider(&config)?;
         let tts_provider = tts::build_provider(&config).await?;
         let player = AudioPlayer::new(
@@ -446,6 +452,11 @@ impl Orchestrator {
                 SttEvent::WorkerDied => {
                     self.restart_stt_or_die().await?;
                 }
+                SttEvent::SpeakerSimilarity { similarity } => {
+                    // Modo sombra (ítem 4 v1 de MEJORAS.md): solo se loguea,
+                    // todavía no gatea ninguna confirmación.
+                    tracing::info!(similarity, "verificación de hablante (modo sombra)");
+                }
             }
         }
         Ok(())
@@ -501,6 +512,7 @@ impl Orchestrator {
             &self.config.workers,
             &self.config.stt,
             &self.config.barge_in,
+            &self.config.agent.speaker_verification,
         )
         .await?;
         tracing::info!("worker de STT reiniciado, Jarvis sigue escuchando");
@@ -1179,6 +1191,10 @@ fn classify_barge_in_event(
         // el lock de `echo_gate`); este brazo queda por exhaustividad.
         SttEvent::Level { .. } => BargeInAction::Ignore,
         SttEvent::WorkerDied => BargeInAction::Ignore,
+        // Modo sombra (ítem 4 v1 de MEJORAS.md): telemetría pura, no afecta
+        // la decisión de barge-in. El logueo pasa por el loop principal
+        // (`Orchestrator::run`), acá solo importa la clasificación.
+        SttEvent::SpeakerSimilarity { .. } => BargeInAction::Ignore,
     }
 }
 
