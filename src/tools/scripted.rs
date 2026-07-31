@@ -34,6 +34,7 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "find_files",
     "open_file",
     "run_powershell",
+    "run_shell",
     "get_volume",
     "set_volume",
     "web_search",

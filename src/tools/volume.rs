@@ -1,5 +1,9 @@
 //! Volumen maestro de Windows vía Core Audio (`IAudioEndpointVolume`).
-//! Acción reversible al instante → `Safe`, sin confirmación.
+//! Acción reversible al instante → `Safe`, sin confirmación. En Unix
+//! todavía no está implementado (el control de volumen del sistema varía
+//! demasiado entre PulseAudio/PipeWire/ALSA/CoreAudio para una única
+//! implementación simple; queda para una etapa posterior, ver MEJORAS.md
+//! ítem 1) — `get_volume`/`set_volume` devuelven un error explicativo.
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -8,6 +12,7 @@ use crate::errors::ToolError;
 
 use super::{RiskLevel, Tool, ToolOutput};
 
+#[cfg(windows)]
 /// Ejecuta `f` sobre el endpoint de volumen del dispositivo de salida por
 /// defecto, con COM inicializado en un hilo bloqueante.
 async fn with_endpoint_volume<T, F>(f: F) -> Result<T, ToolError>
@@ -46,6 +51,13 @@ where
     .map_err(|e| ToolError::Execution(e.to_string()))?
 }
 
+#[cfg(unix)]
+fn not_implemented_on_unix() -> ToolError {
+    ToolError::Execution(
+        "el control de volumen del sistema todavía no está implementado en este SO".to_string(),
+    )
+}
+
 pub struct GetVolume;
 
 #[async_trait]
@@ -71,6 +83,7 @@ impl Tool for GetVolume {
         "consultar el volumen".to_string()
     }
 
+    #[cfg(windows)]
     async fn execute(&self, _args: Value) -> Result<ToolOutput, ToolError> {
         let (level, muted) = with_endpoint_volume(|v| unsafe {
             let level = v.GetMasterVolumeLevelScalar()?;
@@ -84,6 +97,11 @@ impl Tool for GetVolume {
         } else {
             format!("El volumen está en {pct}%.")
         }))
+    }
+
+    #[cfg(unix)]
+    async fn execute(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+        Err(not_implemented_on_unix())
     }
 }
 
@@ -124,6 +142,7 @@ impl Tool for SetVolume {
         format!("poner el volumen al {pct} por ciento")
     }
 
+    #[cfg(windows)]
     async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let pct = args
             .get("percent")
@@ -138,5 +157,10 @@ impl Tool for SetVolume {
         })
         .await?;
         Ok(ToolOutput::text(format!("Volumen ajustado al {pct}%.")))
+    }
+
+    #[cfg(unix)]
+    async fn execute(&self, _args: Value) -> Result<ToolOutput, ToolError> {
+        Err(not_implemented_on_unix())
     }
 }

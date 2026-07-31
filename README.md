@@ -24,6 +24,11 @@ Ver [`workers/README.md`](workers/README.md) para detalle del protocolo entre Ru
   - **[Ollama](https://ollama.com)** instalado y corriendo (para el modo LLM local, que es el default).
     - *Alternativa :* [LM Studio](https://lmstudio.ai) con su servidor local activado (`llm.provider: lmstudio`).
 - Un micrófono y parlantes/auriculares.
+- **Solo Linux**: compilador de C + headers de dbus/X11 (los pide
+  `rusqlite`, y `xcap`/`enigo` para `take_screenshot`/`mouse_move`/
+  `media_control`). En Debian/Ubuntu: `sudo apt install build-essential pkg-config libdbus-1-dev libx11-dev libxdo-dev libxtst-dev libxext-dev`.
+  Verificado en WSL/Ubuntu 26.04 — soporte Linux/Mac todavía en desarrollo,
+  ver [Estado del proyecto](#estado-del-proyecto).
 
 ## Instalación
 
@@ -151,8 +156,8 @@ Cuando `agent.enabled: true` (el default), Jarvis dispone de un conjunto de herr
 | `close_app` | Cierra los procesos de una app. | confirmación |
 | `open_url` | Abre una URL en el navegador por defecto. | |
 | `find_files` / `open_file` | Busca archivos por nombre y los abre con su app por defecto. | |
-| `run_powershell` | Ejecuta un comando de PowerShell. | confirmación / código |
-| `get_volume` / `set_volume` | Consulta y ajusta el volumen maestro. | |
+| `run_powershell` (Windows) / `run_shell` (Linux/Mac) | Ejecuta un comando de PowerShell o de shell (`sh -c`) según el SO. | confirmación / código |
+| `get_volume` / `set_volume` | Consulta y ajusta el volumen maestro. Solo Windows por ahora. | |
 | `media_control` | Play/pausa, siguiente y anterior en la sesión de medios activa del sistema (Spotify, navegador, etc.). | |
 | `take_screenshot` | Captura la pantalla actual. | confirmación |
 | `mouse_move` | Mueve el cursor a una coordenada. | |
@@ -267,6 +272,10 @@ El `system_prompt` por defecto le pide al modelo respuestas breves (1-2 oracione
 - [x] Modo nube
 - [x] Modo agéntico
 - [x] Modo bienvenida
-- [ ] Testeo en Linux/Mac
+- [ ] Testeo en Linux/Mac (`cargo build`/`cargo test` ya verificados en
+      Linux real —WSL/Ubuntu 26.04—, 0 warnings, todos los tests relevantes
+      pasan; falta correr la app completa —STT/TTS/Ollama— ahí y probar en
+      macOS. `get_volume`/`set_volume` y el escaneo de accesos directos de
+      `open_app` siguen siendo Windows-only)
 - [ ] Aplicación de escritorio nativa para Windows/Linux/Mac
 - [ ] Ejecución al arranque del equipo, Jarvis en segundo plano durante el uso de la PC

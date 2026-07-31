@@ -113,6 +113,14 @@ async fn run(mut config: Config) -> errors::Result<()> {
     // 0, antes de que `main` pueda imprimir el error que `run` retorna. Al
     // olvidarlo, el kernel lo cierra recién cuando el proceso termina, que
     // es el único momento en el que debe arrastrar a los workers.
+    //
+    // Job Object y handler de consola son conceptos específicos de Windows
+    // sin equivalente instalado todavía en Unix (el equivalente real sería
+    // un grupo de procesos vía `setsid`/`killpg`, ver MEJORAS.md ítem 1
+    // Stage C) — en Unix, Ctrl+C ya se maneja más abajo vía
+    // `tokio::signal::ctrl_c()`, así que el arranque sigue andando sin
+    // ninguna de las dos garantías extra.
+    #[cfg(windows)]
     match ipc::job_object::JobObject::create_and_assign_current_process() {
         Ok(job) => std::mem::forget(job),
         Err(e) => {
@@ -123,11 +131,14 @@ async fn run(mut config: Config) -> errors::Result<()> {
         }
     }
 
+    #[cfg(windows)]
     let mut console_shutdown_rx = ipc::console_handler::install()
         .map_err(
             |e| tracing::warn!(error = %e, "no se pudo instalar el handler de cierre de consola"),
         )
         .ok();
+    #[cfg(unix)]
+    let mut console_shutdown_rx: Option<tokio::sync::mpsc::Receiver<()>> = None;
 
     llm::model_select::resolve(&mut config).await;
 

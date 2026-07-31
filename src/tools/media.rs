@@ -1,18 +1,16 @@
 //! Control de reproducción multimedia vía teclas de medios simuladas
-//! (`SendInput`). Funciona con cualquier app que tenga la sesión de medios
-//! del sistema activa (Spotify, navegador, etc.), sin API keys ni
-//! integración por app. Reversible/bajo impacto → `Safe`, igual que
+//! (`enigo`, cross-platform). Funciona con cualquier app que tenga la
+//! sesión de medios del sistema activa (Spotify, navegador, etc.), sin API
+//! keys ni integración por app. Reversible/bajo impacto → `Safe`, igual que
 //! `set_volume`.
 
 use async_trait::async_trait;
+use enigo::Key;
 use serde_json::{json, Value};
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    VK_MEDIA_NEXT_TRACK, VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK,
-};
 
 use crate::errors::ToolError;
 
-use super::input::send_key_press;
+use super::input::send_key;
 use super::{required_str, RiskLevel, Tool, ToolOutput};
 
 pub struct MediaControl;
@@ -58,17 +56,17 @@ impl Tool for MediaControl {
 
     async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let action = required_str(&args, "action")?;
-        let (vk, message) = match action {
-            "play_pause" => (VK_MEDIA_PLAY_PAUSE, "Reproducción pausada o reanudada."),
-            "next" => (VK_MEDIA_NEXT_TRACK, "Pasando a la siguiente canción."),
-            "previous" => (VK_MEDIA_PREV_TRACK, "Volviendo a la canción anterior."),
+        let (key, message) = match action {
+            "play_pause" => (Key::MediaPlayPause, "Reproducción pausada o reanudada."),
+            "next" => (Key::MediaNextTrack, "Pasando a la siguiente canción."),
+            "previous" => (Key::MediaPrevTrack, "Volviendo a la canción anterior."),
             other => {
                 return Err(ToolError::InvalidArgs(format!(
                     "acción de medios desconocida: '{other}'"
                 )))
             }
         };
-        send_key_press(vk).await?;
+        send_key(key).await?;
         Ok(ToolOutput::text(message))
     }
 }

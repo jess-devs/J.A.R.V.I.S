@@ -191,19 +191,8 @@ impl Tool for OpenFile {
                 path.display()
             )));
         }
-        let status = tokio::process::Command::new("cmd")
-            .args(["/C", "start", ""])
-            .arg(&path)
-            .status()
-            .await
-            .map_err(|e| ToolError::Execution(format!("no se pudo abrir: {e}")))?;
-        if status.success() {
-            Ok(ToolOutput::text(format!("Abierto: {}.", path.display())))
-        } else {
-            Err(ToolError::Execution(format!(
-                "Windows no pudo abrir {}.",
-                path.display()
-            )))
-        }
+        let path_str = path.display().to_string();
+        crate::platform::open_target(&path_str).await?;
+        Ok(ToolOutput::text(format!("Abierto: {path_str}.")))
     }
 }

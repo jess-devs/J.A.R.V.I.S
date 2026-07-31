@@ -1,11 +1,15 @@
 //! Abrir aplicaciones, sitios web y cerrar aplicaciones. `open_app` primero
-//! prueba los alias de `config.yaml`; si no hay alias, busca con matching
-//! tolerante (substring + tokens + Levenshtein) entre los accesos directos
-//! del Menú Inicio y el Escritorio, y si tampoco hay match confiado cae al
-//! comportamiento clásico de pasarle el nombre literal a `cmd /C start`
-//! (PATH + App Paths del registro). `open_url` lanza con `cmd /C start` el
-//! navegador por defecto. `close_app` mata procesos por nombre y por eso
-//! requiere confirmación.
+//! prueba los alias de `config.yaml`; si no hay alias, en Windows busca con
+//! matching tolerante (substring + tokens + Levenshtein) entre los accesos
+//! directos del Menú Inicio y el Escritorio (el escaneo de accesos
+//! directos es Windows-only por ahora, ver MEJORAS.md ítem 1 Stage C) y si
+//! tampoco hay match confiado cae al comportamiento clásico de pasarle el
+//! nombre literal al lanzador de la plataforma (`platform::open_target`:
+//! `cmd /C start` en Windows —PATH + App Paths del registro—, `xdg-open`/
+//! `open`/PATH en Unix). En Unix, sin escaneo de accesos directos, va
+//! directo a ese fallback. `open_url` usa el mismo lanzador para abrir el
+//! navegador por defecto. `close_app` mata procesos por nombre (vía
+//! `sysinfo`, cross-platform) y por eso requiere confirmación.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -123,22 +127,12 @@ fn score(query_norm: &str, query_tokens: &[String], entry: &AppEntry) -> f32 {
     0.55 * (matched as f32 / query_tokens.len() as f32)
 }
 
-/// Lanza `target` (ruta o nombre) con `start`, que no bloquea y resuelve
-/// igual que lo haría el usuario en Win+R o con doble click.
+/// Lanza `target` (ruta o nombre) con el comando de apertura por defecto
+/// del SO (ver `platform::open_target`), que no bloquea y resuelve igual
+/// que lo haría el usuario con doble click.
 async fn launch(target: &str, display: &str) -> Result<ToolOutput, ToolError> {
-    let status = tokio::process::Command::new("cmd")
-        .args(["/C", "start", ""])
-        .arg(target)
-        .status()
-        .await
-        .map_err(|e| ToolError::Execution(format!("no se pudo lanzar '{target}': {e}")))?;
-    if status.success() {
-        Ok(ToolOutput::text(format!("Aplicación '{display}' lanzada.")))
-    } else {
-        Err(ToolError::Execution(format!(
-            "Windows no pudo lanzar '{display}'."
-        )))
-    }
+    crate::platform::open_target(target).await?;
+    Ok(ToolOutput::text(format!("Aplicación '{display}' lanzada.")))
 }
 
 pub struct OpenApp {
@@ -335,19 +329,8 @@ impl Tool for OpenUrl {
     async fn execute(&self, args: Value) -> Result<ToolOutput, ToolError> {
         let raw = required_str(&args, "url")?;
         let url = Self::normalize_url(raw)?;
-        let status = tokio::process::Command::new("cmd")
-            .args(["/C", "start", ""])
-            .arg(&url)
-            .status()
-            .await
-            .map_err(|e| ToolError::Execution(format!("no se pudo abrir '{url}': {e}")))?;
-        if status.success() {
-            Ok(ToolOutput::text(format!("Abriendo {url} en el navegador.")))
-        } else {
-            Err(ToolError::Execution(format!(
-                "Windows no pudo abrir la URL '{url}'."
-            )))
-        }
+        crate::platform::open_target(&url).await?;
+        Ok(ToolOutput::text(format!("Abriendo {url} en el navegador.")))
     }
 }
 

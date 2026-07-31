@@ -137,7 +137,10 @@ impl ToolRegistry {
             static_tools.push(Arc::new(apps::CloseApp));
             static_tools.push(Arc::new(files::FindFiles::new(&cfg.files)));
             static_tools.push(Arc::new(files::OpenFile));
+            #[cfg(windows)]
             static_tools.push(Arc::new(shell::RunPowershell::new(&cfg.high_risk_patterns)));
+            #[cfg(unix)]
+            static_tools.push(Arc::new(shell::RunShell::new(&cfg.high_risk_patterns)));
             static_tools.push(Arc::new(volume::GetVolume));
             static_tools.push(Arc::new(volume::SetVolume));
             static_tools.push(Arc::new(web::WebSearch::new(&cfg.web)));
