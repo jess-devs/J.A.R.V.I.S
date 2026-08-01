@@ -39,16 +39,17 @@ fi
 echo "OK: cargo, $PYTHON_BIN y ollama estan disponibles."
 
 # Linux (no macOS): cargo build necesita un compilador de C (rusqlite,
-# `bundled`) y headers de dbus/X11 (xcap para take_screenshot, enigo para
-# mouse_move/mouse_click/media_control). Verificado a mano en WSL/Ubuntu:
-# sin estos paquetes, `cargo build` falla recien al link, no al chequear
-# prerrequisitos, asi que conviene avisarlo antes.
+# `bundled`), headers de dbus/X11 (xcap para take_screenshot, enigo para
+# mouse_move/mouse_click/media_control) y headers de ALSA (cpal/rodio,
+# audio). Verificado a mano en WSL/Ubuntu: sin estos paquetes, `cargo build`
+# falla recien al link, no al chequear prerrequisitos, asi que conviene
+# avisarlo antes.
 if [[ "$(uname)" != "Darwin" ]]; then
     if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1; then
-        err "No se encontro un compilador de C. En Debian/Ubuntu: sudo apt install build-essential pkg-config libdbus-1-dev libx11-dev libxdo-dev libxtst-dev libxext-dev"
+        err "No se encontro un compilador de C. En Debian/Ubuntu: sudo apt install build-essential pkg-config libdbus-1-dev libx11-dev libxdo-dev libxtst-dev libxext-dev libasound2-dev"
         exit 1
     fi
-    echo "AVISO: ademas del compilador de C, 'cargo build' en Linux necesita headers de dbus/X11. Si falla, en Debian/Ubuntu: sudo apt install pkg-config libdbus-1-dev libx11-dev libxdo-dev libxtst-dev libxext-dev"
+    echo "AVISO: ademas del compilador de C, 'cargo build' en Linux necesita headers de dbus/X11/ALSA. Si falla, en Debian/Ubuntu: sudo apt install pkg-config libdbus-1-dev libx11-dev libxdo-dev libxtst-dev libxext-dev libasound2-dev"
 fi
 
 # Entorno Python

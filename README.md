@@ -24,9 +24,10 @@ Ver [`workers/README.md`](workers/README.md) para detalle del protocolo entre Ru
   - **[Ollama](https://ollama.com)** instalado y corriendo (para el modo LLM local, que es el default).
     - *Alternativa :* [LM Studio](https://lmstudio.ai) con su servidor local activado (`llm.provider: lmstudio`).
 - Un micrófono y parlantes/auriculares.
-- **Solo Linux**: compilador de C + headers de dbus/X11 (los pide
-  `rusqlite`, y `xcap`/`enigo` para `take_screenshot`/`mouse_move`/
-  `media_control`). En Debian/Ubuntu: `sudo apt install build-essential pkg-config libdbus-1-dev libx11-dev libxdo-dev libxtst-dev libxext-dev`.
+- **Solo Linux**: compilador de C + headers de dbus/X11/ALSA (los pide
+  `rusqlite`, `xcap`/`enigo` para `take_screenshot`/`mouse_move`/
+  `media_control`, y `cpal`/`rodio` para audio). En Debian/Ubuntu:
+  `sudo apt install build-essential pkg-config libdbus-1-dev libx11-dev libxdo-dev libxtst-dev libxext-dev libasound2-dev`.
   Verificado en WSL/Ubuntu 26.04 — soporte Linux/Mac todavía en desarrollo,
   ver [Estado del proyecto](#estado-del-proyecto).
 
