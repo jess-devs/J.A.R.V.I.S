@@ -2,7 +2,7 @@
 con métricas sintéticas — no necesitan audio real ni cargar Whisper.
 
 Los umbrales usados acá replican los defaults de `stt_engine._Engine`
-(ver `config.yaml` / `CONFIGURACION.md`, sección `stt.filters`).
+(ver `config.yaml` / `docs/CONFIGURACION.md`, sección `stt.filters`).
 """
 
 import sys

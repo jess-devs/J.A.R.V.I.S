@@ -27,7 +27,7 @@ impriman donde el usuario los puede ver):
   python stt_worker.py --enroll-voice [--device N] [--seconds N]
                                                 graba tu voz y guarda su embedding de
                                                 referencia para agent.speaker_verification
-                                                (modo sombra, ver CONFIGURACION.md)
+                                                (modo sombra, ver docs/CONFIGURACION.md)
 """
 
 import os
@@ -111,11 +111,10 @@ def _cli_arg(flag: str) -> str | None:
 def _cli_enroll_voice() -> None:
     """Graba unos segundos de voz y guarda su embedding como referencia
     para `agent.speaker_verification` (ítem 4 v1 de MEJORAS.md, modo
-    sombra — ver README/CONFIGURACION.md). Requiere el extra opcional
+    sombra — ver README.md y docs/CONFIGURACION.md). Requiere el extra opcional
     `speechbrain` (`pip install -r workers/requirements-speaker.txt`)."""
     import numpy as np
     import pyaudio
-
     from speaker_verification import SpeakerVerifier
 
     device_index = None

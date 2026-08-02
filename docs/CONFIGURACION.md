@@ -1,7 +1,7 @@
 # Configuración de Jarvis
 
 Referencia completa de `config.yaml`. Para un resumen rápido ver la sección
-["Configuración"](README.md#configuración-configyaml) del README; esta guía
+["Configuración"](../README.md#configuración-configyaml) del README; esta guía
 entra en el detalle de cada clave: qué controla, qué valores acepta, y cuándo
 tiene sentido tocarla.
 
@@ -87,7 +87,7 @@ dijiste, aflojalos.
 
 Corre siempre sobre cada frame en el motor nativo, en el mismo hilo que el
 VAD (`workers/clap_detector.py`), independientemente de si el [modo
-bienvenida](README.md#modo-bienvenida-doble-aplauso) está activo:
+bienvenida](../README.md#modo-bienvenida-doble-aplauso) está activo:
 `welcome.enabled` decide si Jarvis reacciona al evento, no esta sección.
 Es una máquina de estados por frame: **onset** (la energía sube de golpe,
 con timbre de banda ancha y sin pinta de voz sonora) → **decaimiento** (el
@@ -108,7 +108,7 @@ disparan el evento una sola vez, seguido de un refractario).
 | `refractory_ms` | Tras confirmar el doble aplauso, ignora nuevos aplausos por este tiempo. |
 
 Para calibrar estos umbrales en vivo con tu micrófono: `python
-workers/stt_worker.py --test-clap` (ver [`workers/README.md`](workers/README.md)).
+workers/stt_worker.py --test-clap` (ver [`workers/README.md`](../workers/README.md)).
 
 ### Detección de hardware: `device`, `whisper_model`, `compute_type`
 
@@ -310,7 +310,7 @@ sigue generando el resto).
 ## `agent`
 
 La capa agéntica: herramientas que Jarvis puede ejecutar por vos. Ver
-también la sección [Capacidades agénticas](README.md#capacidades-agénticas-herramientas)
+también la sección [Capacidades agénticas](../README.md#capacidades-agénticas-herramientas)
 del README para la tabla de herramientas disponibles.
 
 Tres niveles de riesgo, clasificados de forma determinista **en Rust**
@@ -396,7 +396,7 @@ Lista de servidores MCP (Model Context Protocol) externos a los que Jarvis
 se conecta como cliente — sus tools se pliegan al mismo `ToolRegistry` que
 las built-in y las de `create_tool`. Vacía por defecto (sin servidores, sin
 cambio de comportamiento). Complementa `create_tool`, no lo reemplaza: ver
-[Capacidades agénticas](README.md#capacidades-agénticas-herramientas) del
+[Capacidades agénticas](../README.md#capacidades-agénticas-herramientas) del
 README para la diferencia entre ambos.
 
 Cada entrada de la lista:
@@ -419,7 +419,7 @@ con un warning en vez de pisar la existente.
 ## `welcome`
 
 La escena de bienvenida disparada por doble aplauso (ver
-[Modo bienvenida](README.md#modo-bienvenida-doble-aplauso) del README). El
+[Modo bienvenida](../README.md#modo-bienvenida-doble-aplauso) del README). El
 detector de aplausos en sí vive en [`stt.clap`](#sttclap-detector-de-doble-aplauso)
 y corre siempre, esta sección solo controla si Jarvis reacciona al evento
 y con qué parámetros de escena.

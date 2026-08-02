@@ -6,7 +6,7 @@ Todavía NO se usa para gatear ninguna confirmación de seguridad — el valor
 solo viaja hacia Rust (mensaje `speaker_similarity`) para quedar logueado,
 así se junta evidencia real de qué umbral tendría sentido antes de aplicar
 esto a algo relevante a seguridad (ver `agent.speaker_verification` en
-CONFIGURACION.md).
+docs/CONFIGURACION.md).
 
 Usa ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb`) vía el extra opcional
 `speechbrain` — pesado (~80MB de pesos + torch, que el venv ya trae para

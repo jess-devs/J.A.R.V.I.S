@@ -149,7 +149,7 @@ Todas las claves son opcionales:
 - **`mcp`**: lista de servidores MCP externos a los que Jarvis se conecta como cliente (vacía por defecto). Complementa `create_tool`, no lo reemplaza. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`welcome`**: la escena de bienvenida disparada por doble aplauso,activar/desactivar, música, frase de saludo, volúmenes. Ver [Modo bienvenida](#modo-bienvenida-doble-aplauso).
 
-Guía completa de configuración: [`CONFIGURACION.md`](CONFIGURACION.md).
+Guía completa de configuración: [`CONFIGURACION.md`](docs/CONFIGURACION.md).
 
 ## Capacidades agénticas (herramientas)
 
@@ -194,7 +194,7 @@ La memoria persistente vive en `data/memory.db`. Las memorias recientes se inyec
 
 ### Servidores MCP (cliente)
 
-Además de las herramientas de arriba, Jarvis puede conectarse como **cliente MCP** (Model Context Protocol) a servidores externos ya existentes (Home Assistant, GitHub, Notion, calendarios, Slack, el servidor de referencia `@modelcontextprotocol/server-everything`, etc.), configurados en `mcp:` (`config.yaml`, vacío por defecto — ver [CONFIGURACION.md](CONFIGURACION.md#mcp)). Sus tools se pliegan al mismo registro y al mismo sistema de riesgo determinista que las de arriba: `Confirm` por defecto, o `Safe` si las marcás explícitamente en `trusted_tools`.
+Además de las herramientas de arriba, Jarvis puede conectarse como **cliente MCP** (Model Context Protocol) a servidores externos ya existentes (Home Assistant, GitHub, Notion, calendarios, Slack, el servidor de referencia `@modelcontextprotocol/server-everything`, etc.), configurados en `mcp:` (`config.yaml`, vacío por defecto — ver [CONFIGURACION.md](docs/CONFIGURACION.md#mcp)). Sus tools se pliegan al mismo registro y al mismo sistema de riesgo determinista que las de arriba: `Confirm` por defecto, o `Safe` si las marcás explícitamente en `trusted_tools`.
 
 Esto **no reemplaza** `create_tool`, lo complementa:
 
@@ -251,7 +251,7 @@ Para calibrar el detector con tu propio micrófono, corré:
 
 Esto imprime en vivo, frame a frame, el dBFS de pico, el ZCR y el fondo/umbral actuales, y avisa "CLAP!" al detectar un candidato y "¡DOBLE!" al confirmar el doble aplauso. Podés pasarle `--min-peak`, `--min-rise` y `--min-zcr` para probar valores antes de tocar el yaml (equivalentes a `stt.clap.min_peak_dbfs`/`min_rise_db`/`min_zcr`). Aplaudí un par de veces frente al micrófono, mirá los valores que aparecen, y volcá los que te funcionaron a esas mismas claves dentro de `stt.clap` en `config.yaml`.
 
-Referencia completa: [`stt.clap`](CONFIGURACION.md#sttclap-detector-de-doble-aplauso) para el detector, [`welcome`](CONFIGURACION.md#welcome) para la escena.
+Referencia completa: [`stt.clap`](docs/CONFIGURACION.md#sttclap-detector-de-doble-aplauso) para el detector, [`welcome`](docs/CONFIGURACION.md#welcome) para la escena.
 
 ## Modo local vs. modo nube
 
