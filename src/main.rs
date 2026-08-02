@@ -2,6 +2,7 @@ mod agent;
 mod audio;
 mod audit;
 mod config;
+mod config_ui;
 mod echo_gate;
 mod errors;
 mod http;
@@ -50,6 +51,15 @@ struct Cli {
     /// para acciones de riesgo. Útil para debugging o ambientes ruidosos.
     #[arg(long)]
     text_mode: bool,
+
+    /// Solo levanta la página de configuración local (ver `web_ui` en
+    /// config.yaml) y no arranca el resto de Jarvis: sin STT/TTS/LLM, sin
+    /// preflight de micrófono/Python/Ollama. Pensado para arreglar un
+    /// config.yaml roto (o simplemente configurar Jarvis) sin que el resto
+    /// del programa tenga que poder arrancar primero. Ignora `web_ui.enabled`
+    /// (pedirlo por acá ya es la intención explícita).
+    #[arg(long)]
+    config_ui: bool,
 }
 
 #[tokio::main]
@@ -90,6 +100,27 @@ async fn main() {
         .clone()
         .unwrap_or_else(|| config.log_level.clone());
 
+    if cli.config_ui {
+        // Modo standalone: nunca toma la terminal (no hay TUI ni pipeline de
+        // voz corriendo), así que los logs van siempre a consola, sin
+        // importar `config.ui.enabled`.
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
+            .init();
+
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], config.web_ui.port));
+        println!("Página de configuración local en http://{addr}");
+        println!("Ctrl+C para salir. El resto de Jarvis no está corriendo.");
+
+        tokio::select! {
+            _ = config_ui::serve(cli.config, addr, PathBuf::from("web/config-ui/dist")) => {}
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Señal de interrupción recibida, cerrando...");
+            }
+        }
+        return;
+    }
+
     // Con la TUI activa, la pantalla alterna le pertenece al holograma: los
     // logs de tracing van a un archivo en vez de la consola. `_log_guard`
     // debe vivir hasta el final de `main` (el writer no bloqueante de
@@ -107,13 +138,13 @@ async fn main() {
         None
     };
 
-    if let Err(e) = run(config, cli.text_mode).await {
+    if let Err(e) = run(config, cli.config, cli.text_mode).await {
         eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }
 
-async fn run(mut config: Config, text_mode: bool) -> errors::Result<()> {
+async fn run(mut config: Config, config_path: PathBuf, text_mode: bool) -> errors::Result<()> {
     // El Job Object y el handler de consola deben instalarse ANTES de crear
     // el Orchestrator: este spawnea los workers Python en su constructor, y
     // solo heredan la membresía del job si el proceso Jarvis ya es miembro
@@ -168,6 +199,13 @@ async fn run(mut config: Config, text_mode: bool) -> errors::Result<()> {
         );
 
         config.welcome.enabled = false;
+    }
+
+    if config.web_ui.enabled {
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], config.web_ui.port));
+        let static_dir = PathBuf::from("web/config-ui/dist");
+        let server_config_path = config_path.clone();
+        tokio::spawn(config_ui::serve(server_config_path, addr, static_dir));
     }
 
     if text_mode {

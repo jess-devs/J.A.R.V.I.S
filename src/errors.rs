@@ -49,6 +49,16 @@ pub enum ConfigError {
 
     #[error("config.yaml inválido: {0}")]
     Parse(String),
+
+    #[error("no se pudo escribir '{path}': {source}")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("no se pudo serializar la configuración: {0}")]
+    Serialize(String),
 }
 
 #[derive(Debug, thiserror::Error)]

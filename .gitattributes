@@ -1,0 +1,3 @@
+# Los scripts bash se versionan con LF aunque el checkout sea Windows
+# (core.autocrlf=true los convertiria a CRLF y romperian WSL/Linux).
+*.sh text eol=lf

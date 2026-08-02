@@ -35,7 +35,7 @@ Ver [`workers/README.md`](workers/README.md) para detalle del protocolo entre Ru
 
 ### Automática (recomendada)
 
-Con Rust, Python 3.12 y Ollama ya instalados (ver [Requisitos](#requisitos)), un solo script deja todo listo: crea el venv de los workers, detecta tu hardware (RAM/GPU) para recomendarte y descargar un modelo de Ollama acorde, baja la voz de Piper que usa `config.yaml` y crea el `.env`.
+Con Rust, Python 3.12 y Ollama ya instalados (ver [Requisitos](#requisitos)), un solo script deja todo listo: crea el venv de los workers, detecta tu hardware (RAM/GPU) para recomendarte y descargar un modelo de Ollama acorde, baja la voz de Piper que usa `config.yaml`, crea el `.env` e instala las dependencias del frontend web de `config-ui` (si tenés Node.js; si no, avisa y sigue igual, la web es opcional).
 
 ```powershell
 # Windows (PowerShell)
@@ -125,6 +125,17 @@ INFO Jarvis listo. Escuchando...
 
 Hablá una frase en español y esperá la pausa,vas a ver la transcripción, la respuesta en streaming y escuchar el audio.
 
+#### 5. Frontend web (config-ui, opcional)
+
+Solo hace falta si vas a usar la [página de configuración local](#página-de-configuración-local) (`--config-ui` o `web_ui.enabled: true`). Necesita Node.js LTS.
+
+```bash
+cd web/config-ui
+npm install
+```
+
+El script de setup corre esto solo si encontró `node`/`npm`; si no, avisa y sigue sin fallar.
+
 #### Modo texto
 
 ```bash
@@ -132,6 +143,14 @@ cargo run --release -- --text-mode
 ```
 
 Alternativa a hablarle: escribís el pedido y apretás Enter en vez de usar el micrófono. Jarvis sigue respondiendo por voz (TTS) y pidiendo confirmación de las acciones de riesgo — solo cambia cómo escucha, no cómo responde. Útil para debugging, ambientes ruidosos, o cuando no es práctico hablarle en voz alta. El preflight de este modo no exige micrófono, pero sigue necesitando el venv de Python y la voz de Piper (o un proveedor de TTS en la nube) para poder hablar las respuestas.
+
+#### Página de configuración local
+
+```bash
+cargo run --release -- --config-ui
+```
+
+Levanta solo la [página de configuración local](docs/CONFIGURACION.md#web_ui) (`http://127.0.0.1:4756` por defecto) y nada más del resto de Jarvis: sin STT/TTS/LLM, sin preflight de micrófono/Python/Ollama. Sirve para arreglar un `config.yaml` roto (o simplemente configurarlo desde el navegador en vez de a mano) incluso cuando el resto del programa todavía no puede arrancar. Con `web_ui.enabled: true` (el default) la misma página también queda disponible mientras Jarvis corre normalmente, con o sin `--text-mode`.
 
 ## Configuración (`config.yaml`)
 

@@ -6,11 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::errors::ConfigError;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub runtime: RuntimeConfig,
@@ -25,6 +25,9 @@ pub struct Config {
     pub agent: AgentConfig,
     pub welcome: WelcomeConfig,
     pub ui: UiConfig,
+    /// Página de configuración local servida por Jarvis mismo (lee/escribe
+    /// este mismo config.yaml vía HTTP en 127.0.0.1). Ver `src/config_ui/`.
+    pub web_ui: WebUiConfig,
     pub log_level: String,
     /// Servidores MCP externos a los que Jarvis se conecta como cliente
     /// (complementa `create_tool`, no lo reemplaza — ver README). Vacío por
@@ -47,13 +50,33 @@ impl Default for Config {
             agent: AgentConfig::default(),
             welcome: WelcomeConfig::default(),
             ui: UiConfig::default(),
+            web_ui: WebUiConfig::default(),
             log_level: "info".to_string(),
             mcp: Vec::new(),
         }
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WebUiConfig {
+    /// Si true, Jarvis levanta un servidor HTTP local (ver `port`) que sirve
+    /// la página de configuración y expone su API de lectura/escritura de
+    /// este mismo config.yaml. Solo escucha en 127.0.0.1, nunca en la red.
+    pub enabled: bool,
+    pub port: u16,
+}
+
+impl Default for WebUiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: 4756,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct McpServerConfig {
     /// Nombre corto del servidor, solo para logs/mensajes de error (no se
@@ -126,6 +149,36 @@ impl Config {
         reanchor(&mut self.agent.reminders.db_path, "reminders.db");
         reanchor(&mut self.agent.scripted_tools.db_path, "scripted_tools.db");
     }
+
+    /// Reescribe `path` completo con el estado actual de `self`. Usada por
+    /// la página de configuración local (`src/config_ui/`): a diferencia de
+    /// `load`, esto NO preserva los comentarios ni el formato original del
+    /// YAML (serde-saphyr regenera el documento desde cero) — es una
+    ///     decisión deliberada (ver docs/PRODUCT.md/brief de la página de config), no
+    /// un descuido.
+    ///
+    /// Antes de la primera escritura de este proceso hace una copia de
+    /// respaldo `<path>.bak` del archivo tal como estaba (si `path` existe y
+    /// el `.bak` todavía no), para no perder el config.yaml original del
+    /// usuario si algo sale mal en una escritura posterior.
+    pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
+        if path.exists() {
+            let backup_path = path.with_extension("yaml.bak");
+            if !backup_path.exists() {
+                std::fs::copy(path, &backup_path).map_err(|source| ConfigError::Write {
+                    path: backup_path,
+                    source,
+                })?;
+            }
+        }
+
+        let yaml = serde_saphyr::to_string(self).map_err(|e| ConfigError::Serialize(e.to_string()))?;
+
+        std::fs::write(path, yaml).map_err(|source| ConfigError::Write {
+            path: path.to_path_buf(),
+            source,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,7 +199,7 @@ impl Default for RuntimeConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorkersConfig {
     pub python_executable: PathBuf,
@@ -179,7 +232,7 @@ impl Default for WorkersConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SttEngineKind {
     /// Motor propio: PyAudio + Silero VAD + faster-whisper directo.
@@ -189,7 +242,7 @@ pub enum SttEngineKind {
     Realtimestt,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VadConfig {
     /// Probabilidad de Silero a partir de la cual se considera que empezó a hablar.
@@ -232,7 +285,7 @@ impl Default for VadConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SttFiltersConfig {
     /// Se descarta la transcripción si `no_speech_prob` de Whisper la supera.
@@ -257,7 +310,7 @@ impl Default for SttFiltersConfig {
 /// Parámetros del detector de doble aplauso (modo bienvenida, solo motor
 /// nativo). Corre siempre sobre cada frame — `WelcomeConfig.enabled` es el
 /// que decide si Jarvis reacciona al evento, no esto.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ClapConfig {
     pub min_peak_dbfs: f32,
@@ -285,7 +338,7 @@ impl Default for ClapConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SttConfig {
     /// native (motor propio) | realtimestt (respaldo).
@@ -364,7 +417,7 @@ impl Default for SttConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WakeConfig {
     /// false = sin gate: Jarvis responde a todo lo que transcribe.
@@ -415,7 +468,7 @@ impl Default for WakeConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmProviderKind {
     #[default]
@@ -426,7 +479,7 @@ pub enum LlmProviderKind {
     LmStudio,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OllamaConfig {
     pub base_url: String,
@@ -461,7 +514,7 @@ impl Default for OllamaConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AnthropicConfig {
     pub model: String,
@@ -477,7 +530,7 @@ impl Default for AnthropicConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OpenAiConfig {
     pub model: String,
@@ -494,7 +547,7 @@ impl Default for OpenAiConfig {
 }
 
 /// La API de DeepSeek es compatible con el formato de OpenAI (ver `llm::deepseek`).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DeepSeekConfig {
     pub model: String,
@@ -513,7 +566,7 @@ impl Default for DeepSeekConfig {
 /// LM Studio expone un servidor local compatible con la API de OpenAI (ver
 /// `llm::lmstudio`). A diferencia de los proveedores de nube normalmente no
 /// requiere API key, por eso `api_key_env` es opcional.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LmStudioConfig {
     pub base_url: String,
@@ -535,7 +588,7 @@ impl Default for LmStudioConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
     pub provider: LlmProviderKind,
@@ -584,7 +637,7 @@ impl Default for LlmConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TtsProviderKind {
     #[default]
@@ -593,7 +646,7 @@ pub enum TtsProviderKind {
     Cartesia,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PiperConfig {
     pub voice_path: PathBuf,
@@ -620,7 +673,7 @@ impl Default for PiperConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ElevenLabsConfig {
     pub voice_id: String,
@@ -643,7 +696,7 @@ impl Default for ElevenLabsConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CartesiaTransport {
     #[default]
@@ -651,7 +704,7 @@ pub enum CartesiaTransport {
     WebSocket,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CartesiaOutputFormat {
     pub container: String,
@@ -669,7 +722,7 @@ impl Default for CartesiaOutputFormat {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CartesiaConfig {
     pub model_id: String,
@@ -695,7 +748,7 @@ impl Default for CartesiaConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TtsConfig {
     pub provider: TtsProviderKind,
@@ -717,7 +770,7 @@ impl Default for TtsConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AudioConfig {
     pub output_device: Option<String>,
@@ -742,7 +795,7 @@ impl Default for AudioConfig {
 /// Cuánta confirmación por voz exige Jarvis para las acciones de riesgo
 /// `Confirm` (las de riesgo `Code` piden el código de aceptación siempre,
 /// en ambos modos: es la red de seguridad final y no se puede desactivar).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfirmMode {
     /// Pide un "sí"/"no" por voz para cada acción de riesgo `Confirm`
@@ -758,7 +811,7 @@ pub enum ConfirmMode {
 /// Capa agéntica: herramientas que Jarvis puede ejecutar (consultar el
 /// sistema, controlar la PC, etc.) con confirmación por voz para acciones
 /// riesgosas.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentConfig {
     /// false = comportamiento clásico: chat puro sin herramientas.
@@ -865,7 +918,7 @@ impl Default for AgentConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpeakerVerificationConfig {
     /// `false` (default): sin cambios respecto al comportamiento actual.
@@ -882,7 +935,7 @@ pub struct SpeakerVerificationConfig {
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AuditConfig {
     /// `true` (default) = cada ejecución de una tool de riesgo `Confirm`/
@@ -902,7 +955,7 @@ impl Default for AuditConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TranslateConfig {
     /// Idioma destino usado si el LLM no especifica `target_lang`.
@@ -917,7 +970,7 @@ impl Default for TranslateConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RemindersConfig {
     /// Ruta del archivo SQLite de recordatorios.
@@ -938,7 +991,7 @@ impl Default for RemindersConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScriptedToolsConfig {
     /// Ruta del archivo SQLite de tools personalizadas (separado de
@@ -969,7 +1022,7 @@ impl Default for ScriptedToolsConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MemoryConfig {
     /// Ruta del archivo SQLite de memoria persistente.
@@ -987,7 +1040,7 @@ impl Default for MemoryConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WebToolConfig {
     /// Truncado del texto extraído de una página antes de dárselo al LLM
@@ -1014,7 +1067,7 @@ impl Default for WebToolConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FilesToolConfig {
     /// Carpetas donde busca `find_files` cuando no hay Everything CLI.
@@ -1038,7 +1091,7 @@ impl Default for FilesToolConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct AppsConfig {
     /// Alias hablado → comando/ejecutable real ("navegador" → "chrome").
@@ -1048,7 +1101,7 @@ pub struct AppsConfig {
     pub extra_search_roots: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PipelineConfig {
     pub max_phrase_chars: usize,
@@ -1064,7 +1117,7 @@ impl Default for PipelineConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BargeInMode {
     /// Solo interrumpe si la transcripción capturada mientras Jarvis habla
@@ -1078,7 +1131,7 @@ pub enum BargeInMode {
     AnyVoice,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EchoGuardConfig {
     pub enabled: bool,
@@ -1105,7 +1158,7 @@ impl Default for EchoGuardConfig {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BargeInConfig {
     pub enabled: bool,
@@ -1138,7 +1191,7 @@ impl Default for BargeInConfig {
 /// fondo + saludo + resumen de recordatorios (o noticias del día si no hay).
 /// El detector de aplausos en sí vive en `SttConfig::clap` — esto solo
 /// controla si Jarvis reacciona al evento y con qué parámetros de escena.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WelcomeConfig {
     pub enabled: bool,
@@ -1168,7 +1221,7 @@ impl Default for WelcomeConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MarkerKind {
     /// Curvas suaves; requiere fuente con glifos Braille.
@@ -1178,7 +1231,7 @@ pub enum MarkerKind {
     Block,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
     /// Si true, reemplaza los logs de consola por la interfaz Ratatui

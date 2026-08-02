@@ -440,6 +440,28 @@ y con qué parámetros de escena.
 | `cooldown_secs` | Tras dispararse la escena, ignora nuevos dobles aplausos que la volverían a disparar durante este tiempo. |
 | `news_when_no_reminders` | Si no hay recordatorios pendientes: `true` = cuenta las noticias del día (vía `web_search`); `false` = solo avisa que no hay pendientes. |
 
+## `web_ui`
+
+Página de configuración local: un servidor HTTP que el propio binario de
+Jarvis levanta en tu máquina para leer y escribir este mismo `config.yaml`
+desde el navegador, en vez de editarlo a mano. Piloto actual: solo las
+secciones `llm` y `tts` (el resto del archivo se sigue editando a mano); el
+resto de las secciones se suman más adelante con el mismo patrón.
+
+| Clave | Qué hace |
+|---|---|
+| `enabled` | `false` = no se levanta el servidor. |
+| `port` | Puerto en el que escucha, siempre en `127.0.0.1` — nunca accesible desde la red. |
+
+Con el servidor activo entrá a `http://127.0.0.1:<port>` (por defecto
+[http://127.0.0.1:4756](http://127.0.0.1:4756)). Guardar cambios ahí
+**reescribe `config.yaml` entero** desde la configuración en memoria: se
+pierden los comentarios del archivo (no el formato de comentarios en sí,
+los *contenidos* de comentario), pero antes de la primera escritura de cada
+proceso se guarda una copia tal cual estaba en `config.yaml.bak`. Los
+cambios guardados no se aplican en caliente: hace falta reiniciar Jarvis
+para que los tome (la página lo avisa después de guardar).
+
 ## `log_level`
 
 `trace` | `debug` | `info` | `warn` | `error`. Con `debug` se ven además la

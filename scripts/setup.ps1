@@ -253,5 +253,28 @@ if (Test-Path $envPath)
     Write-Host "Creado .env a partir de .env.example (solo hace falta completarlo si usas un proveedor en la nube)."
 }
 
+# Frontend web (config-ui)
+Write-Step "Instalando dependencias del frontend (web/config-ui)..."
+if (-not (Test-CommandExists "node") -or -not (Test-CommandExists "npm"))
+{
+    Write-Warn "No se encontro 'node'/'npm'. Instala Node.js LTS desde https://nodejs.org y volve a correr este script (la web es opcional)."
+} else
+{
+    Write-Host "OK: Node $(node --version 2>$null | ForEach-Object { $_.Trim() })."
+    Push-Location "web/config-ui"
+    try
+    {
+        npm install
+        if ($LASTEXITCODE -ne 0)
+        {
+            Write-Warn "npm install fallo en web/config-ui. Revisa el error y volve a intentar a mano."
+        }
+    }
+    finally
+    {
+        Pop-Location
+    }
+}
+
 Write-Step "Listo."
 Write-Host "Compila y corre Jarvis con: cargo run --release"

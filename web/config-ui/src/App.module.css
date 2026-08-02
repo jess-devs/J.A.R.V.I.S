@@ -1,0 +1,44 @@
+.page {
+  height: 100vh;
+  background: var(--surface);
+}
+
+.shell {
+  height: 100%;
+  display: flex;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+.contentInner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 48px 40px 80px;
+}
+
+@media (max-width: 860px) {
+  .page {
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .shell {
+    height: auto;
+    min-height: 100vh;
+    flex-direction: column;
+  }
+
+  .content {
+    height: auto;
+  }
+
+  .contentInner {
+    padding: 24px 20px 60px;
+  }
+}

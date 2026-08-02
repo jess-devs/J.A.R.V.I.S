@@ -2,6 +2,13 @@
 /target
 # Cargo.lock se versiona a propósito (binario, no librería) para builds reproducibles.
 
+# Frontend de la página de configuración local (web/config-ui/): node_modules
+# y dist ya los ignora su propio .gitignore.
+
+# Backup automático de Config::save (src/config.rs) antes de la primera
+# reescritura de config.yaml en cada proceso.
+config.yaml.bak
+
 # Python (workers)
 workers/.venv/
 workers/__pycache__/
@@ -50,3 +57,4 @@ Thumbs.db
 
 # IA
 .claude
+.impeccable/

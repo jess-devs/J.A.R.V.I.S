@@ -209,5 +209,17 @@ else
     echo "Creado .env a partir de .env.example (solo hace falta completarlo si usas un proveedor en la nube)."
 fi
 
+# Frontend web (config-ui)
+step "Instalando dependencias del frontend (web/config-ui)..."
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    warn "No se encontro 'node'/'npm'. Instala Node.js LTS desde https://nodejs.org y volve a correr este script (la web es opcional)."
+else
+    echo "OK: Node $(node --version)."
+    (
+        cd "$REPO_ROOT/web/config-ui"
+        npm install || warn "npm install fallo en web/config-ui. Revisa el error y volve a intentar a mano."
+    )
+fi
+
 step "Listo."
 echo "Compila y corre Jarvis con: cargo run --release"

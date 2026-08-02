@@ -13,7 +13,7 @@ name = "jarvis"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync", "fs", "signal"] }
+tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync", "fs", "signal", "net"] }
 tokio-util = "0.7"
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls"] }
 tokio-stream = "0.1"
@@ -58,6 +58,11 @@ enigo = "0.2"
 # JSON-RPC + negociación de capacidades a mano. Solo el transporte stdio
 # (proceso hijo local) por ahora — HTTP/SSE queda para una etapa posterior.
 rmcp = { version = "3", default-features = false, features = ["client", "transport-child-process", "which-command"] }
+# Servidor HTTP embebido de la página de configuración local (src/config_ui/),
+# solo 127.0.0.1: API de lectura/escritura de config.yaml + estáticos del
+# frontend (web/config-ui/dist).
+axum = "0.8"
+tower-http = { version = "0.6", default-features = false, features = ["fs"] }
 
 # Solo se usa en Windows (Core Audio, Job Objects, SendInput histórico,
 # consola) — en otras plataformas ni se descarga ni se compila.
