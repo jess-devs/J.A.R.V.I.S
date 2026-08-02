@@ -7,6 +7,14 @@ Protocolo (ver README.md de este directorio):
   Python -> Rust (stdout): ready | transcript | error | fatal_error
   (motor nativo, además):  vad_start | vad_end | discarded | speaker_similarity
 
+Modo calibración (alternativa a "init" como primer mensaje, ver
+calibration_engine.py y src/stt/calibration.rs del lado Rust): no carga
+Whisper/Silero, solo enumera dispositivos PyAudio y transmite el nivel RMS en
+vivo de uno elegido. Pensado para spawnearse aparte del worker de producción,
+bajo demanda, desde la web de configuración.
+  Rust -> Python (stdin):  calibrate -> list_devices | start_calibration | stop_calibration | shutdown
+  Python -> Rust (stdout): calibration_ready | devices | calibration_started | level | error | fatal_error
+
 Con el motor nativo, "mute"/"unmute" no apagan el micrófono físico (PyAudio
 no lo permite tan barato como RealtimeSTT.set_microphone) sino que activan
 el modo "suppressed": el hilo de audio sigue leyendo el stream pero descarta
@@ -535,14 +543,101 @@ def _run_realtimestt(init_msg: dict, profile: dict, shutdown: threading.Event) -
     sys.exit(0)
 
 
+def _run_calibration_mode(shutdown: threading.Event) -> None:
+    """Modo calibración: no toca `cpu_threads`/`hardware_detect` (eso es
+    solo del camino pesado de producción) ni carga ningún modelo. Un hilo
+    aparte (`calib-level`) emite `level` cada ~100ms mientras hay un stream
+    abierto; el hilo principal atiende `list_devices`/`start_calibration`/
+    `stop_calibration`/`shutdown`."""
+    from calibration_engine import CalibrationEngine, friendly_device_error
+
+    try:
+        engine = CalibrationEngine()
+    except Exception as exc:  # noqa: BLE001 - pyaudio.PyAudio() puede fallar si no hay backend de audio disponible
+        ipc.send(
+            {
+                "type": "fatal_error",
+                "code": "audio_backend_init_failed",
+                "message": str(exc),
+            }
+        )
+        sys.exit(1)
+
+    ipc.send({"type": "calibration_ready"})
+
+    def level_loop() -> None:
+        # Sin `time.sleep()` entre lecturas a propósito: `read_level_dbfs()`
+        # ya bloquea aproximadamente `LEVEL_REPORT_INTERVAL_SECS` (el frame
+        # se dimensiona para eso en `CalibrationEngine.start()`), así que
+        # agregar una espera acá encima solo generaba un atraso creciente
+        # entre lo que decías y lo que mostraba la barra -- el stream no se
+        # alcanzaba a drenar al mismo ritmo que se llenaba.
+        while not shutdown.is_set():
+            if engine.device_index is None:
+                time.sleep(0.05)
+                continue
+            try:
+                dbfs = engine.read_level_dbfs()
+            except Exception:  # noqa: BLE001 - stream cerrado/dispositivo caído entre medio: no es fatal, se reintenta
+                time.sleep(0.05)
+                continue
+            ipc.send({"type": "level", "dbfs": dbfs})
+
+    threading.Thread(target=level_loop, daemon=True, name="calib-level").start()
+
+    try:
+        while not shutdown.is_set():
+            msg = ipc.read_line()
+            if msg is None or msg.get("type") == "shutdown":
+                shutdown.set()
+                break
+            msg_type = msg.get("type")
+            if msg_type == "list_devices":
+                try:
+                    devices = engine.list_devices()
+                except Exception as exc:  # noqa: BLE001 - enumerar dispositivos puede fallar por drivers/permisos
+                    ipc.send(
+                        {
+                            "type": "error",
+                            "code": "list_devices_failed",
+                            "message": str(exc),
+                            "recoverable": True,
+                        }
+                    )
+                    continue
+                ipc.send({"type": "devices", "devices": devices})
+            elif msg_type == "start_calibration":
+                try:
+                    started = engine.start(msg.get("device_index"))
+                except Exception as exc:  # noqa: BLE001 - dispositivo ocupado/exclusivo/inexistente: error recuperable, no fatal
+                    ipc.send(
+                        {
+                            "type": "error",
+                            "code": "device_open_failed",
+                            "message": friendly_device_error(exc),
+                            "recoverable": True,
+                        }
+                    )
+                    continue
+                ipc.send({"type": "calibration_started", **started})
+            elif msg_type == "stop_calibration":
+                engine.stop()
+    finally:
+        engine.close()
+
+    sys.exit(0)
+
+
 def main() -> None:
     init_msg = ipc.read_line()
+    if init_msg is not None and init_msg.get("type") == "calibrate":
+        _run_calibration_mode(threading.Event())
     if init_msg is None or init_msg.get("type") != "init":
         ipc.send(
             {
                 "type": "fatal_error",
                 "code": "protocol_error",
-                "message": "esperaba mensaje 'init' como primer mensaje",
+                "message": "esperaba mensaje 'init' o 'calibrate' como primer mensaje",
             }
         )
         sys.exit(1)

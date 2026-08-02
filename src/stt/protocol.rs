@@ -59,9 +59,34 @@ pub struct ClapInit {
     pub refractory_ms: u32,
 }
 
+/// Un dispositivo de entrada de audio tal como lo ve PyAudio (`index` es el
+/// índice de PyAudio, NO el de `cpal` — ver `startup_checks.rs` sobre por
+/// qué esos dos espacios de índices no coinciden).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AudioDeviceInfo {
+    pub index: u32,
+    pub name: String,
+    pub max_input_channels: u32,
+    pub default_sample_rate: u32,
+    pub is_default: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SttInMessage {
+    /// Alternativa a `Init` como primer mensaje: arranca el worker en modo
+    /// calibración (solo PyAudio, sin cargar Whisper/Silero). Ver
+    /// `crate::stt::calibration::CalibrationWorker`.
+    Calibrate,
+    /// Solo válido después de `Calibrate`/`CalibrationReady`.
+    ListDevices,
+    /// Solo válido después de `Calibrate`/`CalibrationReady`. Reabre el
+    /// stream si ya había uno abierto contra otro dispositivo.
+    StartCalibration {
+        device_index: Option<u32>,
+    },
+    /// Solo válido después de `Calibrate`/`CalibrationReady`.
+    StopCalibration,
     Init {
         /// "native" | "realtimestt".
         engine: String,
@@ -113,6 +138,21 @@ pub struct TranscriptMeta {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SttOutMessage {
+    /// Respuesta a `SttInMessage::Calibrate`: el worker de calibración está
+    /// listo para recibir `ListDevices`/`StartCalibration`.
+    CalibrationReady,
+    /// Respuesta a `SttInMessage::ListDevices`.
+    Devices {
+        devices: Vec<AudioDeviceInfo>,
+    },
+    /// Respuesta a `SttInMessage::StartCalibration`: el stream quedó
+    /// abierto contra `device_index`. A partir de acá empiezan a llegar
+    /// `Level{dbfs}` cada ~100ms, igual que en el motor nativo.
+    CalibrationStarted {
+        device_index: u32,
+        device_name: String,
+        sample_rate: u32,
+    },
     Ready {
         device: String,
         compute_type: String,
@@ -207,4 +247,106 @@ pub enum SttOutMessage {
         #[allow(dead_code)]
         text_preview: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calibrate_serializa_como_type_calibrate() {
+        let json = serde_json::to_value(&SttInMessage::Calibrate).unwrap();
+        assert_eq!(json, serde_json::json!({"type": "calibrate"}));
+    }
+
+    #[test]
+    fn list_devices_serializa_como_type_list_devices() {
+        let json = serde_json::to_value(&SttInMessage::ListDevices).unwrap();
+        assert_eq!(json, serde_json::json!({"type": "list_devices"}));
+    }
+
+    #[test]
+    fn start_calibration_serializa_con_device_index() {
+        let json = serde_json::to_value(&SttInMessage::StartCalibration {
+            device_index: Some(2),
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"type": "start_calibration", "device_index": 2})
+        );
+
+        let json_none = serde_json::to_value(&SttInMessage::StartCalibration {
+            device_index: None,
+        })
+        .unwrap();
+        assert_eq!(
+            json_none,
+            serde_json::json!({"type": "start_calibration", "device_index": null})
+        );
+    }
+
+    #[test]
+    fn stop_calibration_serializa_como_type_stop_calibration() {
+        let json = serde_json::to_value(&SttInMessage::StopCalibration).unwrap();
+        assert_eq!(json, serde_json::json!({"type": "stop_calibration"}));
+    }
+
+    #[test]
+    fn calibration_ready_deserializa() {
+        let msg: SttOutMessage =
+            serde_json::from_value(serde_json::json!({"type": "calibration_ready"})).unwrap();
+        assert!(matches!(msg, SttOutMessage::CalibrationReady));
+    }
+
+    #[test]
+    fn devices_deserializa_con_lista_de_dispositivos() {
+        let msg: SttOutMessage = serde_json::from_value(serde_json::json!({
+            "type": "devices",
+            "devices": [
+                {
+                    "index": 1,
+                    "name": "Micrófono USB",
+                    "max_input_channels": 2,
+                    "default_sample_rate": 44100,
+                    "is_default": true
+                }
+            ]
+        }))
+        .unwrap();
+        match msg {
+            SttOutMessage::Devices { devices } => {
+                assert_eq!(devices.len(), 1);
+                assert_eq!(devices[0].index, 1);
+                assert_eq!(devices[0].name, "Micrófono USB");
+                assert_eq!(devices[0].max_input_channels, 2);
+                assert_eq!(devices[0].default_sample_rate, 44100);
+                assert!(devices[0].is_default);
+            }
+            other => panic!("esperaba Devices, llegó {other:?}"),
+        }
+    }
+
+    #[test]
+    fn calibration_started_deserializa() {
+        let msg: SttOutMessage = serde_json::from_value(serde_json::json!({
+            "type": "calibration_started",
+            "device_index": 1,
+            "device_name": "Micrófono USB",
+            "sample_rate": 16000
+        }))
+        .unwrap();
+        match msg {
+            SttOutMessage::CalibrationStarted {
+                device_index,
+                device_name,
+                sample_rate,
+            } => {
+                assert_eq!(device_index, 1);
+                assert_eq!(device_name, "Micrófono USB");
+                assert_eq!(sample_rate, 16000);
+            }
+            other => panic!("esperaba CalibrationStarted, llegó {other:?}"),
+        }
+    }
 }

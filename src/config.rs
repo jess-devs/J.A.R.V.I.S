@@ -24,6 +24,11 @@ pub struct Config {
     pub pipeline: PipelineConfig,
     pub agent: AgentConfig,
     pub welcome: WelcomeConfig,
+    /// Flag de "ya elegiste tu micrófono" que usa la web de configuración
+    /// para decidir si mostrar el wizard de primer arranque (ver
+    /// `src/config_ui/`, sección onboarding). No es un gate: Jarvis arranca
+    /// igual sin importar este valor, es puro valor agregado de UX.
+    pub onboarding: OnboardingConfig,
     pub ui: UiConfig,
     /// Página de configuración local servida por Jarvis mismo (lee/escribe
     /// este mismo config.yaml vía HTTP en 127.0.0.1). Ver `src/config_ui/`.
@@ -49,6 +54,7 @@ impl Default for Config {
             pipeline: PipelineConfig::default(),
             agent: AgentConfig::default(),
             welcome: WelcomeConfig::default(),
+            onboarding: OnboardingConfig::default(),
             ui: UiConfig::default(),
             web_ui: WebUiConfig::default(),
             log_level: "info".to_string(),
@@ -1221,6 +1227,22 @@ impl Default for WelcomeConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OnboardingConfig {
+    /// El wizard de primer arranque de la web de configuración lo pone en
+    /// `true` al terminar (o al saltarlo) — ver `src/config_ui/`,
+    /// `PUT /api/config/onboarding`. La elección real de micrófono queda en
+    /// `stt.input_device_index`/`stt.vad.energy_floor_dbfs`, no acá.
+    pub completed: bool,
+}
+
+impl Default for OnboardingConfig {
+    fn default() -> Self {
+        Self { completed: false }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MarkerKind {
@@ -1257,5 +1279,32 @@ impl Default for UiConfig {
             truecolor: true,
             marker: MarkerKind::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn onboarding_config_default_es_no_completado() {
+        assert!(!OnboardingConfig::default().completed);
+    }
+
+    #[test]
+    fn config_sin_seccion_onboarding_carga_con_default() {
+        // Un YAML sin `onboarding:` (config.yaml de antes de esta feature)
+        // debe seguir cargando, completando la sección con su default.
+        let yaml = "log_level: info\n";
+        let config: Config = serde_saphyr::from_str(yaml).expect("debe parsear igual");
+        assert!(!config.onboarding.completed);
+    }
+
+    #[test]
+    fn onboarding_config_round_trip_yaml() {
+        let config = OnboardingConfig { completed: true };
+        let yaml = serde_saphyr::to_string(&config).expect("debe serializar");
+        let parsed: OnboardingConfig = serde_saphyr::from_str(&yaml).expect("debe parsear");
+        assert!(parsed.completed);
     }
 }

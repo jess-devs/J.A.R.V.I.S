@@ -61,7 +61,7 @@ rmcp = { version = "3", default-features = false, features = ["client", "transpo
 # Servidor HTTP embebido de la página de configuración local (src/config_ui/),
 # solo 127.0.0.1: API de lectura/escritura de config.yaml + estáticos del
 # frontend (web/config-ui/dist).
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", default-features = false, features = ["fs"] }
 
 # Solo se usa en Windows (Core Audio, Job Objects, SendInput histórico,

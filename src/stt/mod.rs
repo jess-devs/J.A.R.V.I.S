@@ -1,6 +1,7 @@
 //! Wrapper del worker de STT: spawnea el proceso Python, hace el handshake
 //! de inicialización y expone un stream de transcripciones al orquestador.
 
+mod calibration;
 mod protocol;
 
 use std::path::Path;
@@ -12,6 +13,7 @@ use crate::config::{BargeInConfig, SpeakerVerificationConfig, SttConfig, Workers
 use crate::errors::WorkerError;
 use crate::ipc::{WorkerFrame, WorkerHandle};
 
+pub use calibration::{CalibrationEvent, CalibrationWorker};
 pub use protocol::{
     BargeInInit, ClapInit, FiltersInit, SpeakerVerificationInit, SttInMessage, SttOutMessage,
     TranscriptMeta, VadInit,

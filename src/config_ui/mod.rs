@@ -10,6 +10,8 @@
 //! (ver brief de la página de configuración). Esto evita tener que enhebrar
 //! un `Config` compartido y mutable a través del `Orchestrator`.
 
+mod calibration;
+
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -24,8 +26,8 @@ use tower_http::services::ServeDir;
 
 use crate::config::{
     AgentConfig, AudioConfig, BargeInConfig, Config, LlmConfig, LlmProviderKind,
-    McpServerConfig, PipelineConfig, SttConfig, TtsConfig, TtsProviderKind, WakeConfig,
-    WelcomeConfig, WorkersConfig,
+    McpServerConfig, OnboardingConfig, PipelineConfig, SttConfig, TtsConfig, TtsProviderKind,
+    WakeConfig, WelcomeConfig, WorkersConfig,
 };
 use crate::errors::ConfigError;
 
@@ -38,7 +40,19 @@ struct AppState {
 /// termine). Pensado para spawnearse como una tarea de fondo desde `main`;
 /// un error de bind se loguea y la tarea simplemente termina, sin tirar
 /// abajo el resto de Jarvis.
-pub async fn serve(config_path: PathBuf, addr: SocketAddr, static_dir: PathBuf) {
+///
+/// `on_bound`, si se pasa, se llama una sola vez apenas el `TcpListener`
+/// bindea con éxito (antes de empezar a servir requests) — hoy lo usa el
+/// modo standalone `jarvis --config-ui` para abrir el navegador
+/// automáticamente, algo que no tendría sentido hacer desde el modo
+/// integrado (Jarvis corriendo en segundo plano no debería abrir ventanas
+/// por su cuenta), que por eso siempre pasa `None`.
+pub async fn serve(
+    config_path: PathBuf,
+    addr: SocketAddr,
+    static_dir: PathBuf,
+    on_bound: Option<Box<dyn FnOnce() + Send>>,
+) {
     let state = AppState { config_path };
 
     let api = Router::new()
@@ -56,6 +70,14 @@ pub async fn serve(config_path: PathBuf, addr: SocketAddr, static_dir: PathBuf) 
         .route("/api/status/welcome", get(status_welcome))
         .route("/api/config/mcp", get(get_mcp).put(put_mcp))
         .route("/api/config/agent", get(get_agent).put(put_agent))
+        .route(
+            "/api/config/onboarding",
+            get(get_onboarding).put(put_onboarding),
+        )
+        .route(
+            "/api/onboarding/calibration/ws",
+            get(calibration::calibration_ws),
+        )
         .with_state(state);
 
     let app = if static_dir.is_dir() {
@@ -81,6 +103,10 @@ pub async fn serve(config_path: PathBuf, addr: SocketAddr, static_dir: PathBuf) 
     };
 
     tracing::info!(%addr, "página de configuración local disponible");
+
+    if let Some(on_bound) = on_bound {
+        on_bound();
+    }
 
     if let Err(e) = axum::serve(listener, app).await {
         tracing::error!(error = %e, "el servidor de la página de configuración terminó con error");
@@ -340,6 +366,7 @@ section_crud!(get_audio, put_audio, audio, AudioConfig);
 section_crud!(get_pipeline, put_pipeline, pipeline, PipelineConfig);
 section_crud!(get_welcome, put_welcome, welcome, WelcomeConfig);
 section_crud!(get_mcp, put_mcp, mcp, Vec<McpServerConfig>);
+section_crud!(get_onboarding, put_onboarding, onboarding, OnboardingConfig);
 
 #[derive(Serialize)]
 struct WelcomeStatus {
