@@ -3,6 +3,7 @@
 
 mod protocol;
 
+use std::path::Path;
 use std::time::Duration;
 
 use tokio::sync::mpsc;
@@ -92,9 +93,15 @@ impl SttWorker {
         stt: &SttConfig,
         barge_in: &BargeInConfig,
         speaker_verification: &SpeakerVerificationConfig,
+        runtime_dir: &Path,
     ) -> Result<Self, WorkerError> {
-        let (handle, mut frames) =
-            WorkerHandle::spawn("stt", &workers.python_executable, &workers.stt_script).await?;
+        let (handle, mut frames) = WorkerHandle::spawn(
+            "stt",
+            &workers.python_executable,
+            &workers.stt_script,
+            runtime_dir,
+        )
+        .await?;
 
         handle
             .send(&SttInMessage::Init {

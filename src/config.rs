@@ -13,6 +13,7 @@ use crate::errors::ConfigError;
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct Config {
+    pub runtime: RuntimeConfig,
     pub workers: WorkersConfig,
     pub stt: SttConfig,
     pub wake: WakeConfig,
@@ -34,6 +35,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            runtime: RuntimeConfig::default(),
             workers: WorkersConfig::default(),
             stt: SttConfig::default(),
             wake: WakeConfig::default(),
@@ -78,7 +80,69 @@ impl Config {
             path: path.to_path_buf(),
             source,
         })?;
-        serde_saphyr::from_str(&raw).map_err(|e| ConfigError::Parse(e.to_string()))
+        let mut config: Self =
+            serde_saphyr::from_str(&raw).map_err(|e| ConfigError::Parse(e.to_string()))?;
+        config.reanchor_runtime_defaults();
+        Ok(config)
+    }
+
+    /// Directorio canónico para todo lo que Jarvis genera en runtime (DBs,
+    /// logs, cache). Única fuente de verdad: `process.rs` la usa para
+    /// exportar `JARVIS_RUNTIME_DIR` a los workers, y los defaults de rutas
+    /// de este mismo `Config` se anclan a ella (ver `reanchor_runtime_defaults`).
+    pub fn runtime_dir(&self) -> &Path {
+        &self.runtime.dir
+    }
+
+    /// Si `runtime.dir` fue personalizado en el YAML, re-ancla a ese
+    /// directorio las rutas que siguen en su valor por defecto literal
+    /// (`data/<archivo>`). Una ruta que el usuario ya haya fijado a algo
+    /// distinto del default no se toca — compatibilidad con configs
+    /// existentes, ver PLAN_RUNTIME_DIR.md fase 5.
+    ///
+    /// Límite conocido: esto compara contra el literal, no contra "el campo
+    /// estaba ausente en el YAML" (indistinguibles con `#[serde(default)]`).
+    /// Si algo llama `Config::save` (ej. la página de configuración local,
+    /// `src/config_ui/`) mientras `runtime.dir` ya está personalizado, el
+    /// valor re-anclado queda escrito tal cual en el YAML; un cambio
+    /// *posterior* de `runtime.dir` ya no lo va a volver a mover, porque
+    /// para entonces el path guardado ya no matchea el literal default.
+    /// Aceptable para el caso común (fijar `runtime.dir` una vez, al
+    /// principio); si se necesita que siga a `runtime.dir` en todo momento
+    /// habría que trackear "el usuario lo fijó a mano" con un
+    /// `Option<PathBuf>` por campo en vez de este heurístico.
+    fn reanchor_runtime_defaults(&mut self) {
+        let dir = self.runtime.dir.clone();
+        if dir == Path::new("data") {
+            return;
+        }
+        let reanchor = |target: &mut PathBuf, filename: &str| {
+            if *target == Path::new("data").join(filename) {
+                *target = dir.join(filename);
+            }
+        };
+        reanchor(&mut self.agent.audit.path, "audit.log");
+        reanchor(&mut self.agent.memory.db_path, "memory.db");
+        reanchor(&mut self.agent.reminders.db_path, "reminders.db");
+        reanchor(&mut self.agent.scripted_tools.db_path, "scripted_tools.db");
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RuntimeConfig {
+    /// Directorio donde Jarvis escribe todo lo que genera en runtime (DBs,
+    /// logs, cache, embeddings). Cubierto en un solo lugar por `.gitignore`
+    /// (`/data/`) — si algo se escapa de acá, es un bug de la herramienta
+    /// que lo escribió, no un hueco de gitignore. Ver PLAN_RUNTIME_DIR.md.
+    pub dir: PathBuf,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            dir: PathBuf::from("data"),
+        }
     }
 }
 

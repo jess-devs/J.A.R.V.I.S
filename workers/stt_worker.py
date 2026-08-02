@@ -162,7 +162,9 @@ def _cli_enroll_voice() -> None:
     try:
         for _ in range(n_frames):
             raw = stream.read(frame, exception_on_overflow=False)
-            chunks.append(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
+            chunks.append(
+                np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+            )
     finally:
         stream.stop_stream()
         stream.close()
@@ -196,7 +198,6 @@ def _cli_enroll_voice() -> None:
 def _cli_test_clap() -> None:
     import numpy as np
     import pyaudio
-
     from clap_detector import ClapDetector
 
     device_index = None
@@ -258,7 +259,9 @@ def _cli_test_clap() -> None:
         frames_per_buffer=frame_native,
     )
     detector = ClapDetector(overrides)
-    nota_remuestreo = " (remuestreado a 16kHz, igual que en producción)" if decimate else ""
+    nota_remuestreo = (
+        " (remuestreado a 16kHz, igual que en producción)" if decimate else ""
+    )
     print(
         f"Escuchando '{info['name']}' (índice {resolved_index}) a {rate}Hz{nota_remuestreo}. "
         "Aplaudí dos veces seguidas. Ctrl+C para salir."
@@ -292,7 +295,9 @@ def _cli_test_clap() -> None:
             if not was_decaying and detector._decaying_since is not None:
                 print("\n  -> onset detectado, esperando decaimiento...")
             if detector._lockout_until > prev_lockout:
-                print("\n  -> rechazado: la energía se sostuvo demasiado (¿voz, no aplauso?)")
+                print(
+                    "\n  -> rechazado: la energía se sostuvo demasiado (¿voz, no aplauso?)"
+                )
             if double_confirmed:
                 print("\n¡DOBLE!")
             elif not had_first_clap and detector._first_clap_at is not None:
@@ -424,6 +429,22 @@ def _run_native(init_msg: dict, profile: dict, shutdown: threading.Event) -> Non
 
 def _run_realtimestt(init_msg: dict, profile: dict, shutdown: threading.Event) -> None:
     try:
+        # RealtimeSTT escribe `realtimesst.log` en el cwd del proceso al
+        # instanciar el recorder (la librería no expone forma de configurar
+        # la ruta). Nos mudamos a JARVIS_RUNTIME_DIR *solo en este camino*
+        # (el motor nativo no usa RealtimeSTT y no necesita esto) y *antes*
+        # de crear el recorder, para no afectar ningún otro path relativo
+        # del proceso — en particular, evita el chdir global en `main()`
+        # que rompería `speaker_verification.DEFAULT_EMBEDDING_PATH`
+        # ("data/...", quedaría "data/data/..." tras el chdir). Va dentro
+        # de este `try` para que un fallo (permisos, ruta inválida) se
+        # reporte como `fatal_error` en vez de tumbar el worker con un
+        # traceback crudo. Ver PLAN_RUNTIME_DIR.md fase 4.
+        runtime_dir = os.environ.get("JARVIS_RUNTIME_DIR")
+        if runtime_dir:
+            os.makedirs(runtime_dir, exist_ok=True)
+            os.chdir(runtime_dir)
+
         from RealtimeSTT import AudioToTextRecorder
 
         recorder = AudioToTextRecorder(

@@ -4,6 +4,7 @@
 //! el `request_id` en el wire protocol queda como aserción defensiva, no
 //! como mecanismo real de concurrencia.
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,11 +30,19 @@ pub struct PiperWorkerProvider {
 }
 
 impl PiperWorkerProvider {
-    pub async fn spawn(workers: &WorkersConfig, tts: &TtsConfig) -> Result<Self, TtsError> {
-        let (handle, mut frames) =
-            WorkerHandle::spawn("tts", &workers.python_executable, &workers.tts_script)
-                .await
-                .map_err(TtsError::Worker)?;
+    pub async fn spawn(
+        workers: &WorkersConfig,
+        tts: &TtsConfig,
+        runtime_dir: &Path,
+    ) -> Result<Self, TtsError> {
+        let (handle, mut frames) = WorkerHandle::spawn(
+            "tts",
+            &workers.python_executable,
+            &workers.tts_script,
+            runtime_dir,
+        )
+        .await
+        .map_err(TtsError::Worker)?;
 
         handle
             .send(&TtsInMessage::Init {

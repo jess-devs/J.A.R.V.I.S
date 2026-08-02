@@ -10,6 +10,12 @@ documentado acá. `config.yaml` se versiona en git, así que **nunca va una API
 key ahí**: las claves de proveedores en la nube se leen de variables de
 entorno (ver [`.env.example`](.env.example)).
 
+## `runtime`
+
+| Clave | Qué hace |
+|---|---|
+| `dir` | Directorio canónico donde Jarvis escribe todo lo que genera en runtime: DBs (`memory`/`reminders`/`scripted_tools`), `audit.log`, logs de tracing de la TUI, cache de calibración de hardware/voz y `speaker_embedding.json`. Default `data`, cubierto entero por una sola línea de `.gitignore` (`/data/`) — si algo se escapa de acá es un bug de la herramienta que lo escribió, no un hueco de gitignore. Se exporta a los workers Python como la env `JARVIS_RUNTIME_DIR`. Si se cambia y `agent.audit.path`/`agent.memory.db_path`/`agent.reminders.db_path`/`agent.scripted_tools.db_path` siguen en su valor por defecto, se re-anclan automáticamente al nuevo directorio (una ruta ya personalizada por el usuario no se toca). |
+
 ## `workers`
 
 Cómo Rust arranca los dos procesos Python (`stt_worker.py`, `tts_worker.py`)

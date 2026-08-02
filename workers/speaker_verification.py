@@ -21,13 +21,23 @@ resto del worker de STT.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 
-DEFAULT_EMBEDDING_PATH = Path("data/speaker_embedding.json")
 _MODEL_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
-_MODEL_CACHE_DIR = "workers/.cache/spkrec-ecapa-voxceleb"
+
+# `JARVIS_RUNTIME_DIR` la inyecta el proceso Rust (ver PLAN_RUNTIME_DIR.md);
+# si falta (worker corrido suelto, sin pasar por Jarvis, ej. `stt_worker.py
+# --enroll-voice` a mano desde la raíz del repo) cae a la ruta historica.
+_runtime_dir = os.environ.get("JARVIS_RUNTIME_DIR")
+if _runtime_dir:
+    DEFAULT_EMBEDDING_PATH = Path(_runtime_dir) / "speaker_embedding.json"
+    _MODEL_CACHE_DIR = os.path.join(_runtime_dir, "cache", "spkrec-ecapa-voxceleb")
+else:
+    DEFAULT_EMBEDDING_PATH = Path("data/speaker_embedding.json")
+    _MODEL_CACHE_DIR = "workers/.cache/spkrec-ecapa-voxceleb"
 
 
 class SpeakerVerifier:
@@ -100,7 +110,9 @@ class SpeakerVerifier:
                 emb = classifier.encode_batch(tensor)
             return emb.squeeze().cpu().numpy()
         except Exception as exc:  # noqa: BLE001 - un fallo puntual no debe tumbar la transcripción
-            print(f"[speaker_verification] fallo calculando embedding: {exc}", flush=True)
+            print(
+                f"[speaker_verification] fallo calculando embedding: {exc}", flush=True
+            )
             return None
 
     def similarity(self, audio: np.ndarray) -> float | None:

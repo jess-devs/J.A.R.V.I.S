@@ -126,6 +126,7 @@ impl Orchestrator {
             &config.stt,
             &config.barge_in,
             &config.agent.speaker_verification,
+            config.runtime_dir(),
         )
         .await?;
         let llm_provider = llm::build_provider(&config)?;
@@ -513,6 +514,7 @@ impl Orchestrator {
             &self.config.stt,
             &self.config.barge_in,
             &self.config.agent.speaker_verification,
+            self.config.runtime_dir(),
         )
         .await?;
         tracing::info!("worker de STT reiniciado, Jarvis sigue escuchando");

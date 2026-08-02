@@ -33,8 +33,12 @@ pub trait TtsProvider: Send + Sync {
 pub async fn build_provider(config: &Config) -> Result<Arc<dyn TtsProvider>, TtsError> {
     match config.tts.provider {
         TtsProviderKind::Piper => {
-            let provider =
-                piper_worker::PiperWorkerProvider::spawn(&config.workers, &config.tts).await?;
+            let provider = piper_worker::PiperWorkerProvider::spawn(
+                &config.workers,
+                &config.tts,
+                config.runtime_dir(),
+            )
+            .await?;
             Ok(Arc::new(provider))
         }
         TtsProviderKind::Elevenlabs => {

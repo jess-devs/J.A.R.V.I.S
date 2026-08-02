@@ -41,9 +41,25 @@ impl WorkerHandle {
         name: &'static str,
         python_executable: &Path,
         script: &Path,
+        runtime_dir: &Path,
     ) -> Result<(Self, mpsc::Receiver<WorkerFrame>), WorkerError> {
+        // `JARVIS_RUNTIME_DIR` es la única fuente de verdad que ven los
+        // workers Python para dónde cae todo lo que escriben (cache, logs).
+        // Se pasa como env en vez de vía cwd: los workers deciden ellos
+        // mismos cuándo (si acaso) hacer `os.chdir()`, después de que el
+        // intérprete ya resolvió su propio `__file__` — ver
+        // PLAN_RUNTIME_DIR.md fase 4 sobre por qué no usar
+        // `Command::current_dir` acá (rompería la resolución de
+        // `python_executable`/`script` cuando son relativos).
+        //
+        // Se exporta absoluto (best-effort: si falla, se manda tal cual)
+        // para que siga siendo válido incluso después de que un worker haga
+        // `os.chdir()` con él — relativo, una segunda lectura de la env
+        // después del chdir resolvería contra el cwd nuevo, no el original.
+        let runtime_dir_abs = std::path::absolute(runtime_dir).unwrap_or_else(|_| runtime_dir.to_path_buf());
         let mut child = Command::new(python_executable)
             .arg(script)
+            .env("JARVIS_RUNTIME_DIR", runtime_dir_abs)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

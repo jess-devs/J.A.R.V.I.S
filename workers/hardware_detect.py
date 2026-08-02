@@ -23,7 +23,14 @@ import sys
 import time
 import wave
 
-CACHE_PATH = os.path.join(os.path.dirname(__file__), ".cache", "stt_profile.json")
+# `JARVIS_RUNTIME_DIR` la inyecta el proceso Rust (ver PLAN_RUNTIME_DIR.md);
+# si falta (worker corrido suelto, sin pasar por Jarvis) cae a la ruta
+# historica junto al propio script.
+_runtime_dir = os.environ.get("JARVIS_RUNTIME_DIR")
+if _runtime_dir:
+    CACHE_PATH = os.path.join(_runtime_dir, "cache", "stt_profile.json")
+else:
+    CACHE_PATH = os.path.join(os.path.dirname(__file__), ".cache", "stt_profile.json")
 
 # Umbrales de la escalera de calibracion en CPU (RTF = tiempo/duracion).
 # Con margen de sobra se habilita ademas la transcripcion temprana durante
