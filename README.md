@@ -152,6 +152,8 @@ cargo run --release -- --config-ui
 
 Levanta solo la [página de configuración local](docs/CONFIGURACION.md#web_ui) (`http://127.0.0.1:4756` por defecto) y nada más del resto de Jarvis: sin STT/TTS/LLM, sin preflight de micrófono/Python/Ollama. Sirve para arreglar un `config.yaml` roto (o simplemente configurarlo desde el navegador en vez de a mano) incluso cuando el resto del programa todavía no puede arrancar. Con `web_ui.enabled: true` (el default) la misma página también queda disponible mientras Jarvis corre normalmente, con o sin `--text-mode`.
 
+En este modo standalone, apenas el servidor levanta, Jarvis abre la página sola en tu navegador default (best-effort: si falla, la URL queda igual impresa en consola). Si es la primera vez que corrés Jarvis (`onboarding.completed: false`), lo primero que ves es un wizard para elegir tu micrófono con un medidor de nivel en vivo — se puede saltar y volver a hacer cuando quieras después desde la sección "Micrófono" del sidebar. Ver [`onboarding`](docs/CONFIGURACION.md#onboarding).
+
 ## Configuración (`config.yaml`)
 
 Todas las claves son opcionales:
@@ -167,6 +169,7 @@ Todas las claves son opcionales:
 - **`agent`**: capa agéntica,activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, y sub-config de `files`/`apps`/`web`/`memory`/`translate`/`reminders`/`scripted_tools`/`audit`. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`mcp`**: lista de servidores MCP externos a los que Jarvis se conecta como cliente (vacía por defecto). Complementa `create_tool`, no lo reemplaza. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`welcome`**: la escena de bienvenida disparada por doble aplauso,activar/desactivar, música, frase de saludo, volúmenes. Ver [Modo bienvenida](#modo-bienvenida-doble-aplauso).
+- **`onboarding`**: solo `completed` — si ya pasaste por el wizard de elección de micrófono de la página de configuración (no confundir con `welcome`, arriba). La elección real del dispositivo vive en `stt.input_device_index`/`stt.vad.energy_floor_dbfs`, no acá. Ver [`onboarding`](docs/CONFIGURACION.md#onboarding).
 
 Guía completa de configuración: [`CONFIGURACION.md`](docs/CONFIGURACION.md).
 

@@ -137,8 +137,12 @@ mientras que `float16` puro falla sin tensor cores) e `int8` en CPU.
 
 Otras claves de esta sección: `language` (código ISO para Whisper),
 `input_device_index` (índice de PyAudio del micrófono, `null` = el
-default del sistema; usá `python workers/stt_worker.py --list-devices` para
-ver los índices reales, o `--calibrate` para un vúmetro en vivo),
+default del sistema; la forma recomendada de elegirlo es la sección
+"Micrófono" de la [página de configuración local](#web_ui) — dropdown de
+dispositivos con vúmetro en vivo, ver [`onboarding`](#onboarding) más abajo.
+También seguís pudiendo usar `python workers/stt_worker.py --list-devices`
+para ver los índices reales desde la terminal, o `--calibrate` para el mismo
+vúmetro en modo texto, sin navegador),
 `beam_size`/`cpu_threads` (override manual de lo que decidiría la
 calibración), `initial_prompt` (contexto que se le da a Whisper para que
 transcriba mejor "Jarvis"), `recalibrate`, y `stuck_state_timeout_secs`
@@ -439,6 +443,38 @@ y con qué parámetros de escena.
 | `duck_volume` | Volumen reducido de la música mientras Jarvis o el usuario hablan (ducking). |
 | `cooldown_secs` | Tras dispararse la escena, ignora nuevos dobles aplausos que la volverían a disparar durante este tiempo. |
 | `news_when_no_reminders` | Si no hay recordatorios pendientes: `true` = cuenta las noticias del día (vía `web_search`); `false` = solo avisa que no hay pendientes. |
+
+## `onboarding`
+
+No confundir con [`welcome`](#welcome) (arriba): esa es la escena de doble
+aplauso al llegar a casa, esto es el wizard de primer arranque de la
+[página de configuración local](#web_ui) para elegir tu micrófono. La
+calibración en sí (dispositivo, piso de energía) no vive acá — queda en
+[`stt.input_device_index`/`stt.vad.energy_floor_dbfs`](#stt), esta sección
+es solo el flag de "ya pasaste por el wizard".
+
+| Clave | Qué hace |
+|---|---|
+| `completed` | `false` (default) = la página de configuración muestra el wizard de elección de micrófono en vez del panel normal. Se pone en `true` solo o al terminar el wizard o al saltarlo ("Saltar por ahora"). No es un gate: Jarvis arranca igual sin importar este valor. |
+
+El desplegable de dispositivos no muestra todo lo que PyAudio devuelve: en
+Windows, PortAudio expone cada micrófono físico una vez por cada host API
+que lo soporta (MME, DirectSound, WASAPI, WDM-KS), así que sin filtrar
+aparecería el mismo micrófono repetido 3-4 veces (con nombres truncados a 31
+caracteres en el caso de MME), más entradas que no son micrófonos en
+absoluto — "Mezcla estéreo"/Stereo Mix (monitorea lo que suena por los
+parlantes, no tu voz), "Asignador de sonido"/Sound Mapper, "Controlador
+primario de captura de sonido" (mapeos genéricos al dispositivo default del
+sistema). `workers/calibration_engine.py::list_devices()` prefiere el host
+API WASAPI (un micrófono físico aparece una sola vez ahí, con el nombre
+completo) y descarta esos nombres conocidos que no son micrófonos reales —
+ver `_looks_like_real_microphone` y sus tests en
+`workers/tests/test_calibration_engine.py` para la lista completa de
+patrones filtrados.
+
+Podés recalibrar el micrófono cuando quieras después, sin volver a pasar por
+el wizard, desde la sección "Micrófono" del sidebar de la misma página — es
+el mismo panel con vúmetro en vivo, solo que reutilizado ahí.
 
 ## `web_ui`
 
