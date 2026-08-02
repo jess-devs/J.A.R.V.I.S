@@ -1,0 +1,26 @@
+.track {
+  flex: 1;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 80ms linear;
+}
+
+.quiet {
+  background: var(--text-tertiary);
+}
+
+.active {
+  background: var(--positive);
+}
+
+.hot {
+  background: var(--danger);
+}

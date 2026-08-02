@@ -4,6 +4,7 @@ import {
   Bot,
   BrainCircuit,
   Cpu,
+  Gauge,
   Mic,
   Plug,
   Sparkles,
@@ -34,8 +35,9 @@ export const GROUPS: GroupDef[] = [
   { id: "system", label: "Sistema" },
 ];
 
-// Las 11 secciones de config.yaml, agrupadas por función.
+// Las 12 secciones de config.yaml, agrupadas por función.
 export const SECTIONS: SectionDef[] = [
+  { id: "onboarding", label: "Micrófono", icon: Gauge, enabled: true, group: "voice_in" },
   { id: "stt", label: "Voz (STT)", icon: Mic, enabled: true, group: "voice_in" },
   { id: "wake", label: "Palabra de activación", icon: Zap, enabled: true, group: "voice_in" },
   { id: "barge_in", label: "Interrupción", icon: Waves, enabled: true, group: "voice_in" },

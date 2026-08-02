@@ -5,6 +5,7 @@ import type {
   LlmConfig,
   LlmStatus,
   McpServerConfig,
+  OnboardingConfig,
   PipelineConfig,
   SttConfig,
   TtsConfig,
@@ -81,4 +82,7 @@ export const api = {
       agent,
       current_risk_code: currentRiskCode ?? null,
     }),
+
+  getOnboarding: () => get<OnboardingConfig>("/api/config/onboarding"),
+  putOnboarding: (cfg: OnboardingConfig) => put("/api/config/onboarding", cfg),
 };

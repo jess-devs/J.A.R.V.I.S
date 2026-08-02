@@ -340,3 +340,38 @@ export interface WelcomeStatus {
   music_file_present: boolean;
   detail: string;
 }
+
+// ---------------------------------------------------------------------
+// onboarding — no confundir con `welcome` (arriba): esto es el wizard de
+// primer arranque / calibración de micrófono, `welcome` es el saludo por
+// doble aplauso al llegar a casa.
+// ---------------------------------------------------------------------
+
+export interface OnboardingConfig {
+  completed: boolean;
+}
+
+/** Espejo de `AudioDeviceInfo` (src/stt/protocol.rs). `index` es un índice
+ * de PyAudio, no de cpal. */
+export interface AudioDeviceInfo {
+  index: number;
+  name: string;
+  max_input_channels: number;
+  default_sample_rate: number;
+  is_default: boolean;
+}
+
+// Espejo del wire format de `CalibrationEvent` (src/stt/calibration.rs) tal
+// como llega por el WebSocket `/api/onboarding/calibration/ws`.
+export type CalibrationServerMessage =
+  | { type: "devices"; devices: AudioDeviceInfo[] }
+  | { type: "started"; device_index: number; device_name: string; sample_rate: number }
+  | { type: "level"; dbfs: number }
+  | { type: "error"; code: string; message: string }
+  | { type: "died" };
+
+// Espejo de `ClientMessage` (src/config_ui/calibration.rs).
+export type CalibrationClientMessage =
+  | { type: "list_devices" }
+  | { type: "start_calibration"; device_index: number | null }
+  | { type: "stop_calibration" };
