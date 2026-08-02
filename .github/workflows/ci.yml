@@ -56,3 +56,22 @@ jobs:
 
       - name: pytest
         run: python -m pytest workers/tests -v
+
+  privacy-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Buscar archivos privados trackeados
+        run: |
+          PATTERN='\.(db|db-wal|db-shm|db-journal|sqlite|sqlite3|log|wav|mp3|pcm|raw|flac|ogg|m4a|opus|webm)$|\.stt\.|transcript[^/]*\.(txt|json|log|csv|md)$|(^|/)speaker_embedding\.json$|\.env(\.|$)|(^|/)\.venv/|(^|/)__pycache__/'
+          MATCHES=$(git ls-files \
+            | grep -E "$PATTERN" \
+            | grep -v '\.env\.example$' \
+            | grep -v '^tests/fixtures/' \
+            || true)
+          if [ -n "$MATCHES" ]; then
+            echo "Archivos que no deberían estar trackeados (datos privados/dependencias locales):"
+            echo "$MATCHES"
+            exit 1
+          fi
