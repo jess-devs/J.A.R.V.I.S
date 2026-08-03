@@ -384,21 +384,44 @@ Sub-secciones:
   tener `debug` activado), `path` (ruta del archivo, `data/audit.log` por
   defecto, se crea si no existe; formato JSON Lines: una línea = un evento,
   con `event` en `tool_executed` o `confirmation_denied`).
-- **`speaker_verification`**: `enabled` (`false` por defecto). Modo sombra
-  del ítem 4 de MEJORAS.md — hoy el nivel de riesgo "Confirmación" acepta
-  un sí/no de *cualquier* voz (Rust busca la frase en la transcripción, no
-  valida quién habló). Con `enabled: true`, el motor STT nativo calcula (en
-  un hilo aparte, sin sumarle latencia al turno) la similitud coseno de
-  cada frase contra una voz de referencia enrolada una vez con `python
-  workers/stt_worker.py --enroll-voice`, y la manda a Rust, que la
-  **loguea** (`tracing::info!`) — **todavía no rechaza ni gatea ninguna
-  confirmación con esto**, es una etapa de recolección de datos reales de
-  umbral antes de aplicarlo a algo relevante a seguridad (ver el ítem 4 v2,
-  pendiente, en MEJORAS.md). Requiere el extra opcional `speechbrain`
-  (`pip install -r workers/requirements-speaker.txt` en el venv de
-  `workers/`, no instalado por defecto) — si falta o no enrolaste tu voz
-  todavía, el worker loguea un aviso al arrancar y sigue funcionando igual
-  que con esto desactivado.
+- **`speaker_verification`**: verificación de hablante — quién dijo la
+  confirmación, no solo qué dijo. El motor STT nativo calcula (en un hilo
+  aparte, sin sumarle latencia al turno) la similitud coseno de cada frase
+  contra una voz de referencia enrolada, vía ECAPA-TDNN (`speechbrain`,
+  extra opcional — `pip install -r workers/requirements-speaker.txt` en el
+  venv de `workers/`, no instalado por defecto; si falta o no enrolaste tu
+  voz, el worker loguea un aviso al arrancar y todo esto se comporta como
+  desactivado). Forma recomendada de enrolar: sección "Micrófono" de la
+  [página de configuración local](#web_ui) — grabación guiada con
+  countdown y reintento; `python workers/stt_worker.py --enroll-voice
+  [--device N] [--seconds N]` sigue andando como alternativa sin navegador
+  (5s por defecto, sin countdown ni reintento).
+  - `enabled` (`false` por defecto): modo sombra — calcula la similitud y
+    la **loguea** (`tracing::info!`), sin bloquear nada. Pensado para juntar
+    datos reales de qué umbral tiene sentido con tu voz/micrófono antes de
+    usarlo para algo relevante a seguridad.
+  - `gate_confirmations` (`false` por defecto): con esto en `true`, el
+    nivel de riesgo "Confirmación" (y el código de aceptación de riesgo
+    extremo) además de aceptar el sí/no o el código, exige que la
+    similitud contra tu voz enrolada supere `similarity_threshold` — si no
+    coincide, o si no se pudo verificar a tiempo, la acción se cancela con
+    un mensaje hablado explicando por qué (nunca un cancel silencioso) y
+    queda lista para volver a intentarse. Se activa automáticamente el
+    cálculo de similitud (como si `enabled: true`) aunque este campo esté
+    en `false`, porque el gating necesita esa misma señal. Prenderlo sin
+    haber enrolado tu voz antes deja toda confirmación en el camino
+    "inconcluso" (ver `on_uncertain`) — la web te avisa si es tu caso.
+  - `similarity_threshold` (`0.6` por defecto, rango típico `0.0..1.0`):
+    **un punto de partida, no una recomendación de seguridad** — ajustalo
+    mirando los valores reales que loguea el modo sombra con tu propia voz
+    y micrófono antes de confiar en él.
+  - `gate_wait_ms` (`600` por defecto): cuánto espera la verificación a que
+    llegue la similitud correlacionada antes de darse por vencida. Este
+    costo solo se paga al aprobar una confirmación de riesgo con el gating
+    activo, nunca en la conversación normal.
+  - `on_uncertain` (`deny` por defecto): qué hacer si `gate_wait_ms` se
+    cumple sin respuesta. `deny` cancela y pide que lo repitas (más
+    seguro); `allow` deja pasar la acción igual, con un aviso en el log.
 
 ## `mcp`
 

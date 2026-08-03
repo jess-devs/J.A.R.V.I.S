@@ -54,7 +54,7 @@ workers/.venv/Scripts/pip install torchaudio==<version-de-torch> --index-url htt
 - `--list-devices`: lista los índices de PyAudio disponibles (para `stt.input_device_index`).
 - `--calibrate`: vúmetro en vivo para ajustar `stt.vad`/`stt.filters`.
 - `--test-clap [--device N] [--min-peak X] [--min-rise X] [--min-zcr X]`: calibra el detector de doble aplauso (`stt.clap`) imprimiendo dBFS/ZCR/fondo/umbral en vivo por frame, y avisando "CLAP!"/"¡DOBLE!" al detectar cada evento.
-- `--enroll-voice [--device N] [--seconds N]`: graba tu voz (5s por defecto) y guarda su embedding de referencia en `data/speaker_embedding.json`, para `agent.speaker_verification` (ítem 4 de MEJORAS.md, modo sombra — ver [`CONFIGURACION.md`](../docs/CONFIGURACION.md#agent)). Requiere el extra opcional `speechbrain` (`pip install -r workers/requirements-speaker.txt`), no instalado por defecto.
+- `--enroll-voice [--device N] [--seconds N]`: graba tu voz (5s por defecto) y guarda su embedding de referencia en `data/speaker_embedding.json`, para `agent.speaker_verification` (ver [`CONFIGURACION.md`](../docs/CONFIGURACION.md#agent)). Alternativa sin navegador a la grabación guiada (con countdown y reintento) de la sección "Micrófono" de la página de configuración local. Requiere el extra opcional `speechbrain` (`pip install -r workers/requirements-speaker.txt`), no instalado por defecto.
 
 Cada worker lee mensajes NDJSON por stdin y escribe NDJSON (+ bytes crudos de audio en el caso de TTS) por stdout. Se puede probar a mano:
 
