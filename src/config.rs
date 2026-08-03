@@ -924,21 +924,80 @@ impl Default for AgentConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnUncertainPolicy {
+    /// Deja pasar la confirmación igual, con un `tracing::warn!` — prioriza
+    /// no trabar a el/la usuaria por sobre la verificación estricta.
+    Allow,
+    /// Cancela la confirmación (con un mensaje hablado explicando por qué,
+    /// nunca en silencio) y deja que la vuelva a pedir — prioriza
+    /// seguridad por sobre comodidad. Default: es la opción segura cuando
+    /// alguien prende `gate_confirmations` sin pensar en este caso.
+    Deny,
+}
+
+impl Default for OnUncertainPolicy {
+    fn default() -> Self {
+        Self::Deny
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpeakerVerificationConfig {
     /// `false` (default): sin cambios respecto al comportamiento actual.
     /// `true`: el motor STT nativo calcula, en un hilo aparte (sin sumar
     /// latencia al turno), la similitud coseno de cada frase contra la voz
-    /// enrolada con `python workers/stt_worker.py --enroll-voice`, y la
-    /// loguea. Modo sombra (ítem 4 v1 de MEJORAS.md): todavía NO se usa
-    /// para gatear ninguna confirmación, solo para juntar datos reales de
-    /// umbral antes de aplicar nada de esto a algo relevante a seguridad.
-    /// Requiere el extra opcional `speechbrain`
-    /// (`pip install -r workers/requirements-speaker.txt` en el venv de
-    /// `workers/`) — si falta, el worker loguea un aviso y sigue andando
-    /// igual que con esto desactivado.
+    /// enrolada (ver la sección "Micrófono" de la página de configuración,
+    /// o `python workers/stt_worker.py --enroll-voice`), y la loguea. Modo
+    /// sombra: por sí solo NO gatea ninguna confirmación — para eso está
+    /// `gate_confirmations`, más abajo. Requiere el extra opcional
+    /// `speechbrain` (`pip install -r workers/requirements-speaker.txt` en
+    /// el venv de `workers/`) — si falta, el worker loguea un aviso y sigue
+    /// andando igual que con esto desactivado. Se activa automáticamente
+    /// (sin que haga falta ponerlo en `true` acá) si `gate_confirmations`
+    /// está prendido, porque el gating necesita esta misma señal — ver
+    /// `SttWorker::spawn`.
     pub enabled: bool,
+    /// `false` (default): las confirmaciones de riesgo aceptan un sí/no de
+    /// *cualquier* voz, igual que hoy. `true`: además exige que la
+    /// similitud contra la voz enrolada supere `similarity_threshold` —
+    /// ver `Orchestrator::verify_speaker`/`handle_confirmation`. Pensado
+    /// como un paso deliberado y separado de `enabled`: activarlo sin
+    /// haber mirado primero tus propios datos de similitud en modo sombra
+    /// (`enabled: true` sin gating, un tiempo) corre el riesgo de fijar un
+    /// umbral que te rechace a vos mismo.
+    pub gate_confirmations: bool,
+    /// Similitud coseno mínima (`[-1, 1]`, típicamente `0.0..1.0`) para
+    /// aceptar una confirmación cuando `gate_confirmations` está activo.
+    /// El default es un punto de partida razonable, NO una recomendación
+    /// de seguridad — ajustalo mirando los valores reales que loguea el
+    /// modo sombra con tu propia voz y micrófono antes de confiar en él.
+    pub similarity_threshold: f32,
+    /// Cuánto espera `verify_speaker` a que llegue la `SpeakerSimilarity`
+    /// correlacionada con la confirmación antes de resolver como
+    /// "inconcluso" (ver `on_uncertain`). La similitud se calcula en un
+    /// hilo Python aparte y llega después de la transcripción — este
+    /// timeout solo se paga en el camino de aprobar una confirmación de
+    /// riesgo, nunca en la conversación normal.
+    pub gate_wait_ms: u32,
+    /// Qué hacer si `gate_wait_ms` se cumple sin que llegue la similitud
+    /// (worker lento, o `gate_confirmations: true` sin ninguna voz
+    /// enrolada todavía). Ver `OnUncertainPolicy`.
+    pub on_uncertain: OnUncertainPolicy,
+}
+
+impl Default for SpeakerVerificationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            gate_confirmations: false,
+            similarity_threshold: 0.6,
+            gate_wait_ms: 600,
+            on_uncertain: OnUncertainPolicy::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

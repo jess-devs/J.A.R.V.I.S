@@ -18,7 +18,9 @@ use crate::agent::{
     AgentTurnResult, PendingConfirmation, TurnContext,
 };
 use crate::audio::{AudioPlayer, MusicPlayer, PlaybackMeter};
-use crate::config::{AgentConfig, BargeInConfig, BargeInMode, Config, SttEngineKind};
+use crate::config::{
+    AgentConfig, BargeInConfig, BargeInMode, Config, OnUncertainPolicy, SttEngineKind,
+};
 use crate::echo_gate::EchoGate;
 use crate::errors::{Result, WorkerError};
 use crate::llm::{self, ChatMessage, LlmProvider, Role};
@@ -53,6 +55,17 @@ enum ConfirmOutcome {
     /// El usuario cambió de tema: la frase es una petición normal y debe
     /// procesarse como turno nuevo (`handle_utterance`), sin wake gate.
     Utterance(String),
+}
+
+/// Resultado de `Orchestrator::verify_speaker`.
+#[derive(Debug, PartialEq, Eq)]
+enum SpeakerCheck {
+    Verified,
+    Rejected,
+    /// No llegó a tiempo ninguna `SpeakerSimilarity` correlacionada dentro
+    /// de `gate_wait_ms` (worker lento, o sin ninguna voz enrolada) — ver
+    /// `SpeakerVerificationConfig::on_uncertain` para qué hacer en este caso.
+    Inconclusive,
 }
 
 pub struct Orchestrator {
@@ -117,6 +130,13 @@ pub struct Orchestrator {
     /// reabrirla, dejando a Jarvis exigiendo la wake word hasta que lo
     /// llamen de nuevo.
     silence_requested: Arc<AtomicBool>,
+    /// Transcripción que llegó mientras `verify_speaker` esperaba una
+    /// `SpeakerSimilarity` correlacionada (ventana de `gate_wait_ms`, casi
+    /// siempre bien por debajo de 1s) — se reprocesa en `on_transcript` en
+    /// cuanto esa espera termina, para no perder lo que el usuario dijo
+    /// mientras tanto. `None` casi siempre: solo se llena en esa ventana
+    /// específica y se vacía apenas se reprocesa.
+    deferred_transcript: Option<String>,
 }
 
 impl Orchestrator {
@@ -129,6 +149,19 @@ impl Orchestrator {
             config.runtime_dir(),
         )
         .await?;
+        if config.agent.speaker_verification.gate_confirmations
+            && !config
+                .runtime_dir()
+                .join("speaker_embedding.json")
+                .is_file()
+        {
+            tracing::warn!(
+                "speaker_verification.gate_confirmations está activo pero todavía no enrolaste \
+                 tu voz — hasta que lo hagas (sección \"Micrófono\" de la página de \
+                 configuración), toda confirmación de riesgo va a resolver como \"inconcluso\" \
+                 (ver speaker_verification.on_uncertain)"
+            );
+        }
         let llm_provider = llm::build_provider(&config)?;
         let tts_provider = tts::build_provider(&config).await?;
         let player = AudioPlayer::new(
@@ -225,6 +258,7 @@ impl Orchestrator {
             // visualmente antes de que llegue el primer `SttEvent::Level`.
             mic_level_tx: watch::channel(-100.0).0,
             silence_requested,
+            deferred_transcript: None,
         })
     }
 
@@ -453,9 +487,12 @@ impl Orchestrator {
                 SttEvent::WorkerDied => {
                     self.restart_stt_or_die().await?;
                 }
-                SttEvent::SpeakerSimilarity { similarity } => {
-                    // Modo sombra (ítem 4 v1 de MEJORAS.md): solo se loguea,
-                    // todavía no gatea ninguna confirmación.
+                SttEvent::SpeakerSimilarity { similarity, .. } => {
+                    // Si llega acá (fuera de `verify_speaker`) es porque no
+                    // había ninguna confirmación esperando gating en ese
+                    // momento — con `gate_confirmations` activo, la que sí
+                    // importa la consume `verify_speaker` directamente
+                    // desde `self.stt.next_event()`, nunca pasa por acá.
                     tracing::info!(similarity, "verificación de hablante (modo sombra)");
                 }
             }
@@ -522,28 +559,42 @@ impl Orchestrator {
     }
 
     async fn on_transcript(&mut self, text: String) {
-        // El micrófono puede captar la cola del propio TTS ya fuera del
-        // turno (la pregunta de confirmación, el cierre de la respuesta).
-        // Sin este filtro ese eco cuenta como habla del usuario: cancela la
-        // confirmación pendiente como "cambió de tema" y realimenta al LLM
-        // con su propia frase, en bucle.
-        let is_echo = self
-            .echo_gate
-            .lock()
-            .map(|eg| eg.is_echo(&text))
-            .unwrap_or(false);
-        if is_echo {
-            tracing::info!(text = %text, "descartado: probable eco del propio TTS");
-            return;
-        }
+        // Cola en vez de recursión: si `verify_speaker` (dentro de
+        // `resolve_pending_confirmation` → `handle_confirmation`) capturó
+        // una transcripción que llegó durante su ventana de espera acotada
+        // (`self.deferred_transcript`), se reprocesa acá abajo con el mismo
+        // pipeline completo (chequeo de eco incluido) en vez de perderse —
+        // ver `docs/planning/verificacion-hablante.md`, A.3.
+        let mut queue = std::collections::VecDeque::from([text]);
+        while let Some(text) = queue.pop_front() {
+            // El micrófono puede captar la cola del propio TTS ya fuera del
+            // turno (la pregunta de confirmación, el cierre de la
+            // respuesta). Sin este filtro ese eco cuenta como habla del
+            // usuario: cancela la confirmación pendiente como "cambió de
+            // tema" y realimenta al LLM con su propia frase, en bucle.
+            let is_echo = self
+                .echo_gate
+                .lock()
+                .map(|eg| eg.is_echo(&text))
+                .unwrap_or(false);
+            if is_echo {
+                tracing::info!(text = %text, "descartado: probable eco del propio TTS");
+                continue;
+            }
 
-        // ¿Hay una confirmación pendiente? Toda transcripción cuenta como
-        // respuesta (bypass del wake gate: el usuario ya está en diálogo).
-        match self.resolve_pending_confirmation(text).await {
-            Ok(ConfirmOutcome::Done) => {}
-            Ok(ConfirmOutcome::Dispatch(text)) => self.dispatch_by_gate(text).await,
-            Ok(ConfirmOutcome::Utterance(text)) => self.handle_utterance(text).await,
-            Err(text) => self.dispatch_by_gate(text).await,
+            // ¿Hay una confirmación pendiente? Toda transcripción cuenta
+            // como respuesta (bypass del wake gate: el usuario ya está en
+            // diálogo).
+            match self.resolve_pending_confirmation(text).await {
+                Ok(ConfirmOutcome::Done) => {}
+                Ok(ConfirmOutcome::Dispatch(text)) => self.dispatch_by_gate(text).await,
+                Ok(ConfirmOutcome::Utterance(text)) => self.handle_utterance(text).await,
+                Err(text) => self.dispatch_by_gate(text).await,
+            }
+
+            if let Some(deferred) = self.deferred_transcript.take() {
+                queue.push_back(deferred);
+            }
         }
     }
 
@@ -900,7 +951,7 @@ impl Orchestrator {
             match confirm::interpret_code(&text, &self.config.agent) {
                 CodeDecision::Correct => {
                     tracing::info!("código de aceptación correcto; se ejecuta la acción");
-                    self.approve_pending(pending).await;
+                    self.approve_with_speaker_gate(pending, &text).await;
                 }
                 CodeDecision::Wrong => {
                     tracing::info!("código de aceptación incorrecto; acción cancelada");
@@ -932,8 +983,7 @@ impl Orchestrator {
         } else {
             match confirm::interpret(&text, &self.config.agent) {
                 ConfirmDecision::Yes => {
-                    tracing::info!("acción confirmada por voz");
-                    self.approve_pending(pending).await;
+                    self.approve_with_speaker_gate(pending, &text).await;
                 }
                 ConfirmDecision::No => {
                     self.cancel_and_acknowledge(pending).await;
@@ -949,6 +999,138 @@ impl Orchestrator {
             }
         }
         ConfirmOutcome::Done
+    }
+
+    /// Aprueba `pending`, pasando primero por la verificación de hablante
+    /// si `speaker_verification.gate_confirmations` está activo —
+    /// compartido entre la rama de confirmación libre (`ConfirmDecision::Yes`)
+    /// y la de código (`CodeDecision::Correct`) de `handle_confirmation`:
+    /// ambas terminan en "ejecutar algo" y deben pasar por el mismo gate.
+    /// `said_text` es la frase que disparó la aprobación (el "sí" o el
+    /// código), usada para correlacionar con la `SpeakerSimilarity`
+    /// correspondiente — ver `verify_speaker`.
+    async fn approve_with_speaker_gate(&mut self, pending: PendingConfirmation, said_text: &str) {
+        if !self.config.agent.speaker_verification.gate_confirmations {
+            self.approve_pending(pending).await;
+            return;
+        }
+        match self.verify_speaker(said_text).await {
+            SpeakerCheck::Verified => {
+                tracing::info!("acción confirmada por voz (verificada)");
+                self.approve_pending(pending).await;
+            }
+            SpeakerCheck::Rejected => {
+                self.deny_by_speaker(pending, "esa voz no coincide con la registrada")
+                    .await;
+            }
+            SpeakerCheck::Inconclusive => {
+                match self.config.agent.speaker_verification.on_uncertain {
+                    OnUncertainPolicy::Allow => {
+                        tracing::warn!(
+                            "verificación de hablante inconclusa; se aprueba igual (on_uncertain: allow)"
+                        );
+                        self.approve_pending(pending).await;
+                    }
+                    OnUncertainPolicy::Deny => {
+                        self.deny_by_speaker(pending, "no pude verificar tu voz a tiempo")
+                            .await;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Espera, acotado por `speaker_verification.gate_wait_ms`, a que
+    /// llegue la `SpeakerSimilarity` correlacionada con `said_text` (esa
+    /// misma frase, la que disparó la aprobación). La similitud se calcula
+    /// en un hilo Python aparte y llega DESPUÉS de esa transcripción — no
+    /// alcanza con leer un valor ya disponible, hace falta esperar
+    /// activamente. Consume eventos directo de `self.stt.next_event()`
+    /// (el loop principal está pausado, esperando a que este método
+    /// vuelva) — mismo patrón "loop + timeout" que `SttWorker::spawn`/
+    /// `CalibrationWorker::spawn` usan al arrancar, aplicado acá en
+    /// caliente.
+    async fn verify_speaker(&mut self, said_text: &str) -> SpeakerCheck {
+        let threshold = self.config.agent.speaker_verification.similarity_threshold;
+        let wait = Duration::from_millis(self.config.agent.speaker_verification.gate_wait_ms as u64);
+        let said_normalized = normalize_for_match(said_text);
+        let deadline = tokio::time::Instant::now() + wait;
+
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return SpeakerCheck::Inconclusive;
+            }
+            let event = match tokio::time::timeout(remaining, self.stt.next_event()).await {
+                Ok(event) => event,
+                Err(_) => return SpeakerCheck::Inconclusive,
+            };
+            let Some(event) = event else {
+                // El worker murió del todo — el loop principal lo va a
+                // notar y reiniciarlo en su próxima vuelta; acá no hay
+                // nada más que esperar.
+                return SpeakerCheck::Inconclusive;
+            };
+            match event {
+                SttEvent::SpeakerSimilarity {
+                    similarity,
+                    text_preview,
+                } => {
+                    if speaker_similarity_matches(&said_normalized, &text_preview) {
+                        return if similarity >= threshold {
+                            SpeakerCheck::Verified
+                        } else {
+                            SpeakerCheck::Rejected
+                        };
+                    }
+                    // No corresponde a esta frase (ej. de una anterior que
+                    // todavía no había terminado de calcularse) — seguir
+                    // esperando dentro del mismo deadline.
+                }
+                SttEvent::Level { dbfs } => {
+                    self.mic_level_tx.send_replace(dbfs);
+                }
+                SttEvent::Transcript { text, .. } => {
+                    // El usuario siguió hablando durante esta espera de
+                    // <1s — no se pierde, `on_transcript` lo reprocesa
+                    // apenas este método vuelve (ver el loop en
+                    // `on_transcript`).
+                    self.deferred_transcript = Some(text);
+                }
+                SttEvent::WorkerDied => return SpeakerCheck::Inconclusive,
+                // VadStart/VadEnd/Discarded/ClapDetected/SpeechConfirmed:
+                // nada que hacer con esto en medio de una verificación.
+                _ => {}
+            }
+        }
+    }
+
+    /// Variante de `cancel_and_acknowledge`/el manejo de `CodeDecision::Wrong`
+    /// para cuando el gating por voz rechaza o no puede verificar una
+    /// confirmación — mismo criterio que ahí: mensaje hablado fijo y
+    /// concreto, nunca un cancel silencioso, y siempre dejando la puerta
+    /// abierta a volver a pedirlo.
+    async fn deny_by_speaker(&mut self, pending: PendingConfirmation, spoken_reason: &str) {
+        tracing::info!(
+            reason = spoken_reason,
+            "confirmación rechazada por verificación de hablante"
+        );
+        self.cancel_pending(
+            pending,
+            &format!(
+                "La verificación de hablante rechazó la confirmación ({spoken_reason}); la acción fue cancelada."
+            ),
+        );
+        agent::speak(
+            &self.tts,
+            &mut self.player,
+            &self.echo_gate,
+            &format!(
+                "Perdón, señor, {spoken_reason}. Cancelé la acción por seguridad — pedímelo de nuevo cuando quieras."
+            ),
+        )
+        .await;
+        self.finish_turn().await;
     }
 
     /// El usuario aprobó: ejecutar la herramienta pendiente y retomar el
@@ -1266,5 +1448,70 @@ async fn handle_barge_in_event(
                 gate.push_ambient(text);
             }
         }
+    }
+}
+
+/// Espacios colapsados y minúsculas — nada más. A diferencia de
+/// `wake::normalize_phrase` (que además saca tildes/puntuación para
+/// tolerar variaciones REALES de transcripción entre dos enunciados
+/// distintos de "jarvis"), acá `text_preview` es literalmente
+/// `texto_dicho[:40]` calculado del lado de Python sobre la MISMA cadena
+/// que ya llegó como `text` — deberían coincidir carácter a carácter salvo
+/// mayúsculas/espacios, no hace falta tolerar más que eso.
+fn normalize_for_match(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+/// `text_preview` son los primeros 40 caracteres (ver `text[:40]` en
+/// `workers/stt_engine.py::_check_speaker_async`) del texto que generó esa
+/// similitud — se compara por prefijo normalizado, no por igualdad exacta,
+/// porque el preview puede quedar cortado a mitad de palabra si la frase
+/// original pasa los 40 caracteres.
+fn speaker_similarity_matches(said_normalized: &str, text_preview: &str) -> bool {
+    let preview_normalized = normalize_for_match(text_preview);
+    if preview_normalized.is_empty() {
+        return false;
+    }
+    said_normalized.starts_with(&preview_normalized) || preview_normalized.starts_with(said_normalized)
+}
+
+#[cfg(test)]
+mod speaker_gate_tests {
+    use super::*;
+
+    #[test]
+    fn matches_frase_identica() {
+        let said = normalize_for_match("sí, confirmo");
+        assert!(speaker_similarity_matches(&said, "sí, confirmo"));
+    }
+
+    #[test]
+    fn matches_ignora_mayusculas_y_espacios_extra() {
+        let said = normalize_for_match("Sí,   confirmo");
+        assert!(speaker_similarity_matches(&said, "sí, confirmo"));
+    }
+
+    #[test]
+    fn matches_preview_truncado_a_40_caracteres() {
+        let frase_larga = "sí, confirmo, adelante con la acción que me pediste hacer";
+        let said = normalize_for_match(frase_larga);
+        let preview_truncado = &frase_larga[..40.min(frase_larga.len())];
+        assert!(speaker_similarity_matches(&said, preview_truncado));
+    }
+
+    #[test]
+    fn no_matchea_frases_distintas() {
+        let said = normalize_for_match("sí, confirmo");
+        assert!(!speaker_similarity_matches(&said, "no, cancelá todo"));
+    }
+
+    #[test]
+    fn no_matchea_preview_vacio() {
+        let said = normalize_for_match("sí, confirmo");
+        assert!(!speaker_similarity_matches(&said, ""));
+        assert!(!speaker_similarity_matches(&said, "   "));
     }
 }

@@ -1,20 +1,27 @@
-"""Motor liviano de calibración de micrófono: enumerar dispositivos PyAudio y
-transmitir el nivel RMS->dBFS en vivo de un dispositivo elegido, sin cargar
-ningún modelo (Whisper/Silero/torch). Código nuevo modelado sobre
-`stt_worker.py::_cli_calibrate`/`_cli_list_devices` (el CLI de diagnóstico
-por terminal), no una extracción de `stt_engine.py::_Engine` — esa clase es
-mucho más grande (VAD, transcripción, tres hilos) y no tiene una pieza de
-captura reutilizable tal cual.
+"""Motor liviano de calibración de micrófono: enumerar dispositivos PyAudio,
+transmitir el nivel RMS->dBFS en vivo de un dispositivo elegido, y grabar el
+audio de enrollment de voz — todo sin cargar ningún modelo pesado
+(Whisper/Silero/torch) acá; el embedding de hablante lo calcula
+`speaker_verification.SpeakerVerifier`, importado perezosamente por
+`stt_worker.py` recién cuando termina una grabación de enrollment. Código
+nuevo modelado sobre `stt_worker.py::_cli_calibrate`/`_cli_list_devices`/
+`_cli_enroll_voice` (los CLI de diagnóstico por terminal), no una extracción
+de `stt_engine.py::_Engine` — esa clase es mucho más grande (VAD,
+transcripción, tres hilos) y no tiene una pieza de captura reutilizable tal
+cual.
 
 Usado por el modo `calibrate` de `stt_worker.py`, hablado desde Rust por
 `crate::stt::calibration::CalibrationWorker` (ver `src/stt/protocol.rs` para
 el shape exacto de los mensajes `list_devices`/`start_calibration`/
-`stop_calibration`/`devices`/`calibration_started`/`level`/`error`).
+`stop_calibration`/`start_enroll`/`cancel_enroll`/`devices`/
+`calibration_started`/`enroll_started`/`enroll_progress`/
+`enroll_processing`/`enroll_complete`/`level`/`error`).
 """
 
 from __future__ import annotations
 
 import threading
+import time
 
 import numpy as np
 import pyaudio
@@ -118,6 +125,12 @@ class CalibrationEngine:
         self.device_index: int | None = None
         self.device_name: str = ""
         self.sample_rate: int = 0
+        # true mientras `start_enroll` está leyendo el stream desde su
+        # propio hilo -- `level_loop` (stt_worker.py) lo chequea para NO
+        # llamar `read_level_dbfs()` en paralelo: ambos hilos leyendo del
+        # mismo stream se robarían frames entre sí (un `read()` es
+        # consumidor, no hay forma de que dos lectores vean el mismo audio).
+        self.is_enrolling: bool = False
 
     def list_devices(self) -> list[dict]:
         """Enumera micrófonos reales, no "todos los dispositivos con canales
@@ -243,6 +256,59 @@ class CalibrationEngine:
             raw = self._stream.read(self._frames_per_read, exception_on_overflow=False)
         audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
         return rms_dbfs(audio)
+
+    def record_enroll(
+        self,
+        seconds: float,
+        on_progress,
+        cancel_event: threading.Event,
+    ) -> np.ndarray:
+        """Graba `seconds` de audio del stream YA ABIERTO (por una llamada
+        previa a `start()`) EN EL HILO QUE LLAMA a esta función — el
+        llamador (`stt_worker.py::_run_calibration_mode`) debe correr esto
+        en un hilo aparte, nunca en el hilo de control de IPC (bloqueado en
+        `ipc.read_line()`): si grabar+calcular el embedding corriera ahí,
+        un `cancel_enroll`/`shutdown` durante ese lapso quedaría sin
+        atender.
+
+        `on_progress(elapsed_ms, total_ms)` se llama cada ~200ms. Si
+        `cancel_event` se dispara antes de completar `seconds`, corta ahí y
+        devuelve el audio grabado hasta ese punto (puede ser corto o
+        vacío) — es responsabilidad del llamador decidir qué hacer con un
+        audio parcial (en la práctica, no calcular el embedding).
+
+        NO toca `self.is_enrolling` — eso es responsabilidad del llamador
+        (`stt_worker.py::run_enrollment`), que lo mantiene en `true` durante
+        TODO el enrollment (grabación + cálculo del embedding), no solo
+        mientras este método está leyendo el stream. Mientras esté en
+        `true`, `read_level_dbfs()` no debe llamarse desde otro hilo: ambos
+        leerían del mismo stream y se robarían frames entre sí (un `read()`
+        es consumidor) — y aunque acá ya no hay lectura de stream durante el
+        cálculo del embedding, `level_loop` retomando justo en ese momento
+        solo generaría tráfico de WS sin sentido mientras la UI muestra
+        "procesando"."""
+        total_samples = max(1, int(seconds * self.sample_rate))
+        # ~20ms por chunk: grano fino para que el progreso y la cancelación
+        # respondan rápido, sin relación con `_frames_per_read` (pensado
+        # para el caso de uso del vúmetro).
+        chunk_samples = max(1, round(self.sample_rate * 0.02))
+        chunks: list[np.ndarray] = []
+        read_samples = 0
+        total_ms = int(seconds * 1000)
+        last_progress = time.monotonic()
+        while read_samples < total_samples and not cancel_event.is_set():
+            with self._lock:
+                if self._stream is None:
+                    break
+                n = min(chunk_samples, total_samples - read_samples)
+                raw = self._stream.read(n, exception_on_overflow=False)
+            chunks.append(np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0)
+            read_samples += n
+            now = time.monotonic()
+            if now - last_progress >= 0.2:
+                on_progress(int(read_samples / self.sample_rate * 1000), total_ms)
+                last_progress = now
+        return np.concatenate(chunks) if chunks else np.zeros(0, dtype=np.float32)
 
     def stop(self) -> None:
         with self._lock:

@@ -52,10 +52,15 @@ pub enum SttEvent {
         dbfs: f32,
     },
     WorkerDied,
-    /// Modo sombra del ítem 4 de MEJORAS.md — ver
-    /// `SpeakerVerificationInit`/`SttOutMessage::SpeakerSimilarity`.
+    /// Ver `SpeakerVerificationInit`/`SttOutMessage::SpeakerSimilarity`. En
+    /// modo sombra (`enabled`, sin `gate_confirmations`) esto solo se
+    /// loguea; con `gate_confirmations` activo, `text_preview` es la clave
+    /// que usa `Orchestrator::verify_speaker` para correlacionar esta
+    /// similitud (llega asíncrona, después) con la confirmación que la
+    /// disparó.
     SpeakerSimilarity {
         similarity: f32,
+        text_preview: String,
     },
 }
 
@@ -132,7 +137,12 @@ impl SttWorker {
                     vad_threshold_while_speaking: barge_in.echo_guard.vad_threshold_while_speaking,
                 },
                 speaker_verification: SpeakerVerificationInit {
-                    enabled: speaker_verification.enabled,
+                    // `gate_confirmations` necesita esta misma señal de
+                    // Python (la similitud calculada) para poder gatear
+                    // algo — activarlo sin `enabled` igual debe encender
+                    // el cálculo, si no el gating no tendría con qué
+                    // trabajar. Ver el doc-comment de `SpeakerVerificationConfig`.
+                    enabled: speaker_verification.enabled || speaker_verification.gate_confirmations,
                 },
                 clap: ClapInit {
                     min_peak_dbfs: stt.clap.min_peak_dbfs,
@@ -259,8 +269,14 @@ impl SttWorker {
                             tracing::error!(code = %code, message = %message, "error fatal del worker STT");
                             return Some(SttEvent::WorkerDied);
                         }
-                        Ok(SttOutMessage::SpeakerSimilarity { similarity, .. }) => {
-                            return Some(SttEvent::SpeakerSimilarity { similarity })
+                        Ok(SttOutMessage::SpeakerSimilarity {
+                            similarity,
+                            text_preview,
+                        }) => {
+                            return Some(SttEvent::SpeakerSimilarity {
+                                similarity,
+                                text_preview,
+                            })
                         }
                         Ok(_) => continue,
                         Err(e) => {

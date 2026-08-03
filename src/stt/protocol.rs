@@ -24,12 +24,14 @@ pub struct FiltersInit {
     pub max_compression_ratio: f32,
 }
 
-/// Espeja `SpeakerVerificationConfig` (src/config.rs) — modo sombra del
-/// ítem 4 de MEJORAS.md: si `enabled`, el motor nativo calcula (en un hilo
-/// aparte, sin sumar latencia al turno) la similitud coseno de cada frase
-/// contra la voz enrolada con `--enroll-voice`, y la manda como
-/// `speaker_similarity` para quedar logueada — todavía no gatea ninguna
-/// confirmación.
+/// Espeja `SpeakerVerificationConfig` (src/config.rs): si `enabled`, el
+/// motor nativo calcula (en un hilo aparte, sin sumar latencia al turno) la
+/// similitud coseno de cada frase contra la voz enrolada, y la manda como
+/// `speaker_similarity`. Este `enabled` es `config.enabled ||
+/// config.gate_confirmations` (ver `SttWorker::spawn`) — el gating de
+/// confirmaciones de riesgo necesita esta misma señal calculada, así que
+/// prender `gate_confirmations` la enciende aunque `enabled` esté en
+/// `false`.
 #[derive(Debug, Serialize)]
 pub struct SpeakerVerificationInit {
     pub enabled: bool,
@@ -87,6 +89,20 @@ pub enum SttInMessage {
     },
     /// Solo válido después de `Calibrate`/`CalibrationReady`.
     StopCalibration,
+    /// Solo válido después de `Calibrate`/`CalibrationReady`. Graba
+    /// `seconds` de audio contra `device_index` (`None` = default del
+    /// sistema) y, al terminar, calcula el embedding de referencia de
+    /// `SpeakerVerifier.enroll()` — ver `workers/speaker_verification.py`.
+    /// Si ya había una calibración de nivel en curso (`StartCalibration`),
+    /// la reemplaza: no pueden convivir un stream de nivel y uno de
+    /// enrollment al mismo tiempo.
+    StartEnroll {
+        device_index: Option<u32>,
+        seconds: f32,
+    },
+    /// Solo válido después de `StartEnroll`. Corta la grabación en curso
+    /// (no hace nada si ya terminó o si no hay ningún enrollment activo).
+    CancelEnroll,
     Init {
         /// "native" | "realtimestt".
         engine: String,
@@ -152,6 +168,27 @@ pub enum SttOutMessage {
         device_index: u32,
         device_name: String,
         sample_rate: u32,
+    },
+    /// Respuesta a `SttInMessage::StartEnroll`: la grabación arrancó.
+    EnrollStarted {
+        device_index: u32,
+        device_name: String,
+        total_ms: u32,
+    },
+    /// Progreso de la grabación en curso, cada ~200ms.
+    EnrollProgress {
+        elapsed_ms: u32,
+        total_ms: u32,
+    },
+    /// La grabación terminó y se está calculando el embedding — puede
+    /// tardar (hasta ~14s la primera vez que se carga el modelo de
+    /// `speechbrain`, más si hace falta descargar sus pesos). Sin este
+    /// evento la UI se vería colgada entre el fin de la grabación y
+    /// `EnrollComplete`/`Error`.
+    EnrollProcessing,
+    /// Embedding calculado y guardado con éxito.
+    EnrollComplete {
+        embedding_path: String,
     },
     Ready {
         device: String,
@@ -237,14 +274,16 @@ pub enum SttOutMessage {
         code: String,
         message: String,
     },
-    /// Modo sombra del ítem 4 de MEJORAS.md (ver `SpeakerVerificationInit`):
-    /// similitud coseno de la última frase contra la voz enrolada. Llega
-    /// asíncrono, después del `Transcript` correspondiente (se calcula en
-    /// un hilo aparte para no sumarle latencia al turno) — hoy solo se
-    /// loguea, no gatea ninguna confirmación.
+    /// Similitud coseno de la última frase contra la voz enrolada (ver
+    /// `SpeakerVerificationInit`). Llega asíncrono, después del `Transcript`
+    /// correspondiente (se calcula en un hilo aparte para no sumarle
+    /// latencia al turno). En modo sombra solo se loguea; con
+    /// `speaker_verification.gate_confirmations` activo, `text_preview`
+    /// (los primeros 40 caracteres de esa frase) es la clave que usa
+    /// `Orchestrator::verify_speaker` para correlacionarla con la
+    /// confirmación que la disparó.
     SpeakerSimilarity {
         similarity: f32,
-        #[allow(dead_code)]
         text_preview: String,
     },
 }
@@ -347,6 +386,100 @@ mod tests {
                 assert_eq!(sample_rate, 16000);
             }
             other => panic!("esperaba CalibrationStarted, llegó {other:?}"),
+        }
+    }
+
+    #[test]
+    fn start_enroll_serializa_con_device_index_y_seconds() {
+        let json = serde_json::to_value(&SttInMessage::StartEnroll {
+            device_index: Some(1),
+            seconds: 5.0,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"type": "start_enroll", "device_index": 1, "seconds": 5.0})
+        );
+
+        let json_none = serde_json::to_value(&SttInMessage::StartEnroll {
+            device_index: None,
+            seconds: 5.0,
+        })
+        .unwrap();
+        assert_eq!(
+            json_none,
+            serde_json::json!({"type": "start_enroll", "device_index": null, "seconds": 5.0})
+        );
+    }
+
+    #[test]
+    fn cancel_enroll_serializa_como_type_cancel_enroll() {
+        let json = serde_json::to_value(&SttInMessage::CancelEnroll).unwrap();
+        assert_eq!(json, serde_json::json!({"type": "cancel_enroll"}));
+    }
+
+    #[test]
+    fn enroll_started_deserializa() {
+        let msg: SttOutMessage = serde_json::from_value(serde_json::json!({
+            "type": "enroll_started",
+            "device_index": 1,
+            "device_name": "Micrófono USB",
+            "total_ms": 5000
+        }))
+        .unwrap();
+        match msg {
+            SttOutMessage::EnrollStarted {
+                device_index,
+                device_name,
+                total_ms,
+            } => {
+                assert_eq!(device_index, 1);
+                assert_eq!(device_name, "Micrófono USB");
+                assert_eq!(total_ms, 5000);
+            }
+            other => panic!("esperaba EnrollStarted, llegó {other:?}"),
+        }
+    }
+
+    #[test]
+    fn enroll_progress_deserializa() {
+        let msg: SttOutMessage = serde_json::from_value(serde_json::json!({
+            "type": "enroll_progress",
+            "elapsed_ms": 1200,
+            "total_ms": 5000
+        }))
+        .unwrap();
+        match msg {
+            SttOutMessage::EnrollProgress {
+                elapsed_ms,
+                total_ms,
+            } => {
+                assert_eq!(elapsed_ms, 1200);
+                assert_eq!(total_ms, 5000);
+            }
+            other => panic!("esperaba EnrollProgress, llegó {other:?}"),
+        }
+    }
+
+    #[test]
+    fn enroll_processing_deserializa() {
+        let msg: SttOutMessage =
+            serde_json::from_value(serde_json::json!({"type": "enroll_processing"})).unwrap();
+        assert!(matches!(msg, SttOutMessage::EnrollProcessing));
+    }
+
+    #[test]
+    fn enroll_complete_deserializa() {
+        let msg: SttOutMessage = serde_json::from_value(serde_json::json!({
+            "type": "enroll_complete",
+            "embedding_path": "data/speaker_embedding.json"
+        }))
+        .unwrap();
+        match msg {
+            SttOutMessage::EnrollComplete { embedding_path } => {
+                assert_eq!(embedding_path, "data/speaker_embedding.json");
+            }
+            other => panic!("esperaba EnrollComplete, llegó {other:?}"),
         }
     }
 }

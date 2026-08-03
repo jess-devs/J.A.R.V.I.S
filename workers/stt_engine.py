@@ -105,6 +105,20 @@ class _Engine:
             verifier = SpeakerVerifier()
             if verifier.enrolled:
                 self.speaker_verifier = verifier
+                # Fuerza ACÁ, en el hilo principal (todavía no arrancó
+                # ningún otro hilo), el import pesado de `speechbrain`
+                # (arrastra scipy/torch) que `_check_speaker_async` haría
+                # más tarde de forma perezosa en su propio hilo
+                # ("speaker-verify") — confirmado con py-spy que la primera
+                # carga de una extensión nativa como `scipy.linalg.blas` en
+                # un hilo que no es el principal puede colgar
+                # indefinidamente en Windows (loader lock). El import queda
+                # cacheado en `sys.modules`, así que `_check_speaker_async`
+                # no vuelve a pagar este costo.
+                try:
+                    import speechbrain  # noqa: F401
+                except Exception:  # noqa: BLE001 - si falla, el primer embed() real ya lo va a reportar
+                    pass
             else:
                 print(
                     "[speaker_verification] agent.speaker_verification.enabled=true pero "

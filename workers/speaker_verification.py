@@ -1,12 +1,11 @@
-"""Verificación de hablante — modo sombra (ítem 4 v1 de MEJORAS.md).
+"""Verificación de hablante (`agent.speaker_verification`).
 
 Calcula la similitud coseno entre el embedding de voz de cada frase y un
-embedding de referencia enrolado una vez (`stt_worker.py --enroll-voice`).
-Todavía NO se usa para gatear ninguna confirmación de seguridad — el valor
-solo viaja hacia Rust (mensaje `speaker_similarity`) para quedar logueado,
-así se junta evidencia real de qué umbral tendría sentido antes de aplicar
-esto a algo relevante a seguridad (ver `agent.speaker_verification` en
-docs/CONFIGURACION.md).
+embedding de referencia enrolado una vez (sección "Micrófono" de la página
+de configuración, o `stt_worker.py --enroll-voice`). En modo sombra
+(`enabled`) el valor solo viaja hacia Rust para quedar logueado; con
+`gate_confirmations` activo, Rust además lo usa para exigir que coincida
+antes de aprobar una confirmación de riesgo (ver docs/CONFIGURACION.md).
 
 Usa ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb`) vía el extra opcional
 `speechbrain` — pesado (~80MB de pesos + torch, que el venv ya trae para
@@ -24,7 +23,21 @@ import json
 import os
 from pathlib import Path
 
-import numpy as np
+# Hay que fijar esto ANTES de que algo importe `huggingface_hub`/`speechbrain`
+# (acá o en cualquier otro módulo que se importe antes): sus barras de
+# progreso de descarga/verificación escriben con `\r` sin salto de línea.
+# Este worker corre con stdout redirigido a stderr (ver `ipc.py`, dup2 a
+# nivel de fd) y Rust lee stderr línea por línea (`BufReader::lines`) — un
+# `\r` repetido sin `\n` nunca completa una línea, así que si el pipe (con
+# buffer limitado del lado de Windows) se llena antes de que aparezca un
+# salto de línea real, el próximo `write()` del lado Python se bloquea para
+# siempre esperando que alguien lo drene, y nadie puede: cuelga el hilo que
+# esté cargando el modelo (visto en vivo: `EncoderClassifier.from_hparams`
+# nunca vuelve, aunque el modelo ya esté en caché local). Desactivar las
+# barras de progreso evita el escenario de raíz, no solo lo esconde.
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
+import numpy as np  # noqa: E402
 
 _MODEL_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
 

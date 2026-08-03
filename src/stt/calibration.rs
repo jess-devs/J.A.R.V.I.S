@@ -43,8 +43,27 @@ pub enum CalibrationEvent {
     Level {
         dbfs: f32,
     },
+    /// La grabación de enrollment de voz arrancó.
+    EnrollStarted {
+        device_index: u32,
+        device_name: String,
+        total_ms: u32,
+    },
+    /// Progreso de la grabación en curso, cada ~200ms.
+    EnrollProgress {
+        elapsed_ms: u32,
+        total_ms: u32,
+    },
+    /// Grabación terminada, calculando el embedding — puede tardar (carga
+    /// perezosa del modelo de `speechbrain`).
+    EnrollProcessing,
+    /// Embedding calculado y guardado con éxito.
+    EnrollComplete {
+        embedding_path: String,
+    },
     /// Error recuperable (dispositivo ocupado/exclusivo, enumeración
-    /// fallida, etc.) — el worker sigue vivo, se puede reintentar.
+    /// fallida, enrollment fallido, etc.) — el worker sigue vivo, se puede
+    /// reintentar.
     Error {
         code: String,
         message: String,
@@ -119,6 +138,23 @@ impl CalibrationWorker {
         self.handle.send(&SttInMessage::StopCalibration).await
     }
 
+    pub async fn start_enroll(
+        &self,
+        device_index: Option<u32>,
+        seconds: f32,
+    ) -> Result<(), WorkerError> {
+        self.handle
+            .send(&SttInMessage::StartEnroll {
+                device_index,
+                seconds,
+            })
+            .await
+    }
+
+    pub async fn cancel_enroll(&self) -> Result<(), WorkerError> {
+        self.handle.send(&SttInMessage::CancelEnroll).await
+    }
+
     /// Espera el próximo evento del worker. `None` indica que el stream de
     /// frames se cerró (proceso terminado) sin que llegara a mandarse un
     /// `fatal_error` explícito — el llamador debe tratarlo igual que
@@ -144,6 +180,32 @@ impl CalibrationWorker {
                         }
                         Ok(SttOutMessage::Level { dbfs }) => {
                             return Some(CalibrationEvent::Level { dbfs })
+                        }
+                        Ok(SttOutMessage::EnrollStarted {
+                            device_index,
+                            device_name,
+                            total_ms,
+                        }) => {
+                            return Some(CalibrationEvent::EnrollStarted {
+                                device_index,
+                                device_name,
+                                total_ms,
+                            })
+                        }
+                        Ok(SttOutMessage::EnrollProgress {
+                            elapsed_ms,
+                            total_ms,
+                        }) => {
+                            return Some(CalibrationEvent::EnrollProgress {
+                                elapsed_ms,
+                                total_ms,
+                            })
+                        }
+                        Ok(SttOutMessage::EnrollProcessing) => {
+                            return Some(CalibrationEvent::EnrollProcessing)
+                        }
+                        Ok(SttOutMessage::EnrollComplete { embedding_path }) => {
+                            return Some(CalibrationEvent::EnrollComplete { embedding_path })
                         }
                         Ok(SttOutMessage::Error { code, message, .. }) => {
                             return Some(CalibrationEvent::Error { code, message })

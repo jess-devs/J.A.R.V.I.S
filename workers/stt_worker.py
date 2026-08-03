@@ -547,8 +547,9 @@ def _run_calibration_mode(shutdown: threading.Event) -> None:
     """Modo calibración: no toca `cpu_threads`/`hardware_detect` (eso es
     solo del camino pesado de producción) ni carga ningún modelo. Un hilo
     aparte (`calib-level`) emite `level` cada ~100ms mientras hay un stream
-    abierto; el hilo principal atiende `list_devices`/`start_calibration`/
-    `stop_calibration`/`shutdown`."""
+    abierto y no hay un enrollment en curso; el hilo principal atiende
+    `list_devices`/`start_calibration`/`stop_calibration`/`start_enroll`/
+    `cancel_enroll`/`shutdown`."""
     from calibration_engine import CalibrationEngine, friendly_device_error
 
     try:
@@ -573,7 +574,7 @@ def _run_calibration_mode(shutdown: threading.Event) -> None:
         # entre lo que decías y lo que mostraba la barra -- el stream no se
         # alcanzaba a drenar al mismo ritmo que se llenaba.
         while not shutdown.is_set():
-            if engine.device_index is None:
+            if engine.device_index is None or engine.is_enrolling:
                 time.sleep(0.05)
                 continue
             try:
@@ -585,11 +586,93 @@ def _run_calibration_mode(shutdown: threading.Event) -> None:
 
     threading.Thread(target=level_loop, daemon=True, name="calib-level").start()
 
+    # Solo un enrollment a la vez; este Event se comparte entre el hilo de
+    # control (que lo crea y lo puede cancelar) y el hilo de grabación (que
+    # lo consulta). `None` = no hay ningún enrollment en curso.
+    active_enroll_cancel: threading.Event | None = None
+
+    def run_enrollment(device_index: int | None, seconds: float, cancel_event: threading.Event) -> None:
+        nonlocal active_enroll_cancel
+        try:
+            try:
+                started = engine.start(device_index)
+            except Exception as exc:  # noqa: BLE001 - dispositivo ocupado/exclusivo/inexistente: error recuperable, no fatal
+                ipc.send(
+                    {
+                        "type": "error",
+                        "code": "device_open_failed",
+                        "message": friendly_device_error(exc),
+                        "recoverable": True,
+                    }
+                )
+                return
+
+            total_ms = int(seconds * 1000)
+            ipc.send(
+                {
+                    "type": "enroll_started",
+                    "device_index": started["device_index"],
+                    "device_name": started["device_name"],
+                    "total_ms": total_ms,
+                }
+            )
+
+            # Se mantiene en `true` durante TODA la operación (grabación +
+            # cálculo del embedding), no solo mientras se lee el stream: si
+            # se apagara apenas termina de grabar, `level_loop` retomaría
+            # mientras todavía se está calculando el embedding (puede
+            # tardar bastante la primera vez) y mandaría `level` sin que
+            # nadie lo esté mirando -- la UI está mostrando "procesando".
+            engine.is_enrolling = True
+            audio = engine.record_enroll(
+                seconds,
+                on_progress=lambda elapsed_ms, total: ipc.send(
+                    {"type": "enroll_progress", "elapsed_ms": elapsed_ms, "total_ms": total}
+                ),
+                cancel_event=cancel_event,
+            )
+            if cancel_event.is_set():
+                # Cancelado a mitad de grabación: no tiene sentido calcular
+                # un embedding de referencia con audio parcial/incompleto.
+                # No se manda ningún evento más -- el frontend ya transicionó
+                # su propio estado a "idle" apenas el usuario apretó cancelar.
+                return
+
+            ipc.send({"type": "enroll_processing"})
+            from speaker_verification import SpeakerVerifier
+
+            verifier = SpeakerVerifier()
+            if verifier.enroll(audio):
+                ipc.send(
+                    {
+                        "type": "enroll_complete",
+                        "embedding_path": str(verifier.embedding_path),
+                    }
+                )
+            else:
+                ipc.send(
+                    {
+                        "type": "error",
+                        "code": "enroll_failed",
+                        "message": (
+                            "No se pudo calcular tu voz de referencia — falta instalar "
+                            "el extra opcional (pip install -r workers/requirements-speaker.txt) "
+                            "o falló la descarga del modelo la primera vez."
+                        ),
+                        "recoverable": True,
+                    }
+                )
+        finally:
+            engine.is_enrolling = False
+            active_enroll_cancel = None
+
     try:
         while not shutdown.is_set():
             msg = ipc.read_line()
             if msg is None or msg.get("type") == "shutdown":
                 shutdown.set()
+                if active_enroll_cancel is not None:
+                    active_enroll_cancel.set()
                 break
             msg_type = msg.get("type")
             if msg_type == "list_devices":
@@ -622,7 +705,47 @@ def _run_calibration_mode(shutdown: threading.Event) -> None:
                 ipc.send({"type": "calibration_started", **started})
             elif msg_type == "stop_calibration":
                 engine.stop()
+            elif msg_type == "start_enroll":
+                if active_enroll_cancel is not None:
+                    ipc.send(
+                        {
+                            "type": "error",
+                            "code": "enroll_already_in_progress",
+                            "message": "Ya hay una grabación de voz en curso.",
+                            "recoverable": True,
+                        }
+                    )
+                    continue
+                # Fuerza el import pesado de `speechbrain` (que arrastra
+                # scipy/torch) ACÁ, en el hilo principal, ANTES de spawnear
+                # el hilo de grabación -- confirmado con py-spy que hacerlo
+                # por primera vez en un hilo NO principal cuelga
+                # indefinidamente: `scipy.linalg.blas` carga una extensión
+                # nativa (.pyd) y Windows serializa la carga de DLLs a nivel
+                # de proceso (loader lock) de una forma que puede
+                # deadlockear si el primer import de un árbol así de pesado
+                # ocurre en un hilo secundario mientras otros hilos siguen
+                # vivos (acá: "calib-level"). Los imports quedan cacheados
+                # en `sys.modules`, así que este costo (unos segundos) se
+                # paga una sola vez por proceso, no en cada enrollment.
+                try:
+                    import speechbrain  # noqa: F401
+                except Exception:  # noqa: BLE001 - si falla, SpeakerVerifier lo va a reportar de nuevo más abajo
+                    pass
+                active_enroll_cancel = threading.Event()
+                seconds = float(msg.get("seconds") or 5.0)
+                threading.Thread(
+                    target=run_enrollment,
+                    args=(msg.get("device_index"), seconds, active_enroll_cancel),
+                    daemon=True,
+                    name="enroll-record",
+                ).start()
+            elif msg_type == "cancel_enroll":
+                if active_enroll_cancel is not None:
+                    active_enroll_cancel.set()
     finally:
+        if active_enroll_cancel is not None:
+            active_enroll_cancel.set()
         engine.close()
 
     sys.exit(0)
