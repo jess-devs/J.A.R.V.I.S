@@ -38,7 +38,7 @@ stt:
   device: auto
   whisper_model: auto
   compute_type: auto
-  input_device_index: 39
+  input_device_index: null
   beam_size: null
   cpu_threads: null
   initial_prompt: "Conversación en español con un asistente de voz llamado Jarvis. El usuario a veces lo llama por su nombre: Jarvis."
@@ -197,9 +197,9 @@ agent:
     everything_cli: null
   apps:
     aliases:
+      calculadora: calc
       navegador: brave
       bloc de notas: notepad
-      calculadora: calc
     extra_search_roots: []
   web:
     max_page_chars: 4000
@@ -228,6 +228,10 @@ agent:
     path: data/audit.log
   speaker_verification:
     enabled: false
+    gate_confirmations: false
+    similarity_threshold: 0.6
+    gate_wait_ms: 600
+    on_uncertain: deny
 welcome:
   enabled: false
   music_path: assets/music/welcome.mp3
