@@ -7,6 +7,7 @@ import type {
   McpServerConfig,
   OnboardingConfig,
   PipelineConfig,
+  SpeakerVerificationStatus,
   SttConfig,
   TtsConfig,
   TtsStatus,
@@ -85,4 +86,7 @@ export const api = {
 
   getOnboarding: () => get<OnboardingConfig>("/api/config/onboarding"),
   putOnboarding: (cfg: OnboardingConfig) => put("/api/config/onboarding", cfg),
+
+  statusSpeakerVerification: () =>
+    get<SpeakerVerificationStatus>("/api/status/speaker_verification"),
 };

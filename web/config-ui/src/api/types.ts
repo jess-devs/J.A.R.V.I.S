@@ -282,8 +282,19 @@ export interface AuditConfig {
   path: string;
 }
 
+export type OnUncertainPolicy = "allow" | "deny";
+
 export interface SpeakerVerificationConfig {
   enabled: boolean;
+  gate_confirmations: boolean;
+  similarity_threshold: number;
+  gate_wait_ms: number;
+  on_uncertain: OnUncertainPolicy;
+}
+
+export interface SpeakerVerificationStatus {
+  enrolled: boolean;
+  enrolled_at: string | null;
 }
 
 export interface AgentConfig {
@@ -362,11 +373,17 @@ export interface AudioDeviceInfo {
 }
 
 // Espejo del wire format de `CalibrationEvent` (src/stt/calibration.rs) tal
-// como llega por el WebSocket `/api/onboarding/calibration/ws`.
+// como llega por el WebSocket `/api/onboarding/calibration/ws` — incluye
+// tanto los eventos de calibración de nivel como los de enrollment de voz
+// (mismo socket, mismo worker, ver docs/planning/verificacion-hablante.md).
 export type CalibrationServerMessage =
   | { type: "devices"; devices: AudioDeviceInfo[] }
   | { type: "started"; device_index: number; device_name: string; sample_rate: number }
   | { type: "level"; dbfs: number }
+  | { type: "enroll_started"; device_index: number; device_name: string; total_ms: number }
+  | { type: "enroll_progress"; elapsed_ms: number; total_ms: number }
+  | { type: "enroll_processing" }
+  | { type: "enroll_complete"; embedding_path: string }
   | { type: "error"; code: string; message: string }
   | { type: "died" };
 
@@ -374,4 +391,6 @@ export type CalibrationServerMessage =
 export type CalibrationClientMessage =
   | { type: "list_devices" }
   | { type: "start_calibration"; device_index: number | null }
-  | { type: "stop_calibration" };
+  | { type: "stop_calibration" }
+  | { type: "start_enroll"; device_index: number | null; seconds?: number }
+  | { type: "cancel_enroll" };

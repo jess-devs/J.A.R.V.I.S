@@ -4,6 +4,7 @@ import { PageHeader } from '../components/PageHeader';
 import { SaveBar } from '../components/SaveBar';
 import { FieldGroup } from '../components/form/Field';
 import { DeviceCalibrationPanel } from '../components/calibration/DeviceCalibrationPanel';
+import { EnrollmentPanel } from '../components/enrollment/EnrollmentPanel';
 import { useConfigSection } from '../hooks/useConfigSection';
 import type { ToastMessage } from '../components/Toast';
 
@@ -45,6 +46,20 @@ export function OnboardingSection({ onToast }: { onToast: (toast: Omit<ToastMess
         <DeviceCalibrationPanel
           selectedDeviceIndex={cfg.input_device_index}
           onSelect={(index) => setValue((prev) => ({ ...prev, input_device_index: index }))}
+        />
+      </FieldGroup>
+
+      <FieldGroup
+        title="Mi voz"
+        columns={1}
+      >
+        <EnrollmentPanel
+          deviceIndex={cfg.input_device_index}
+          deviceLabel={
+            cfg.input_device_index === null
+              ? 'el dispositivo por defecto del sistema'
+              : 'el micrófono elegido arriba'
+          }
         />
       </FieldGroup>
 

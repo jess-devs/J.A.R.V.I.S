@@ -25,12 +25,18 @@ use super::AppState;
 /// dropearse.
 const CLIENT_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Duración de la grabación de enrollment si el cliente no especifica
+/// `seconds` — mismo default que `_cli_enroll_voice` en `stt_worker.py`.
+const DEFAULT_ENROLL_SECONDS: f32 = 5.0;
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientMessage {
     ListDevices,
     StartCalibration { device_index: Option<u32> },
     StopCalibration,
+    StartEnroll { device_index: Option<u32>, seconds: Option<f32> },
+    CancelEnroll,
 }
 
 pub(super) async fn calibration_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
@@ -82,6 +88,17 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
                             }
                             Ok(ClientMessage::StopCalibration) => {
                                 if worker.stop().await.is_err() {
+                                    break;
+                                }
+                            }
+                            Ok(ClientMessage::StartEnroll { device_index, seconds }) => {
+                                let seconds = seconds.unwrap_or(DEFAULT_ENROLL_SECONDS);
+                                if worker.start_enroll(device_index, seconds).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Ok(ClientMessage::CancelEnroll) => {
+                                if worker.cancel_enroll().await.is_err() {
                                     break;
                                 }
                             }

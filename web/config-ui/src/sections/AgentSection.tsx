@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
 import { api } from '../api/client';
-import type { AgentConfig, ConfirmMode } from '../api/types';
+import type { AgentConfig, ConfirmMode, OnUncertainPolicy } from '../api/types';
 import { PageHeader } from '../components/PageHeader';
 import { SaveBar } from '../components/SaveBar';
 import { Modal } from '../components/Modal';
@@ -10,6 +10,7 @@ import {
   KeyValueEditor,
   NumberInput,
   Select,
+  Slider,
   StringListEditor,
   TextInput,
   Toggle,
@@ -23,6 +24,11 @@ const CONFIRM_MODE_OPTIONS: { value: ConfirmMode; label: string }[] = [
   { value: 'free', label: 'Mano libre (sin preguntar)' },
 ];
 
+const ON_UNCERTAIN_OPTIONS: { value: OnUncertainPolicy; label: string }[] = [
+  { value: 'deny', label: 'Cancelar y pedir que lo repita (más seguro)' },
+  { value: 'allow', label: 'Dejar pasar igual, solo con aviso en el log' },
+];
+
 export function AgentSection({ onToast }: { onToast: (toast: Omit<ToastMessage, 'id'>) => void }) {
   const riskCodeConfirmRef = useRef<string>('');
   const { value, original, loading, saving, error, dirty, savedOnce, setValue, handleSave, handleDiscard } =
@@ -33,6 +39,14 @@ export function AgentSection({ onToast }: { onToast: (toast: Omit<ToastMessage, 
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalInput, setModalInput] = useState('');
+  const [voiceEnrolled, setVoiceEnrolled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api
+      .statusSpeakerVerification()
+      .then((s) => setVoiceEnrolled(s.enrolled))
+      .catch(() => setVoiceEnrolled(null));
+  }, []);
 
   const doSave = async () => {
     try {
@@ -249,10 +263,60 @@ export function AgentSection({ onToast }: { onToast: (toast: Omit<ToastMessage, 
         <Field label="Ruta del log">
           <TextInput monospace value={cfg.audit.path} onChange={(v) => set('audit', { ...cfg.audit, path: v })} />
         </Field>
-        <Field label="Verificación de hablante (modo sombra)" hint="Todavía no gatea ninguna confirmación.">
+        <Field
+          label="Verificación de hablante (modo sombra)"
+          hint="Calcula y loguea la similitud de cada frase contra tu voz enrolada, sin bloquear nada todavía."
+        >
           <Toggle
             checked={cfg.speaker_verification.enabled}
-            onChange={(v) => set('speaker_verification', { enabled: v })}
+            onChange={(v) => set('speaker_verification', { ...cfg.speaker_verification, enabled: v })}
+          />
+        </Field>
+      </FieldGroup>
+
+      <FieldGroup title="Gating de confirmaciones por voz">
+        <Field
+          label="Exigir tu voz para confirmar acciones de riesgo"
+          hint={
+            voiceEnrolled === false
+              ? 'Enrolá tu voz primero desde la sección "Micrófono" del sidebar.'
+              : 'Si la voz no coincide (o no se pudo verificar a tiempo), la acción se cancela y te lo dice.'
+          }
+        >
+          <Toggle
+            checked={cfg.speaker_verification.gate_confirmations}
+            disabled={voiceEnrolled === false}
+            onChange={(v) => set('speaker_verification', { ...cfg.speaker_verification, gate_confirmations: v })}
+          />
+        </Field>
+        <div />
+        <Field
+          label="Umbral de similitud"
+          hint="Punto de partida, no una recomendación de seguridad — ajustalo mirando tus propios valores logueados en modo sombra."
+        >
+          <Slider
+            value={Math.round(cfg.speaker_verification.similarity_threshold * 100)}
+            min={0}
+            max={100}
+            onChange={(v) => set('speaker_verification', { ...cfg.speaker_verification, similarity_threshold: v / 100 })}
+            format={(v) => `${v}%`}
+          />
+        </Field>
+        <Field label="Tiempo de espera de la verificación">
+          <NumberInput
+            value={cfg.speaker_verification.gate_wait_ms}
+            min={100}
+            max={5000}
+            step={100}
+            suffix="ms"
+            onChange={(v) => set('speaker_verification', { ...cfg.speaker_verification, gate_wait_ms: v })}
+          />
+        </Field>
+        <Field label="Si no se pudo verificar a tiempo">
+          <Select
+            value={cfg.speaker_verification.on_uncertain}
+            onChange={(v) => set('speaker_verification', { ...cfg.speaker_verification, on_uncertain: v as OnUncertainPolicy })}
+            options={ON_UNCERTAIN_OPTIONS}
           />
         </Field>
       </FieldGroup>

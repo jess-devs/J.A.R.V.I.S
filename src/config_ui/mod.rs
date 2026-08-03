@@ -68,6 +68,10 @@ pub async fn serve(
         .route("/api/config/pipeline", get(get_pipeline).put(put_pipeline))
         .route("/api/config/welcome", get(get_welcome).put(put_welcome))
         .route("/api/status/welcome", get(status_welcome))
+        .route(
+            "/api/status/speaker_verification",
+            get(status_speaker_verification),
+        )
         .route("/api/config/mcp", get(get_mcp).put(put_mcp))
         .route("/api/config/agent", get(get_agent).put(put_agent))
         .route(
@@ -384,6 +388,39 @@ async fn status_welcome(State(state): State<AppState>) -> Result<Json<WelcomeSta
         } else {
             format!("no se encontró {}", welcome.music_path.display())
         },
+    }))
+}
+
+// ---------------------------------------------------------------------
+// Estado de la verificación de hablante: si ya hay una voz enrolada.
+// Vive fuera de la sección `agent` (`AgentConfig::speaker_verification`,
+// PUT/GET normales) porque no es config — es una lectura del filesystem,
+// mismo espíritu que `status_welcome` (chequea si el mp3 existe).
+// ---------------------------------------------------------------------
+
+#[derive(Serialize)]
+struct SpeakerVerificationStatus {
+    enrolled: bool,
+    /// Fecha de modificación del embedding guardado, si existe (formato
+    /// RFC 3339) — para mostrar "enrolado el ..." en la web.
+    enrolled_at: Option<String>,
+}
+
+async fn status_speaker_verification(
+    State(state): State<AppState>,
+) -> Result<Json<SpeakerVerificationStatus>, ApiError> {
+    let config = load(&state.config_path)?;
+    let embedding_path = config.runtime_dir().join("speaker_embedding.json");
+
+    let enrolled = embedding_path.is_file();
+    let enrolled_at = std::fs::metadata(&embedding_path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .map(|modified| chrono::DateTime::<chrono::Local>::from(modified).to_rfc3339());
+
+    Ok(Json(SpeakerVerificationStatus {
+        enrolled,
+        enrolled_at,
     }))
 }
 
