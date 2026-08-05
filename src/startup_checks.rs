@@ -305,12 +305,8 @@ async fn ensure_ollama_serve(config: &Config) {
         return;
     }
 
-    // `println!`/`eprintln!` además del log de tracing a propósito: este
-    // chequeo corre antes de que la TUI (si está activa) tome la pantalla,
-    // así que es seguro imprimir acá, y es el único punto en el que
-    // `ui.enabled: true` desviaría el aviso a `logs/jarvis.log` en vez de
-    // mostrarlo — el usuario debe enterarse en consola de que Jarvis está
-    // lanzando un proceso externo.
+    // `println!`/`eprintln!` además del log de tracing a propósito: el usuario
+    // debe enterarse en consola de que Jarvis está lanzando un proceso externo.
     println!("Ollama no responde; iniciando `ollama serve` automáticamente...");
     tracing::info!("Ollama no responde; levantando `ollama serve`...");
 

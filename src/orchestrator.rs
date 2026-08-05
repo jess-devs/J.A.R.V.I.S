@@ -17,7 +17,7 @@ use crate::agent::{
     confirm::{self, CodeDecision, ConfirmDecision},
     AgentTurnResult, PendingConfirmation, TurnContext,
 };
-use crate::audio::{AudioPlayer, MusicPlayer, PlaybackMeter};
+use crate::audio::{AudioPlayer, MusicPlayer};
 use crate::config::{
     AgentConfig, BargeInConfig, BargeInMode, Config, OnUncertainPolicy, SttEngineKind,
 };
@@ -31,7 +31,6 @@ use crate::stt::{SttEvent, SttMode, SttWorker};
 use crate::tools::scripted_store::ScriptedToolStore;
 use crate::tools::{system_info, ToolRegistry};
 use crate::tts::{self, TtsProvider};
-use crate::tui::{UiState, VisualState};
 use crate::wake::{AttentionGate, GateDecision};
 
 enum AgentState {
@@ -115,15 +114,6 @@ pub struct Orchestrator {
     /// stdin y cancela el token del turno vigente en este slot. La Fase 3 lo
     /// reemplaza por el disparo real desde el motor de STT.
     test_cancel_slot: Option<Arc<Mutex<Option<CancellationToken>>>>,
-    /// Publica transiciones de estado para la TUI (ver `crate::tui`). Se
-    /// escribe siempre, aunque `config.ui.enabled` sea `false`: sin
-    /// receptores activos, `set()` no cuesta nada relevante.
-    ui: UiState,
-    /// Nivel de energía del micrófono en dBFS crudo (la normalización a
-    /// 0.0-1.0 es cosa de la TUI, ver `crate::tui::normalize_mic_level`),
-    /// para que la TUI anime `UserSpeaking` con el volumen real de voz.
-    /// Igual que `ui`, se escribe siempre aunque nadie la lea.
-    mic_level_tx: watch::Sender<f32>,
     /// Puesto en `true` por la tool `enter_silence_mode` (corre dentro del
     /// loop agéntico, sin acceso a `self`). `finish_turn` lo revisa y
     /// consume: si está en `true`, cierra la ventana de atención en vez de
@@ -140,7 +130,7 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
-    pub async fn new(config: Config, ui: UiState) -> Result<Self> {
+    pub async fn new(config: Config) -> Result<Self> {
         let stt = SttWorker::spawn(
             &config.workers,
             &config.stt,
@@ -252,28 +242,9 @@ impl Orchestrator {
             reminder_store: reminder_store_for_welcome,
             last_welcome: None,
             test_cancel_slot,
-            ui,
-            // -100.0 dBFS = silencio total (por debajo del piso que usa
-            // `normalize_mic_level`), para que el nivel arranque en 0.0
-            // visualmente antes de que llegue el primer `SttEvent::Level`.
-            mic_level_tx: watch::channel(-100.0).0,
             silence_requested,
             deferred_transcript: None,
         })
-    }
-
-    /// Nivel de reproducción en tiempo real (ver `AudioPlayer::playback_meter`),
-    /// para que `main.rs` se lo pase a la TUI sin exponer el `AudioPlayer` entero.
-    pub fn playback_meter(&self) -> PlaybackMeter {
-        self.player.playback_meter()
-    }
-
-    /// Nivel de energía del micrófono en dBFS crudo (sin normalizar), para
-    /// animar `UserSpeaking` con el volumen real de voz en vez de un pulso
-    /// sintético. La normalización a 0.0-1.0 es puramente visual y vive del
-    /// lado de la TUI (`crate::tui::normalize_mic_level`).
-    pub fn mic_level_rx(&self) -> tokio::sync::watch::Receiver<f32> {
-        self.mic_level_tx.subscribe()
     }
 
     /// Token de cancelación para un turno nuevo. Con `JARVIS_TEST_CANCEL` lo
@@ -299,11 +270,6 @@ impl Orchestrator {
     /// mutear físicamente — así se puede detectar que el usuario habla
     /// encima. Si no, el comportamiento de siempre (mute real).
     async fn begin_speaking(&mut self) {
-        // "Pensando": arranca el turno (mic en modo speaking/mute) antes de
-        // que haya audio de Jarvis. La TUI promueve esto a "hablando" sola
-        // en cuanto detecta nivel de audio real (ver `crate::tui::run`), sin
-        // que el orquestador necesite saber cuándo empieza a sonar el TTS.
-        self.ui.set(VisualState::Thinking);
         if self.music.is_playing() {
             self.music.duck();
         }
@@ -318,7 +284,6 @@ impl Orchestrator {
 
     /// Contraparte de `begin_speaking`: vuelve a escucha normal.
     async fn end_speaking(&mut self) {
-        self.ui.set(VisualState::Listening);
         if self.music.is_playing() {
             self.music.unduck();
         }
@@ -455,7 +420,6 @@ impl Orchestrator {
                 }
                 SttEvent::VadStart => {
                     tracing::debug!("VAD: inicio de voz detectado");
-                    self.ui.set(VisualState::UserSpeaking);
                     // Red de seguridad: si el VAD dispara pero no llega a
                     // generar un turno (el gate lo dropea/ignora), el
                     // `unduck()` de contrapartida es el de VadEnd, no el de
@@ -466,7 +430,6 @@ impl Orchestrator {
                 }
                 SttEvent::VadEnd { speech_ms } => {
                     tracing::debug!(speech_ms = ?speech_ms, "VAD: fin de voz detectado");
-                    self.ui.set(VisualState::Listening);
                     if matches!(self.state, AgentState::Idle) && self.music.is_playing() {
                         self.music.unduck();
                     }
@@ -481,9 +444,6 @@ impl Orchestrator {
                     tracing::debug!(reason = %reason, "audio descartado por el motor STT");
                 }
                 SttEvent::ClapDetected => self.handle_clap().await,
-                SttEvent::Level { dbfs } => {
-                    self.mic_level_tx.send_replace(dbfs);
-                }
                 SttEvent::WorkerDied => {
                     self.restart_stt_or_die().await?;
                 }
@@ -544,8 +504,6 @@ impl Orchestrator {
             maximo = self.config.workers.max_restarts,
             "el worker de STT se cayó o quedó colgado; reiniciándolo"
         );
-        self.ui
-            .set(VisualState::Error("worker STT reiniciado".to_string()));
         self.stt = SttWorker::spawn(
             &self.config.workers,
             &self.config.stt,
@@ -702,7 +660,6 @@ impl Orchestrator {
                         cancel,
                         echo_gate: self.echo_gate.clone(),
                         pause_rx,
-                        ui: self.ui.clone(),
                     };
                     agent::run_agentic_turn(&mut ctx, &mut self.history).await
                 };
@@ -806,7 +763,6 @@ impl Orchestrator {
                 cancel: cancel.clone(),
                 echo_gate: self.echo_gate.clone(),
                 pause_rx: pause_rx.clone(),
-                ui: self.ui.clone(),
             };
             let turn_future = agent::run_agentic_turn(&mut ctx, &mut self.history);
             tokio::pin!(turn_future);
@@ -917,7 +873,6 @@ impl Orchestrator {
                     Instant::now() + Duration::from_secs(self.config.agent.confirm_timeout_secs);
                 self.state = AgentState::AwaitingConfirmation { pending, deadline };
                 self.end_speaking().await;
-                self.ui.set(VisualState::AwaitingConfirmation);
             }
             Err(e) => {
                 tracing::error!(error = %e, "fallo generando la respuesta");
@@ -1052,7 +1007,8 @@ impl Orchestrator {
     /// caliente.
     async fn verify_speaker(&mut self, said_text: &str) -> SpeakerCheck {
         let threshold = self.config.agent.speaker_verification.similarity_threshold;
-        let wait = Duration::from_millis(self.config.agent.speaker_verification.gate_wait_ms as u64);
+        let wait =
+            Duration::from_millis(self.config.agent.speaker_verification.gate_wait_ms as u64);
         let said_normalized = normalize_for_match(said_text);
         let deadline = tokio::time::Instant::now() + wait;
 
@@ -1086,9 +1042,6 @@ impl Orchestrator {
                     // No corresponde a esta frase (ej. de una anterior que
                     // todavía no había terminado de calcularse) — seguir
                     // esperando dentro del mismo deadline.
-                }
-                SttEvent::Level { dbfs } => {
-                    self.mic_level_tx.send_replace(dbfs);
                 }
                 SttEvent::Transcript { text, .. } => {
                     // El usuario siguió hablando durante esta espera de
@@ -1151,7 +1104,6 @@ impl Orchestrator {
             cancel,
             echo_gate: self.echo_gate.clone(),
             pause_rx,
-            ui: self.ui.clone(),
         };
         let result = agent::resume_agentic_turn(&mut ctx, &mut self.history, pending).await;
         self.conclude_turn(result).await;
@@ -1161,11 +1113,7 @@ impl Orchestrator {
     /// TODO tool call recibe siempre un tool_result (aunque sea "cancelado")
     /// — OpenAI/Anthropic lo exigen y a Ollama le da coherencia.
     fn cancel_pending(&mut self, pending: PendingConfirmation, reason: &str) {
-        crate::audit::record_confirmation_denied(
-            &pending.call.name,
-            pending.requires_code,
-            reason,
-        );
+        crate::audit::record_confirmation_denied(&pending.call.name, pending.requires_code, reason);
         self.history.push(ChatMessage::tool_result(
             &pending.call.id,
             &pending.call.name,
@@ -1375,12 +1323,8 @@ fn classify_barge_in_event(
         // v1: un doble aplauso a mitad de turno se ignora, no interrumpe la
         // respuesta en curso ni dispara la escena de bienvenida encima.
         SttEvent::ClapDetected => BargeInAction::Ignore,
-        // Telemetría de nivel, no afecta la decisión de barge-in.
-        // `handle_barge_in_event` ya la descarta antes de llegar acá (evita
-        // el lock de `echo_gate`); este brazo queda por exhaustividad.
-        SttEvent::Level { .. } => BargeInAction::Ignore,
         SttEvent::WorkerDied => BargeInAction::Ignore,
-        // Modo sombra (ítem 4 v1 de MEJORAS.md): telemetría pura, no afecta
+        // Modo sombra: telemetría pura, no afecta
         // la decisión de barge-in. El logueo pasa por el loop principal
         // (`Orchestrator::run`), acá solo importa la clasificación.
         SttEvent::SpeakerSimilarity { .. } => BargeInAction::Ignore,
@@ -1404,12 +1348,6 @@ async fn handle_barge_in_event(
     paused: &mut bool,
     interrupt_text: &mut Option<String>,
 ) {
-    // `Level` es telemetría pura (no afecta la decisión de barge-in, ver
-    // `classify_barge_in_event`) pero llega ~10 veces por segundo durante
-    // todo el turno: evita el lock/unlock de `echo_gate` para descartarla.
-    if matches!(event, SttEvent::Level { .. }) {
-        return;
-    }
     let action = {
         let mut eg = echo_gate.lock().unwrap();
         classify_barge_in_event(gate, &mut eg, barge_in, event, *paused)
@@ -1432,9 +1370,14 @@ async fn handle_barge_in_event(
         }
         BargeInAction::NeedsRelevanceCheck { text, was_saying } => {
             let timeout = Duration::from_secs(barge_in.relevance_timeout_secs);
-            let relevant =
-                agent::relevance::sounds_directed_at_jarvis(llm, &was_saying, &text, agent_cfg, timeout)
-                    .await;
+            let relevant = agent::relevance::sounds_directed_at_jarvis(
+                llm,
+                &was_saying,
+                &text,
+                agent_cfg,
+                timeout,
+            )
+            .await;
             if relevant {
                 tracing::info!(text = %text, "barge-in: interrupción confirmada tras chequeo de relevancia");
                 if !cancel.is_cancelled() {
@@ -1475,7 +1418,8 @@ fn speaker_similarity_matches(said_normalized: &str, text_preview: &str) -> bool
     if preview_normalized.is_empty() {
         return false;
     }
-    said_normalized.starts_with(&preview_normalized) || preview_normalized.starts_with(said_normalized)
+    said_normalized.starts_with(&preview_normalized)
+        || preview_normalized.starts_with(said_normalized)
 }
 
 #[cfg(test)]

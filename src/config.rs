@@ -29,7 +29,6 @@ pub struct Config {
     /// `src/config_ui/`, sección onboarding). No es un gate: Jarvis arranca
     /// igual sin importar este valor, es puro valor agregado de UX.
     pub onboarding: OnboardingConfig,
-    pub ui: UiConfig,
     /// Página de configuración local servida por Jarvis mismo (lee/escribe
     /// este mismo config.yaml vía HTTP en 127.0.0.1). Ver `src/config_ui/`.
     pub web_ui: WebUiConfig,
@@ -55,7 +54,6 @@ impl Default for Config {
             agent: AgentConfig::default(),
             welcome: WelcomeConfig::default(),
             onboarding: OnboardingConfig::default(),
-            ui: UiConfig::default(),
             web_ui: WebUiConfig::default(),
             log_level: "info".to_string(),
             mcp: Vec::new(),
@@ -127,7 +125,7 @@ impl Config {
     /// directorio las rutas que siguen en su valor por defecto literal
     /// (`data/<archivo>`). Una ruta que el usuario ya haya fijado a algo
     /// distinto del default no se toca — compatibilidad con configs
-    /// existentes, ver PLAN_RUNTIME_DIR.md fase 5.
+    /// existentes.
     ///
     /// Límite conocido: esto compara contra el literal, no contra "el campo
     /// estaba ausente en el YAML" (indistinguibles con `#[serde(default)]`).
@@ -160,8 +158,7 @@ impl Config {
     /// la página de configuración local (`src/config_ui/`): a diferencia de
     /// `load`, esto NO preserva los comentarios ni el formato original del
     /// YAML (serde-saphyr regenera el documento desde cero) — es una
-    ///     decisión deliberada (ver docs/PRODUCT.md/brief de la página de config), no
-    /// un descuido.
+    /// decisión deliberada (ver docs/ARCHITECTURE.md), no un descuido.
     ///
     /// Antes de la primera escritura de este proceso hace una copia de
     /// respaldo `<path>.bak` del archivo tal como estaba (si `path` existe y
@@ -178,7 +175,8 @@ impl Config {
             }
         }
 
-        let yaml = serde_saphyr::to_string(self).map_err(|e| ConfigError::Serialize(e.to_string()))?;
+        let yaml =
+            serde_saphyr::to_string(self).map_err(|e| ConfigError::Serialize(e.to_string()))?;
 
         std::fs::write(path, yaml).map_err(|source| ConfigError::Write {
             path: path.to_path_buf(),
@@ -193,7 +191,7 @@ pub struct RuntimeConfig {
     /// Directorio donde Jarvis escribe todo lo que genera en runtime (DBs,
     /// logs, cache, embeddings). Cubierto en un solo lugar por `.gitignore`
     /// (`/data/`) — si algo se escapa de acá, es un bug de la herramienta
-    /// que lo escribió, no un hueco de gitignore. Ver PLAN_RUNTIME_DIR.md.
+    /// que lo escribió, no un hueco de gitignore. Ver docs/ARCHITECTURE.md.
     pub dir: PathBuf,
 }
 
@@ -1299,45 +1297,6 @@ pub struct OnboardingConfig {
 impl Default for OnboardingConfig {
     fn default() -> Self {
         Self { completed: false }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MarkerKind {
-    /// Curvas suaves; requiere fuente con glifos Braille.
-    #[default]
-    Braille,
-    /// Fallback más compatible con fuentes/terminales limitados.
-    Block,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct UiConfig {
-    /// Si true, reemplaza los logs de consola por la interfaz Ratatui
-    /// (holograma que respira/reacciona a la voz). Los logs de `tracing`
-    /// pasan a un archivo (ver `main.rs`) mientras esté activa.
-    pub enabled: bool,
-    /// Cuadros por segundo del loop de renderizado.
-    pub fps: u32,
-    /// true = colores RGB de 24 bits (Windows Terminal, la mayoría de
-    /// terminales Linux). false = paleta ANSI de 16 colores, para consola
-    /// clásica de Windows u otros terminales sin soporte truecolor.
-    pub truecolor: bool,
-    /// "braille" (curvas suaves, requiere fuente con glifos Braille) o
-    /// "block" (fallback más compatible con fuentes/terminales limitados).
-    pub marker: MarkerKind,
-}
-
-impl Default for UiConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            fps: 30,
-            truecolor: true,
-            marker: MarkerKind::default(),
-        }
     }
 }
 

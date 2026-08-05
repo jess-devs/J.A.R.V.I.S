@@ -163,7 +163,7 @@ pub enum SttOutMessage {
     },
     /// Respuesta a `SttInMessage::StartCalibration`: el stream quedó
     /// abierto contra `device_index`. A partir de acá empiezan a llegar
-    /// `Level{dbfs}` cada ~100ms, igual que en el motor nativo.
+    /// mediciones `Level{dbfs}` cada ~100ms.
     CalibrationStarted {
         device_index: u32,
         device_name: String,
@@ -241,7 +241,6 @@ pub enum SttOutMessage {
     ClapDetected,
     /// Energía instantánea del micrófono (dBFS), emitida cada ~100ms
     /// mientras el motor nativo no está suprimido — independiente del VAD,
-    /// para animar el nivel real de voz del usuario en la TUI.
     Level {
         #[serde(default)]
         dbfs: f32,
@@ -315,10 +314,8 @@ mod tests {
             serde_json::json!({"type": "start_calibration", "device_index": 2})
         );
 
-        let json_none = serde_json::to_value(&SttInMessage::StartCalibration {
-            device_index: None,
-        })
-        .unwrap();
+        let json_none =
+            serde_json::to_value(&SttInMessage::StartCalibration { device_index: None }).unwrap();
         assert_eq!(
             json_none,
             serde_json::json!({"type": "start_calibration", "device_index": null})

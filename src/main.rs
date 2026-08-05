@@ -21,7 +21,6 @@ mod text;
 mod text_mode;
 mod tools;
 mod tts;
-mod tui;
 mod wake;
 
 use std::path::PathBuf;
@@ -30,7 +29,6 @@ use clap::Parser;
 
 use config::Config;
 use orchestrator::Orchestrator;
-use tui::UiState;
 
 #[derive(Parser)]
 #[command(
@@ -86,7 +84,7 @@ struct Cli {
 /// momento en el que debe arrastrar a los workers.
 ///
 /// Sin equivalente instalado todavía en Unix (el equivalente real sería un
-/// grupo de procesos vía `setsid`/`killpg`, ver MEJORAS.md ítem 1 Stage C)
+/// grupo de procesos vía `setsid`/`killpg`, una mejora futura del roadmap)
 /// — ahí el arranque sigue andando sin esta garantía extra.
 #[cfg(windows)]
 fn install_job_object_guard() {
@@ -124,11 +122,8 @@ fn open_url_in_browser(url: &str) {
 async fn main() {
     std::panic::set_hook(Box::new(|info| {
         // `eprintln!` además de `tracing::error!` a propósito: con
-        // `ui.enabled: true` el subscriber de tracing escribe a
-        // `logs/jarvis.log`, no a la consola, así que un panic ahí sería
-        // invisible en pantalla si solo se logueara. Esto garantiza que
-        // cualquier muerte anómala se anuncie en la terminal sin importar
-        // el sink de tracing configurado.
+        // `eprintln!` garantiza que un panic sea visible aunque el subscriber
+        // de tracing todavía no esté inicializado.
         eprintln!("Panic no controlado en Jarvis: {info}");
         tracing::error!(panic = %info, "panic no controlado en Jarvis");
         // Un panic en una tarea `tokio::spawn` no termina el proceso (no hay
@@ -159,9 +154,8 @@ async fn main() {
         .unwrap_or_else(|| config.log_level.clone());
 
     if cli.config_ui {
-        // Modo standalone: nunca toma la terminal (no hay TUI ni pipeline de
-        // voz corriendo), así que los logs van siempre a consola, sin
-        // importar `config.ui.enabled`.
+        // Modo standalone: no arranca el pipeline de voz y los logs van a
+        // consola.
         tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
             .init();
@@ -188,22 +182,9 @@ async fn main() {
         return;
     }
 
-    // Con la TUI activa, la pantalla alterna le pertenece al holograma: los
-    // logs de tracing van a un archivo en vez de la consola. `_log_guard`
-    // debe vivir hasta el final de `main` (el writer no bloqueante de
-    // tracing-appender depende de él para no perder líneas al salir).
-    let builder =
-        tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::new(log_level));
-    let _log_guard = if config.ui.enabled {
-        let log_dir = config.runtime_dir().join("logs");
-        let file_appender = tracing_appender::rolling::never(log_dir, "jarvis.log");
-        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-        builder.with_writer(non_blocking).with_ansi(false).init();
-        Some(guard)
-    } else {
-        builder.init();
-        None
-    };
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
+        .init();
 
     if let Err(e) = run(config, cli.config, cli.text_mode).await {
         eprintln!("Error: {e}");
@@ -271,29 +252,7 @@ async fn run(mut config: Config, config_path: PathBuf, text_mode: bool) -> error
 
     startup_checks::run(&config).await?;
 
-    let ui_config = config.ui.clone();
-    let (ui_state, ui_state_rx) = UiState::new();
-
-    let mut assistant = Orchestrator::new(config, ui_state).await?;
-
-    // Cancela el loop de la TUI (si está activa) para que se llegue a
-    // restaurar la terminal (raw mode/alternate screen) sin importar por qué
-    // rama del `select!` de abajo se terminó cerrando Jarvis.
-    let ui_shutdown = tokio_util::sync::CancellationToken::new();
-    let mut ui_handle = if ui_config.enabled {
-        let jarvis_meter = assistant.playback_meter();
-        let mic_level_rx = assistant.mic_level_rx();
-        let shutdown = ui_shutdown.clone();
-        Some(tokio::spawn(tui::run(
-            ui_config,
-            ui_state_rx,
-            jarvis_meter,
-            mic_level_rx,
-            shutdown,
-        )))
-    } else {
-        None
-    };
+    let mut assistant = Orchestrator::new(config).await?;
 
     let result = tokio::select! {
         r = assistant.run() => r,
@@ -310,39 +269,11 @@ async fn run(mut config: Config, config_path: PathBuf, text_mode: bool) -> error
             tracing::info!("Cierre de consola/logoff/apagado detectado, cerrando...");
             Ok(())
         }
-        ui_result = join_optional(&mut ui_handle) => {
-            tracing::info!("Interfaz cerrada, cerrando Jarvis...");
-            match ui_result {
-                Ok(Err(e)) => Err(e),
-                _ => Ok(()),
-            }
-        }
     };
 
     // Si `ui_result` fue la rama que resolvió el `select!` de arriba, el
     // handle ya está completo (`join_optional` lo pollea vía `&mut`, no lo
     // consume) — repollearlo acá rompería (`JoinHandle` no admite poll tras
-    // `Ready`). Para el resto de las ramas, esto es lo que le da tiempo a la
-    // TUI de restaurar la terminal antes de seguir.
-    ui_shutdown.cancel();
-    if let Some(handle) = ui_handle {
-        if !handle.is_finished() {
-            let _ = handle.await;
-        }
-    }
-
     assistant.shutdown().await;
     result
-}
-
-/// Espera un `JoinHandle` opcional sin resolver nunca si es `None` — así se
-/// puede sumar como una rama más de un `tokio::select!` sin ramificar la
-/// macro por configuración (ver uso arriba, TUI activada o no).
-async fn join_optional<T>(
-    handle: &mut Option<tokio::task::JoinHandle<T>>,
-) -> Result<T, tokio::task::JoinError> {
-    match handle {
-        Some(h) => h.await,
-        None => std::future::pending().await,
-    }
 }

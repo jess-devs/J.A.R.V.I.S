@@ -1,4 +1,4 @@
-//! Modo texto (`--text-mode`, ver MEJORAS.md ítem 7): lee pedidos por
+//! Modo texto (`--text-mode`, ver README.md): lee pedidos por
 //! stdin en vez de STT. v1 solo saltea el reconocimiento de voz — Jarvis
 //! sigue *hablando* las respuestas por TTS y sigue pidiendo confirmación
 //! de voz-por-texto para acciones de riesgo. Útil para debugging o
@@ -31,7 +31,6 @@ use crate::reminders::{self, ReminderStore};
 use crate::tools::scripted_store::ScriptedToolStore;
 use crate::tools::{system_info, ToolRegistry};
 use crate::tts::{self, TtsProvider};
-use crate::tui::UiState;
 
 struct TextSession {
     config: Config,
@@ -41,7 +40,6 @@ struct TextSession {
     registry: ToolRegistry,
     memory: Arc<MemoryStore>,
     echo_gate: Arc<Mutex<EchoGate>>,
-    ui: UiState,
     history: Vec<ChatMessage>,
     system_static_cache: Option<(u64, String)>,
     /// Recordatorios vencidos que anuncia `reminders::run_poller` en una
@@ -74,9 +72,9 @@ impl TextSession {
             &config.mcp,
         )
         .await;
-        let echo_gate = Arc::new(Mutex::new(EchoGate::new(config.barge_in.echo_guard.clone())));
-        let (ui, _ui_state_rx) = UiState::new();
-
+        let echo_gate = Arc::new(Mutex::new(EchoGate::new(
+            config.barge_in.echo_guard.clone(),
+        )));
         let (reminder_tx, reminder_rx) = mpsc::channel(16);
         tokio::spawn(reminders::run_poller(
             reminder_store,
@@ -97,7 +95,6 @@ impl TextSession {
             registry,
             memory,
             echo_gate,
-            ui,
             history,
             system_static_cache: None,
             reminder_rx,
@@ -160,7 +157,6 @@ impl TextSession {
             cancel: CancellationToken::new(),
             echo_gate: self.echo_gate.clone(),
             pause_rx,
-            ui: self.ui.clone(),
         };
         match agent::run_agentic_turn(&mut ctx, &mut self.history).await {
             Ok(result) => self.report_result(result),
@@ -172,7 +168,10 @@ impl TextSession {
     }
 
     /// Retoma un turno tras resolver una confirmación afirmativa.
-    async fn approve_pending(&mut self, pending: PendingConfirmation) -> Option<PendingConfirmation> {
+    async fn approve_pending(
+        &mut self,
+        pending: PendingConfirmation,
+    ) -> Option<PendingConfirmation> {
         let (_pause_tx, pause_rx) = watch::channel(false);
         let mut ctx = TurnContext {
             llm: &self.llm,
@@ -183,7 +182,6 @@ impl TextSession {
             cancel: CancellationToken::new(),
             echo_gate: self.echo_gate.clone(),
             pause_rx,
-            ui: self.ui.clone(),
         };
         match agent::resume_agentic_turn(&mut ctx, &mut self.history, pending).await {
             Ok(result) => self.report_result(result),
@@ -304,7 +302,10 @@ async fn handle_confirmation_reply(
         match confirm::interpret_code(&text, &session.config.agent) {
             CodeDecision::Correct => session.approve_pending(pending).await,
             CodeDecision::Wrong => {
-                session.cancel_pending(pending, "El usuario dio un código de aceptación incorrecto; la acción fue cancelada.");
+                session.cancel_pending(
+                    pending,
+                    "El usuario dio un código de aceptación incorrecto; la acción fue cancelada.",
+                );
                 println!("[jarvis] Código incorrecto. Acción cancelada.");
                 None
             }
@@ -314,7 +315,10 @@ async fn handle_confirmation_reply(
                 None
             }
             CodeDecision::Unrelated => {
-                session.cancel_pending(pending, "El usuario cambió de tema; la acción fue cancelada.");
+                session.cancel_pending(
+                    pending,
+                    "El usuario cambió de tema; la acción fue cancelada.",
+                );
                 session.run_new_turn(text).await
             }
         }
@@ -327,7 +331,10 @@ async fn handle_confirmation_reply(
                 None
             }
             ConfirmDecision::Unrelated => {
-                session.cancel_pending(pending, "El usuario cambió de tema; la acción fue cancelada.");
+                session.cancel_pending(
+                    pending,
+                    "El usuario cambió de tema; la acción fue cancelada.",
+                );
                 session.run_new_turn(text).await
             }
         }

@@ -45,12 +45,6 @@ pub enum SttEvent {
     },
     /// Doble aplauso confirmado (solo `engine: native`). Ver `ClapInit`.
     ClapDetected,
-    /// Energía instantánea del micrófono (dBFS), cada ~100ms mientras el
-    /// motor no está suprimido — independiente del VAD, para animar el nivel
-    /// real de voz del usuario en la TUI.
-    Level {
-        dbfs: f32,
-    },
     WorkerDied,
     /// Ver `SpeakerVerificationInit`/`SttOutMessage::SpeakerSimilarity`. En
     /// modo sombra (`enabled`, sin `gate_confirmations`) esto solo se
@@ -142,7 +136,8 @@ impl SttWorker {
                     // algo — activarlo sin `enabled` igual debe encender
                     // el cálculo, si no el gating no tendría con qué
                     // trabajar. Ver el doc-comment de `SpeakerVerificationConfig`.
-                    enabled: speaker_verification.enabled || speaker_verification.gate_confirmations,
+                    enabled: speaker_verification.enabled
+                        || speaker_verification.gate_confirmations,
                 },
                 clap: ClapInit {
                     min_peak_dbfs: stt.clap.min_peak_dbfs,
@@ -260,7 +255,6 @@ impl SttWorker {
                             return Some(SttEvent::Discarded { reason })
                         }
                         Ok(SttOutMessage::ClapDetected) => return Some(SttEvent::ClapDetected),
-                        Ok(SttOutMessage::Level { dbfs }) => return Some(SttEvent::Level { dbfs }),
                         Ok(SttOutMessage::Error { code, message, .. }) => {
                             tracing::warn!(code = %code, message = %message, "error de transcripción recuperable");
                             continue;
