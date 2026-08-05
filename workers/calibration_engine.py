@@ -24,7 +24,14 @@ import threading
 import time
 
 import numpy as np
-import pyaudio
+
+
+def _load_pyaudio():
+    # Pure calibration helpers and their tests do not need PortAudio. Keep the
+    # native module lazy so CI can exercise those helpers without audio headers.
+    import pyaudio
+
+    return pyaudio
 
 # Cada cuánto se reporta un nivel por IPC (ver `stt_worker.py::level_loop`).
 # El tamaño de frame que se le pide a PyAudio (`start()`) se deriva de esto
@@ -118,7 +125,8 @@ class CalibrationEngine:
     separados."""
 
     def __init__(self) -> None:
-        self._pa = pyaudio.PyAudio()
+        self._pyaudio = _load_pyaudio()
+        self._pa = self._pyaudio.PyAudio()
         self._stream: "pyaudio.Stream | None" = None
         self._frames_per_read: int = 0
         self._lock = threading.Lock()
@@ -168,7 +176,7 @@ class CalibrationEngine:
         """Devuelve `(índice del host API preferido o None, índice del
         dispositivo de entrada default dentro de ese host API o None)`."""
         try:
-            wasapi = self._pa.get_host_api_info_by_type(pyaudio.paWASAPI)
+            wasapi = self._pa.get_host_api_info_by_type(self._pyaudio.paWASAPI)
         except OSError:
             try:
                 return None, self._pa.get_default_input_device_info()["index"]
@@ -204,7 +212,7 @@ class CalibrationEngine:
             resolved_index = int(info["index"])
             frames_per_read = max(1, round(rate * LEVEL_REPORT_INTERVAL_SECS))
             stream = self._pa.open(
-                format=pyaudio.paInt16,
+                format=self._pyaudio.paInt16,
                 channels=1,
                 rate=rate,
                 input=True,

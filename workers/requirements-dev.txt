@@ -1,3 +1,4 @@
 # Dependencias de test (además de requirements.txt). No hace falta el venv
 # completo de RealtimeSTT/torch para correr estos tests: son lógica pura.
 pytest>=8,<9
+numpy>=2,<3
