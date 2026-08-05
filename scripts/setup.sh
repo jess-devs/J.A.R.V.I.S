@@ -65,7 +65,18 @@ fi
 
 # Entorno Python
 step "Creando/actualizando el entorno Python de los workers..."
-"$REPO_ROOT/scripts/setup_python_env.sh"
+# Todo lo que sigue depende del venv (la descarga de la voz de Piper lo usa
+# directamente), así que si esto falla no tiene sentido continuar. Con `set -e`
+# el script moriría igual, pero sin decir qué quedó sin hacer.
+if ! "$REPO_ROOT/scripts/setup_python_env.sh"; then
+    err "Fallo la creacion del entorno Python. El resto del setup no se ejecuto:"
+    echo "       - descarga de la voz de Piper" >&2
+    echo "       - descarga del modelo de Ollama" >&2
+    echo "       - creacion de .env" >&2
+    echo "       - dependencias del frontend (web/config-ui)" >&2
+    echo "       Resolve el error de arriba y volve a correr este script: los pasos ya hechos se saltean." >&2
+    exit 1
+fi
 
 # Hardware -> modelo de Ollama recomendado
 step "Detectando hardware para recomendar un modelo de Ollama..."

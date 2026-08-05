@@ -68,7 +68,13 @@ Si preferís entender o ajustar cada paso a mano, seguí la sección de abajo, e
 ./scripts/setup_python_env.sh
 ```
 
-Esto crea `workers/.venv` con Python 3.12 e instala `RealtimeSTT` y `piper-tts` (junto con sus dependencias transitivas: `torch`, `faster-whisper`, `pyaudio`, `onnxruntime`).
+Esto crea `workers/.venv` con Python 3.11 o 3.12 (el script busca el intérprete solo; podés forzar uno con `PYTHON_BIN=/ruta/al/python3.12`) e instala `RealtimeSTT` y `piper-tts`, junto con sus dependencias transitivas: `torch`, `faster-whisper`, `pyaudio`, `onnxruntime`.
+
+> [!NOTE]
+> `torch` es una dependencia dura de RealtimeSTT y en **Linux** la build que pip baja por defecto es la de CUDA: contando las librerías `nvidia-*` son unos 2,5 GB y el venv termina pesando ~5 GB. Si no tenés GPU NVIDIA, instalá antes la variante CPU-only (`workers/.venv/bin/pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu`) y después corré el script: pip respeta lo que ya está instalado. En **Windows** pasa al revés, el default es CPU-only.
+
+> [!TIP]
+> En Linux, `PyAudio` no tiene wheels y se compila desde fuente: hacen falta un compilador de C, los headers de portaudio y los de Python. El script los verifica antes de instalar y te dice qué falta. En Arch/CachyOS: `sudo pacman -S --needed base-devel portaudio`.
 
 Si tenés GPU NVIDIA y querés aceleración CUDA para Whisper, instalá `torch` con el índice de CUDA correspondiente *antes* de correr el script de setup (por defecto `pip install torch` en Windows instala la build CPU-only):
 
