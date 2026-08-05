@@ -16,8 +16,9 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Request, State};
+use axum::http::{header, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -25,15 +26,18 @@ use serde::Serialize;
 use tower_http::services::ServeDir;
 
 use crate::config::{
-    AgentConfig, AudioConfig, BargeInConfig, Config, LlmConfig, LlmProviderKind,
-    McpServerConfig, OnboardingConfig, PipelineConfig, SttConfig, TtsConfig, TtsProviderKind,
-    WakeConfig, WelcomeConfig, WorkersConfig,
+    AgentConfig, AudioConfig, BargeInConfig, Config, LlmConfig, LlmProviderKind, McpServerConfig,
+    OnboardingConfig, PipelineConfig, SttConfig, TtsConfig, TtsProviderKind, WakeConfig,
+    WelcomeConfig, WorkersConfig,
 };
 use crate::errors::ConfigError;
 
 #[derive(Clone)]
 struct AppState {
     config_path: PathBuf,
+    /// Puerto en el que quedó bindeado el servidor, para saber qué `Origin`
+    /// es el de la propia página (ver `origin_allowed`).
+    port: u16,
 }
 
 /// Arranca el servidor y corre para siempre (o hasta que el proceso
@@ -53,7 +57,10 @@ pub async fn serve(
     static_dir: PathBuf,
     on_bound: Option<Box<dyn FnOnce() + Send>>,
 ) {
-    let state = AppState { config_path };
+    let state = AppState {
+        config_path,
+        port: addr.port(),
+    };
 
     let api = Router::new()
         .route("/api/config/llm", get(get_llm).put(put_llm))
@@ -82,7 +89,10 @@ pub async fn serve(
             "/api/onboarding/calibration/ws",
             get(calibration::calibration_ws),
         )
-        .with_state(state);
+        .with_state(state.clone())
+        // Solo sobre `api`: los estáticos del frontend no exponen nada y no
+        // tiene sentido que un `Origin` raro impida cargar la propia página.
+        .layer(axum::middleware::from_fn_with_state(state, guard_origin));
 
     let app = if static_dir.is_dir() {
         api.fallback_service(ServeDir::new(&static_dir))
@@ -115,6 +125,65 @@ pub async fn serve(
     if let Err(e) = axum::serve(listener, app).await {
         tracing::error!(error = %e, "el servidor de la página de configuración terminó con error");
     }
+}
+
+// ---------------------------------------------------------------------
+// Guard de Origin
+// ---------------------------------------------------------------------
+
+/// Decide si un request con este `Origin` puede tocar la API local.
+///
+/// Bindear a 127.0.0.1 evita que la API se vea desde la red, pero no evita
+/// que una página web cualquiera que el usuario esté visitando le hable al
+/// servidor desde su propio navegador. Para los `PUT` REST eso lo frena el
+/// preflight de CORS (son `application/json`, así que el navegador pide
+/// permiso primero y acá no se contesta ninguno), pero **un WebSocket no
+/// tiene same-origin policy**: sin este chequeo, cualquier sitio podía abrir
+/// `/api/onboarding/calibration/ws` y desde ahí enumerar micrófonos, abrir el
+/// micrófono (`start_calibration`) o pisar el embedding de voz de referencia
+/// con `start_enroll`, que es justamente lo que protege el gate de
+/// verificación de hablante.
+///
+/// Un `Origin` ausente se acepta: el navegador SIEMPRE lo manda en el
+/// handshake de un WebSocket y en cualquier request cross-origin, así que su
+/// ausencia significa `curl`, un test o un cliente nativo — y un programa
+/// nativo corriendo como el usuario ya puede hacer todo esto sin pasar por
+/// acá. La vía que este guard cierra es la del navegador.
+fn origin_allowed(origin: Option<&str>, port: u16) -> bool {
+    let Some(origin) = origin else {
+        return true;
+    };
+    // Los únicos hosts que pueden llegar a un listener bindeado a 127.0.0.1,
+    // y los mismos que el frontend produce al armar la URL desde
+    // `location.host`. Comparación exacta: `http://127.0.0.1.evil.com:4756`
+    // y el `Origin: null` de un iframe sandboxeado no matchean.
+    ["127.0.0.1", "localhost", "[::1]"]
+        .iter()
+        .any(|host| origin == format!("http://{host}:{port}"))
+}
+
+async fn guard_origin(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    // Un header presente pero no representable como texto no puede ser el
+    // origin de la propia página, así que se rechaza en vez de confundirse
+    // con el caso "no vino ningún Origin", que sí se acepta.
+    let origin = req
+        .headers()
+        .get(header::ORIGIN)
+        .map(|value| value.to_str().unwrap_or("<no es texto válido>"));
+
+    if !origin_allowed(origin, state.port) {
+        tracing::warn!(
+            origin = origin.unwrap_or_default(),
+            path = %req.uri().path(),
+            "request a la API de configuración rechazado: viene de otra página web, no de la configuración local"
+        );
+        return ApiError::forbidden(
+            "origen no permitido: esta API solo responde a la página de configuración local",
+        )
+        .into_response();
+    }
+
+    next.run(req).await
 }
 
 // ---------------------------------------------------------------------
@@ -462,4 +531,63 @@ async fn put_agent(
     config.agent = update.agent;
     save(&config, &state.config_path)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PORT: u16 = 4756;
+
+    #[test]
+    fn sin_origin_se_acepta() {
+        // curl, un cliente nativo o un request same-origin sin CORS.
+        assert!(origin_allowed(None, PORT));
+    }
+
+    #[test]
+    fn la_propia_pagina_se_acepta_por_cualquiera_de_sus_hosts() {
+        assert!(origin_allowed(Some("http://127.0.0.1:4756"), PORT));
+        assert!(origin_allowed(Some("http://localhost:4756"), PORT));
+        assert!(origin_allowed(Some("http://[::1]:4756"), PORT));
+    }
+
+    #[test]
+    fn otra_pagina_web_se_rechaza() {
+        assert!(!origin_allowed(Some("https://example.com"), PORT));
+        assert!(!origin_allowed(Some("http://evil.com"), PORT));
+    }
+
+    #[test]
+    fn origin_null_se_rechaza() {
+        // Un iframe sandboxeado o una página abierta con file:// mandan
+        // exactamente este valor.
+        assert!(!origin_allowed(Some("null"), PORT));
+    }
+
+    #[test]
+    fn el_host_no_se_matchea_por_prefijo() {
+        assert!(!origin_allowed(
+            Some("http://127.0.0.1.evil.com:4756"),
+            PORT
+        ));
+        assert!(!origin_allowed(
+            Some("http://localhost.evil.com:4756"),
+            PORT
+        ));
+    }
+
+    #[test]
+    fn otro_puerto_del_mismo_host_se_rechaza() {
+        // Otro servidor local (o el propio Jarvis en otra config) no es la
+        // página de configuración de este proceso.
+        assert!(!origin_allowed(Some("http://127.0.0.1:1234"), PORT));
+    }
+
+    #[test]
+    fn https_se_rechaza() {
+        // El servidor es HTTP plano: un origin https con este host/puerto no
+        // puede ser la propia página.
+        assert!(!origin_allowed(Some("https://127.0.0.1:4756"), PORT));
+    }
 }

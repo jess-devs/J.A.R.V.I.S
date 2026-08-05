@@ -1,8 +1,15 @@
 //! Guard anti-SSRF: antes de que una tool le pegue a una URL (búsqueda web,
 //! `fetch_page`, o una receta HTTP de `create_tool`), resuelve el host y
 //! rechaza si alguna IP resultante es loopback, privada o link-local. Se
-//! chequean las IPs resueltas (no el string del host) para no dejar pasar
-//! un hostname público que resuelve a una IP privada (DNS rebinding).
+//! chequean las IPs resueltas y no el string del host, así que un hostname
+//! de aspecto público que apunta a una IP privada tampoco pasa.
+//!
+//! Lo que NO cubre: la ventana entre este chequeo y el fetch real. Acá se
+//! resuelve el host y se aprueba, pero después `reqwest` vuelve a resolver
+//! por su cuenta — con un TTL corto, un atacante puede contestar una IP
+//! pública en la primera consulta y una privada en la segunda (DNS
+//! rebinding). Cerrarlo de verdad pide fijar la conexión a la IP ya
+//! validada, vía un resolver propio o `ClientBuilder::resolve`.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -18,9 +25,9 @@ pub async fn ensure_public_host(url: &str) -> Result<(), ToolError> {
         .ok_or_else(|| ToolError::InvalidArgs(format!("URL sin host: {url}")))?;
     let port = parsed.port_or_known_default().unwrap_or(80);
 
-    let addrs = tokio::net::lookup_host((host, port)).await.map_err(|e| {
-        ToolError::Execution(format!("no se pudo resolver el host '{host}': {e}"))
-    })?;
+    let addrs = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| ToolError::Execution(format!("no se pudo resolver el host '{host}': {e}")))?;
 
     for addr in addrs {
         let ip = addr.ip();
@@ -42,7 +49,11 @@ fn is_forbidden(ip: IpAddr) -> bool {
 }
 
 fn is_forbidden_v4(v4: Ipv4Addr) -> bool {
-    v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified() || v4.is_broadcast()
+    v4.is_loopback()
+        || v4.is_private()
+        || v4.is_link_local()
+        || v4.is_unspecified()
+        || v4.is_broadcast()
 }
 
 fn is_forbidden_v6(v6: Ipv6Addr) -> bool {
