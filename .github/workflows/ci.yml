@@ -23,9 +23,17 @@ jobs:
 
       - name: Instalar Rust estable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # La acción instala el perfil `minimal`, que no trae rustfmt.
+          components: rustfmt
 
       - name: Cachear dependencias de cargo
         uses: Swatinem/rust-cache@v2
+
+      # Antes de compilar: no necesita las dependencias de sistema de abajo y
+      # tarda un segundo, así que un error de formato corta el job enseguida.
+      - name: cargo fmt
+        run: cargo fmt --check
 
       - name: Instalar dependencias de sistema (Linux)
         if: matrix.os == 'ubuntu-latest'

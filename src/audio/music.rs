@@ -129,9 +129,8 @@ impl MusicPlayer {
             ))
         })?;
 
-        let sink = Sink::try_new(handle).map_err(|e| {
-            AudioError::Backend(format!("no se pudo crear el sink de música: {e}"))
-        })?;
+        let sink = Sink::try_new(handle)
+            .map_err(|e| AudioError::Backend(format!("no se pudo crear el sink de música: {e}")))?;
         sink.set_volume(self.shared.base_volume);
         sink.append(source);
 
@@ -154,5 +153,6 @@ fn open_output_stream(
         Some(device) => OutputStream::try_from_device(&device),
         None => OutputStream::try_default(),
     };
-    result.map_err(|e| AudioError::Backend(format!("no se pudo abrir el dispositivo de música: {e}")))
+    result
+        .map_err(|e| AudioError::Backend(format!("no se pudo abrir el dispositivo de música: {e}")))
 }

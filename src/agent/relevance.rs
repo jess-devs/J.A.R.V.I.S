@@ -63,7 +63,10 @@ pub async fn sounds_directed_at_jarvis(
 
 /// Corre `stream_chat` en una tarea aparte y junta los `TextDelta` en un
 /// string. Mismo patrón que `llm_task` en `pipeline::streaming`.
-async fn collect_reply(llm: Arc<dyn LlmProvider>, history: Vec<ChatMessage>) -> Result<String, LlmError> {
+async fn collect_reply(
+    llm: Arc<dyn LlmProvider>,
+    history: Vec<ChatMessage>,
+) -> Result<String, LlmError> {
     let (tx, mut rx) = mpsc::channel(8);
     let task = tokio::spawn(async move { llm.stream_chat(&history, &[], tx).await });
 
@@ -101,7 +104,9 @@ mod tests {
             tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
         ) -> Result<(), LlmError> {
             tokio::time::sleep(self.delay).await;
-            let _ = tx.send(Ok(LlmEvent::TextDelta(self.reply.to_string()))).await;
+            let _ = tx
+                .send(Ok(LlmEvent::TextDelta(self.reply.to_string())))
+                .await;
             let _ = tx.send(Ok(LlmEvent::Done)).await;
             Ok(())
         }
@@ -118,8 +123,14 @@ mod tests {
             delay: Duration::from_millis(0),
         });
         assert!(
-            sounds_directed_at_jarvis(&llm, "el clima de hoy es soleado", "para, jarvis", &cfg(), Duration::from_secs(1))
-                .await
+            sounds_directed_at_jarvis(
+                &llm,
+                "el clima de hoy es soleado",
+                "para, jarvis",
+                &cfg(),
+                Duration::from_secs(1)
+            )
+            .await
         );
     }
 
@@ -130,8 +141,14 @@ mod tests {
             delay: Duration::from_millis(0),
         });
         assert!(
-            !sounds_directed_at_jarvis(&llm, "el clima de hoy es soleado", "y entonces le dije que no", &cfg(), Duration::from_secs(1))
-                .await
+            !sounds_directed_at_jarvis(
+                &llm,
+                "el clima de hoy es soleado",
+                "y entonces le dije que no",
+                &cfg(),
+                Duration::from_secs(1)
+            )
+            .await
         );
     }
 
@@ -142,8 +159,14 @@ mod tests {
             delay: Duration::from_millis(200),
         });
         assert!(
-            !sounds_directed_at_jarvis(&llm, "el clima de hoy es soleado", "para, jarvis", &cfg(), Duration::from_millis(20))
-                .await
+            !sounds_directed_at_jarvis(
+                &llm,
+                "el clima de hoy es soleado",
+                "para, jarvis",
+                &cfg(),
+                Duration::from_millis(20)
+            )
+            .await
         );
     }
 }

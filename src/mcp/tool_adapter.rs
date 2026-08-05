@@ -75,10 +75,7 @@ impl Tool for McpTool {
         }
 
         let result = self.client.call_tool(params).await.map_err(|e| {
-            ToolError::Execution(format!(
-                "servidor MCP '{}': {e}",
-                self.server_name
-            ))
+            ToolError::Execution(format!("servidor MCP '{}': {e}", self.server_name))
         })?;
 
         let mut text_parts = Vec::new();

@@ -33,19 +33,30 @@ const DEFAULT_ENROLL_SECONDS: f32 = 5.0;
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientMessage {
     ListDevices,
-    StartCalibration { device_index: Option<u32> },
+    StartCalibration {
+        device_index: Option<u32>,
+    },
     StopCalibration,
-    StartEnroll { device_index: Option<u32>, seconds: Option<f32> },
+    StartEnroll {
+        device_index: Option<u32>,
+        seconds: Option<f32>,
+    },
     CancelEnroll,
 }
 
-pub(super) async fn calibration_ws(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+pub(super) async fn calibration_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
 async fn send_error(socket: &mut WebSocket, code: &str, message: impl std::fmt::Display) {
-    let payload = serde_json::json!({"type": "error", "code": code, "message": message.to_string()});
-    let _ = socket.send(WsMessage::Text(payload.to_string().into())).await;
+    let payload =
+        serde_json::json!({"type": "error", "code": code, "message": message.to_string()});
+    let _ = socket
+        .send(WsMessage::Text(payload.to_string().into()))
+        .await;
 }
 
 async fn handle_socket(mut socket: WebSocket, state: AppState) {

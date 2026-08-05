@@ -103,8 +103,7 @@ mod tests {
     /// ambos `record_*` juntos para no necesitar un segundo `init`.
     #[test]
     fn init_and_record_write_valid_jsonlines() {
-        let dir =
-            std::env::temp_dir().join(format!("jarvis_audit_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("jarvis_audit_test_{}", std::process::id()));
         let path = dir.join("audit.log");
         init(&path);
 

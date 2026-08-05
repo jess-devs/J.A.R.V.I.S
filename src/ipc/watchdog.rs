@@ -12,7 +12,10 @@ fn registry() -> &'static Mutex<Vec<u32>> {
 }
 
 pub fn register_worker_pid(pid: u32) {
-    registry().lock().expect("registry lock envenenado").push(pid);
+    registry()
+        .lock()
+        .expect("registry lock envenenado")
+        .push(pid);
 }
 
 /// Mata (síncronamente) todos los PIDs registrados. Pensado para llamarse

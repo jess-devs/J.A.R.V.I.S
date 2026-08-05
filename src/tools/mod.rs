@@ -181,9 +181,7 @@ impl ToolRegistry {
             static_tools.push(Arc::new(scripted::DeleteCustomTool::new(
                 scripted_store.clone(),
             )));
-            static_tools.push(Arc::new(silence::EnterSilenceMode {
-                flag: silence_flag,
-            }));
+            static_tools.push(Arc::new(silence::EnterSilenceMode { flag: silence_flag }));
 
             if !mcp_servers.is_empty() {
                 let reserved: HashSet<String> = scripted::BUILTIN_NAMES
