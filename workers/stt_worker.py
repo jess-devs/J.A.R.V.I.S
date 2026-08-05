@@ -118,8 +118,8 @@ def _cli_arg(flag: str) -> str | None:
 
 def _cli_enroll_voice() -> None:
     """Graba unos segundos de voz y guarda su embedding como referencia
-    para `agent.speaker_verification` (ítem 4 v1 de MEJORAS.md, modo
-    sombra — ver README.md y docs/CONFIGURACION.md). Requiere el extra opcional
+    para `agent.speaker_verification` (modo sombra; ver README.md y
+    docs/CONFIGURACION.md). Requiere el extra opcional
     `speechbrain` (`pip install -r workers/requirements-speaker.txt`)."""
     import numpy as np
     import pyaudio
@@ -447,7 +447,7 @@ def _run_realtimestt(init_msg: dict, profile: dict, shutdown: threading.Event) -
         # ("data/...", quedaría "data/data/..." tras el chdir). Va dentro
         # de este `try` para que un fallo (permisos, ruta inválida) se
         # reporte como `fatal_error` en vez de tumbar el worker con un
-        # traceback crudo. Ver PLAN_RUNTIME_DIR.md fase 4.
+        # traceback crudo. Ver docs/ARCHITECTURE.md.
         runtime_dir = os.environ.get("JARVIS_RUNTIME_DIR")
         if runtime_dir:
             os.makedirs(runtime_dir, exist_ok=True)

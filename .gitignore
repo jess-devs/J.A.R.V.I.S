@@ -61,3 +61,6 @@ Thumbs.db
 # IA
 .claude
 .impeccable/
+
+# Docu
+.obsidian

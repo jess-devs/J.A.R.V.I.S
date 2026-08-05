@@ -416,8 +416,8 @@ class _Engine:
                     self._check_speaker_async(audio, text)
 
     def _check_speaker_async(self, audio: np.ndarray, text: str) -> None:
-        """Calcula la similitud de hablante en un hilo aparte (modo sombra,
-        ítem 4 v1 de MEJORAS.md): no debe sumarle latencia al turno de voz,
+        """Calcula la similitud de hablante en un hilo aparte (modo sombra):
+        no debe sumarle latencia al turno de voz,
         así que el `transcript` ya salió antes de llamar esto — el
         resultado llega después, como mensaje aparte, solo para logueo."""
         verifier = self.speaker_verifier

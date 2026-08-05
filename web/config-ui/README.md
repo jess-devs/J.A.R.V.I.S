@@ -1,32 +1,49 @@
-# React + TypeScript + Vite
+# Jarvis Configuration UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This is the local React/Vite configuration page for Jarvis. It is an optional
+development surface: the production binary serves the generated static files
+from `dist/` through the Rust/Axum server.
 
-Currently, two official plugins are available:
+## Development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The Vite dev server is useful for frontend iteration. The Rust API must be
+running separately when a component needs configuration data or calibration.
+
+## Build And Lint
+
+```bash
+npm run build
+npm run lint
+```
+
+The build output in `dist/` is ignored by git and must exist before the Rust
+server can serve the complete UI. Without it, the Rust API still starts but
+the static frontend is unavailable.
+
+## Boundaries
+
+- React owns presentation, form state, validation feedback, and browser-side
+  WebSocket handling.
+- Rust owns configuration parsing, persistence, provider status, calibration
+  workers, and security decisions.
+- The API is served by Jarvis on `127.0.0.1` only.
+- Saved changes rewrite the local YAML configuration and normally require a
+  Jarvis restart.
+- Do not put API keys, personal paths, recordings, or other private data in
+  this project.
+
+## Conventions
+
+- Use the existing components in `src/components/form/` before creating new
+  controls.
+- Keep section styling in CSS Modules and shared values in
+  `src/styles/tokens.css`.
+- Preserve the Spanish-first product language and the visual rules in
+  [`docs/DESIGN.md`](../../docs/DESIGN.md).
+- There is no frontend test runner configured yet; changes need build/lint and
+  documented manual verification until that becomes a separate decision.

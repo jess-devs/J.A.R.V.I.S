@@ -140,8 +140,13 @@ ConfirmDecision::Yes => {
 
 ### A.5 — Documentación
 
-- `docs/CONFIGURACION.md`: reescribir el párrafo de `speaker_verification` (líneas 387-401) — ya no es solo modo sombra, documentar los 4 campos nuevos, remitir a la sección "Micrófono" como forma recomendada de enrolar (dejando `--enroll-voice` como alternativa sin navegador), mantener explícito que el umbral default es un placeholder.
-- `README.md`: agregar `speaker_verification` a la lista de secciones de `config.yaml` (hoy no aparece) + mención del enrollment guiado.
+- [`docs/CONFIGURACION.md`](../CONFIGURACION.md): reescribir el párrafo de
+  `speaker_verification` (líneas 387-401) — ya no es solo modo sombra,
+  documentar los 4 campos nuevos, remitir a la sección "Micrófono" como forma
+  recomendada de enrolar (dejando `--enroll-voice` como alternativa sin
+  navegador), mantener explícito que el umbral default es un placeholder.
+- [`README.md`](../../README.md): agregar `speaker_verification` a la lista de
+  secciones de `config.yaml` (hoy no aparece) + mención del enrollment guiado.
 
 ### A.6 — Verificación end-to-end
 

@@ -41,7 +41,7 @@ import numpy as np  # noqa: E402
 
 _MODEL_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
 
-# `JARVIS_RUNTIME_DIR` la inyecta el proceso Rust (ver PLAN_RUNTIME_DIR.md);
+# `JARVIS_RUNTIME_DIR` la inyecta el proceso Rust (ver docs/ARCHITECTURE.md);
 # si falta (worker corrido suelto, sin pasar por Jarvis, ej. `stt_worker.py
 # --enroll-voice` a mano desde la raíz del repo) cae a la ruta historica.
 _runtime_dir = os.environ.get("JARVIS_RUNTIME_DIR")

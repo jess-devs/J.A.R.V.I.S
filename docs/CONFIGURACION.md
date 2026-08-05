@@ -6,15 +6,36 @@ entra en el detalle de cada clave: qué controla, qué valores acepta, y cuándo
 tiene sentido tocarla.
 
 Todas las claves son opcionales, lo que se omita usa el valor por defecto
-documentado acá. `config.yaml` se versiona en git, así que **nunca va una API
-key ahí**: las claves de proveedores en la nube se leen de variables de
-entorno (ver [`.env.example`](.env.example)).
+documentado acá. [`src/config.rs`](../src/config.rs) es la fuente de esos
+defaults. [`config.example.yaml`](../config.example.yaml) es la plantilla
+portable versionada — copiala a `config.yaml` antes de arrancar Jarvis (los
+scripts de `scripts/` lo hacen por vos) — y `config.yaml` es
+la configuración personal ignorada por git. **Nunca va una API key en ninguno
+de esos archivos**: las claves de proveedores en la nube se leen de variables
+de entorno (ver [`.env.example`](../.env.example)). Tampoco van rutas
+personales, dispositivos locales, aliases privados ni datos de voz en la
+plantilla versionada.
+
+## Los archivos YAML no llevan comentarios
+
+Ni `config.yaml` ni `config.example.yaml` deben contener comentarios: **esta
+guía es el único lugar donde se documenta la configuración**. Dos razones
+concretas:
+
+- La página local de configuración serializa el archivo entero al guardar, así
+  que **cualquier comentario se pierde en el primer guardado desde la web**.
+  Documentar ahí es trabajo que se borra solo.
+- `config.example.yaml` se copia tal cual a `config.yaml`, con lo cual sus
+  comentarios terminan dentro del archivo personal y se duplican con esta
+  referencia, que es la que se mantiene actualizada.
+
+Si una clave necesita explicación, va acá, en la tabla de su sección.
 
 ## `runtime`
 
 | Clave | Qué hace |
 |---|---|
-| `dir` | Directorio canónico donde Jarvis escribe todo lo que genera en runtime: DBs (`memory`/`reminders`/`scripted_tools`), `audit.log`, logs de tracing de la TUI, cache de calibración de hardware/voz y `speaker_embedding.json`. Default `data`, cubierto entero por una sola línea de `.gitignore` (`/data/`) — si algo se escapa de acá es un bug de la herramienta que lo escribió, no un hueco de gitignore. Se exporta a los workers Python como la env `JARVIS_RUNTIME_DIR`. Si se cambia y `agent.audit.path`/`agent.memory.db_path`/`agent.reminders.db_path`/`agent.scripted_tools.db_path` siguen en su valor por defecto, se re-anclan automáticamente al nuevo directorio (una ruta ya personalizada por el usuario no se toca). |
+| `dir` | Directorio canónico donde Jarvis escribe todo lo que genera en runtime: DBs (`memory`/`reminders`/`scripted_tools`), `audit.log`, cache de calibración de hardware/voz y `speaker_embedding.json`. Default `data`, cubierto entero por una sola línea de `.gitignore` (`/data/`) — si algo se escapa de acá es un bug de la herramienta que lo escribió, no un hueco de gitignore. Se exporta a los workers Python como la env `JARVIS_RUNTIME_DIR`. Si se cambia y `agent.audit.path`/`agent.memory.db_path`/`agent.reminders.db_path`/`agent.scripted_tools.db_path` siguen en su valor por defecto, se re-anclan automáticamente al nuevo directorio (una ruta ya personalizada por el usuario no se toca). |
 
 ## `workers`
 
@@ -502,10 +523,10 @@ el mismo panel con vúmetro en vivo, solo que reutilizado ahí.
 ## `web_ui`
 
 Página de configuración local: un servidor HTTP que el propio binario de
-Jarvis levanta en tu máquina para leer y escribir este mismo `config.yaml`
-desde el navegador, en vez de editarlo a mano. Piloto actual: solo las
-secciones `llm` y `tts` (el resto del archivo se sigue editando a mano); el
-resto de las secciones se suman más adelante con el mismo patrón.
+Jarvis levanta en tu máquina para leer y escribir tu `config.yaml` personal
+desde el navegador, en vez de editarlo a mano. Es un prototipo: ya expone
+secciones de voz, audio, proveedores, agente, MCP, workers, onboarding y
+bienvenida, pero la cobertura, validación y UX todavía pueden cambiar.
 
 | Clave | Qué hace |
 |---|---|

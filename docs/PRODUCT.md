@@ -15,11 +15,11 @@ Framework moderno, decidido por superficie:
 
 ## Users
 
-Personas hispanohablantes que instalan y corren Jarvis en su propia máquina de escritorio (instalación distribuible, no un asistente personal de un solo desarrollador). Le hablan por voz (o usan el modo texto) para controlar su PC de forma manos-libres, y usarán la futura página de configuración local para ajustar `config.yaml` sin editar YAML a mano.
+Personas hispanohablantes que instalan y corren Jarvis en su propia máquina de escritorio. El desarrollo actual prioriza el uso personal real, pero el núcleo debe poder convertirse en una instalación distribuible y multiplataforma. Le hablan por voz (o usan el modo texto) para controlar su PC de forma manos-libres y pueden usar la página de configuración local para ajustar `config.yaml` sin editar YAML a mano.
 
 ## Product Purpose
 
-Jarvis es un asistente de voz conversacional y agéntico en tiempo real (STT → LLM → TTS), en español, pensado para correr 100% local con opción de usar servicios en la nube. Además de conversar, usa herramientas para controlar el sistema, archivos, apps, mouse/pantalla, traducir, crear recordatorios, definir sus propias tools, buscar en la web y recordar cosas entre sesiones — todo por voz, con confirmación hablada para las acciones peligrosas.
+Jarvis es un asistente de voz conversacional y agéntico en tiempo real (STT → LLM → TTS), en español, pensado para correr 100% local con opción explícita de usar servicios en la nube. Vive como proceso de fondo, responde cuando el usuario se dirige a él, puede guardar silencio y busca una conversación fluida con interrupciones naturales. Además de conversar, usa herramientas para controlar el sistema, archivos, apps, mouse/pantalla, traducir, crear recordatorios, definir sus propias tools, buscar en la web y recordar cosas entre sesiones — todo por voz, con confirmación hablada para las acciones peligrosas.
 
 Éxito: alguien lo instala, le habla en español, y logra que ejecute tareas reales en su PC (abrir apps, buscar archivos, controlar el sistema) sin depender de la nube ni exponer sus datos, con un margen de seguridad claro para lo riesgoso.
 
@@ -32,8 +32,8 @@ Frente a asistentes de voz basados en nube (Alexa, Google Assistant, Siri) o wra
 - Se instala y corre en la máquina de escritorio del usuario (Windows hoy; Linux en desarrollo — build/tests verificados en WSL/Ubuntu, falta correr la app completa ahí; Mac no soportado todavía).
 - Requiere micrófono/parlantes; el modo texto (`--text-mode`) es alternativa sin micrófono (sigue respondiendo por voz).
 - Arquitectura: orquestador Rust (`src/`, todo el networking, config y pipeline) + dos workers Python de inferencia ML pura (`workers/`), hablados por stdio.
-- Configuración hoy vive enteramente en `config.yaml`, editado a mano; la futura página de configuración local reemplazará/complementará eso.
-- El HUD de terminal (ratatui, `src/tui/`) es una interfaz visual opcional (`config.ui.enabled`) que anima el estado del asistente (escuchando/pensando/hablando). No es la superficie que este documento prioriza para trabajo de diseño futuro — las superficies confirmadas son la landing page y la página de configuración local, ambas web.
+- La configuración personal vive en `config.yaml`, ignorado por git; `config.example.yaml` es la plantilla portable y `src/config.rs` define los defaults.
+- La página de configuración local (`web/config-ui/`) es un prototipo React/Axum. La landing pública es una superficie futura.
 - Acciones de riesgo requieren confirmación hablada o un código de aceptación pronunciado, verificado en Rust — nunca decidido por el LLM.
 
 ## Capabilities and Constraints
@@ -43,7 +43,8 @@ Frente a asistentes de voz basados en nube (Alexa, Google Assistant, Siri) o wra
 - Herramientas agénticas: estado del sistema, abrir/cerrar apps, buscar/abrir archivos, ejecutar comandos de shell, volumen, control de medios, captura de pantalla, mouse, traducción, recordatorios, tools personalizadas, búsqueda web, memoria persistente (SQLite local), y cliente MCP a servidores externos.
 - Tres niveles de riesgo deterministas (lectura / confirmación / código), decididos en Rust, nunca por el LLM; el nivel código exige un código hablado que el modelo no puede ver ni confirmar por su cuenta.
 - Sin aplicación de escritorio nativa todavía (roadmap); sin ejecución automática al arranque del equipo todavía (roadmap).
-- Landing page y página de configuración local **no existen todavía en el código** — son las dos superficies web confirmadas a construir a futuro, framework específico aún sin decidir.
+- La página de configuración local existe como prototipo; la landing pública todavía no existe.
+- La TUI de terminal fue eliminada y no forma parte del producto.
 
 ## Brand Commitments
 
@@ -53,7 +54,10 @@ Vara de calidad/fidelidad de referencia (craft bar), confirmada por el usuario: 
 
 ## Evidence on Hand
 
-- `../README.md`, `CONFIGURACION.md` y `MEJORAS.md` documentan capacidades, configuración y mejoras ya implementadas.
+- [`../README.md`](../README.md), [`CONFIGURACION.md`](CONFIGURACION.md),
+  [`ARCHITECTURE.md`](ARCHITECTURE.md), [`SECURITY.md`](SECURITY.md) y
+  [`ROADMAP.md`](ROADMAP.md) documentan capacidades, configuración, estructura,
+  límites y evolución.
 - No hay assets de marca, logo, ni contenido de landing page todavía (texto, capturas, testimonios). Trabajo de diseño futuro no debe inventar prueba social, métricas ni capturas que no existan.
 
 ## Product Principles
@@ -62,7 +66,8 @@ Vara de calidad/fidelidad de referencia (craft bar), confirmada por el usuario: 
 2. Seguridad determinista: el riesgo de una acción lo clasifica Rust, nunca el LLM; lo más peligroso exige un código hablado que el modelo no puede ver ni confirmar por su cuenta.
 3. Español como idioma primario de principio a fin (voz, prompts, mensajes), no una traducción de un producto en inglés.
 4. Configuración declarativa y opcional: toda clave de `config.yaml` tiene un default razonable; nada es obligatorio para arrancar.
-5. Separación de responsabilidades: Rust orquesta y decide, Python solo hace inferencia ML pura vía stdio.
+5. Separación de responsabilidades: Rust orquesta y decide, Python solo hace inferencia ML y captura de audio vía stdio.
+6. Conversación respetuosa del contexto: Jarvis no responde a todo el audio ambiente, puede silenciarse y no toma acciones por iniciativa propia.
 
 ## Accessibility & Inclusion
 

@@ -2,7 +2,7 @@
 //! Windows, macOS, Linux/X11), compartida entre `media.rs` (teclas de
 //! medios) y `screen.rs` (control de mouse). En Linux/Wayland puede no
 //! funcionar sin soporte explícito del compositor — limitación conocida de
-//! `enigo`, no de Jarvis (ver MEJORAS.md ítem 1).
+//! `enigo`, no de Jarvis (ver docs/ROADMAP.md).
 
 use enigo::{Coordinate, Direction, Enigo, Key, Keyboard, Mouse, Settings};
 
@@ -15,8 +15,9 @@ pub enum MouseButton {
 }
 
 fn new_enigo() -> Result<Enigo, ToolError> {
-    Enigo::new(&Settings::default())
-        .map_err(|e| ToolError::Execution(format!("no se pudo inicializar el control de input: {e}")))
+    Enigo::new(&Settings::default()).map_err(|e| {
+        ToolError::Execution(format!("no se pudo inicializar el control de input: {e}"))
+    })
 }
 
 /// Mueve el cursor a coordenadas absolutas de pantalla (píxeles físicos,

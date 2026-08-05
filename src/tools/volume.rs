@@ -2,7 +2,7 @@
 //! Acción reversible al instante → `Safe`, sin confirmación. En Unix
 //! todavía no está implementado (el control de volumen del sistema varía
 //! demasiado entre PulseAudio/PipeWire/ALSA/CoreAudio para una única
-//! implementación simple; queda para una etapa posterior, ver MEJORAS.md
+//! implementación simple; queda para una etapa posterior del roadmap.
 //! ítem 1) — `get_volume`/`set_volume` devuelven un error explicativo.
 
 use async_trait::async_trait;

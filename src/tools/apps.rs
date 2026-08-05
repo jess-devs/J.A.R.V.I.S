@@ -2,7 +2,7 @@
 //! prueba los alias de `config.yaml`; si no hay alias, en Windows busca con
 //! matching tolerante (substring + tokens + Levenshtein) entre los accesos
 //! directos del Menú Inicio y el Escritorio (el escaneo de accesos
-//! directos es Windows-only por ahora, ver MEJORAS.md ítem 1 Stage C) y si
+//! directos es Windows-only por ahora, ver docs/ROADMAP.md y si
 //! tampoco hay match confiado cae al comportamiento clásico de pasarle el
 //! nombre literal al lanzador de la plataforma (`platform::open_target`:
 //! `cmd /C start` en Windows —PATH + App Paths del registro—, `xdg-open`/

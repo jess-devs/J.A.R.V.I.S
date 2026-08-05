@@ -23,7 +23,7 @@ import sys
 import time
 import wave
 
-# `JARVIS_RUNTIME_DIR` la inyecta el proceso Rust (ver PLAN_RUNTIME_DIR.md);
+# `JARVIS_RUNTIME_DIR` la inyecta el proceso Rust (ver docs/ARCHITECTURE.md);
 # si falta (worker corrido suelto, sin pasar por Jarvis) cae a la ruta
 # historica junto al propio script.
 _runtime_dir = os.environ.get("JARVIS_RUNTIME_DIR")

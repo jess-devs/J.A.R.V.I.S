@@ -48,7 +48,7 @@ impl WorkerHandle {
         // Se pasa como env en vez de vía cwd: los workers deciden ellos
         // mismos cuándo (si acaso) hacer `os.chdir()`, después de que el
         // intérprete ya resolvió su propio `__file__` — ver
-        // PLAN_RUNTIME_DIR.md fase 4 sobre por qué no usar
+        // docs/ARCHITECTURE.md sobre por qué no usar
         // `Command::current_dir` acá (rompería la resolución de
         // `python_executable`/`script` cuando son relativos).
         //
@@ -56,7 +56,8 @@ impl WorkerHandle {
         // para que siga siendo válido incluso después de que un worker haga
         // `os.chdir()` con él — relativo, una segunda lectura de la env
         // después del chdir resolvería contra el cwd nuevo, no el original.
-        let runtime_dir_abs = std::path::absolute(runtime_dir).unwrap_or_else(|_| runtime_dir.to_path_buf());
+        let runtime_dir_abs =
+            std::path::absolute(runtime_dir).unwrap_or_else(|_| runtime_dir.to_path_buf());
         let mut child = Command::new(python_executable)
             .arg(script)
             .env("JARVIS_RUNTIME_DIR", runtime_dir_abs)

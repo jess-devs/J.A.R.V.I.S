@@ -30,7 +30,12 @@ Por eso, la calibración corre en **un worker Python dedicado y liviano, separad
 
 ## Fase 0 — Guardar este plan en el repo
 
-Antes de tocar código, copiar este documento a `docs/planning/onboarding-mic-calibracion.md` dentro del repositorio, para que quede versionado junto al código que describe y visible para cualquiera que abra el proyecto — no solo en el directorio local de planes de la herramienta. Es el primer commit de la serie, antes de cualquier cambio funcional.
+Antes de tocar código, copiar este documento a
+[`docs/planning/onboarding-mic-calibracion.md`](onboarding-mic-calibracion.md)
+dentro del repositorio, para que quede versionado junto al código que describe
+y visible para cualquiera que abra el proyecto — no solo en el directorio local
+de planes de la herramienta. Es el primer commit de la serie, antes de
+cualquier cambio funcional.
 
 ## Fase 1 — Dependencia
 
@@ -146,8 +151,14 @@ Un componente compartido, montado en dos lugares (wizard condicional + sección 
 
 ## Fase 9 — Documentación
 
-- `README.md`: agregar entrada `**onboarding**` junto a `**welcome**` en la lista de secciones de `config.yaml`; mencionar el wizard y el auto-open del navegador en la sección de la página de configuración local.
-- `docs/CONFIGURACION.md`: en la sección que documenta `energy_floor_dbfs`/`input_device_index`, agregar un párrafo remitiendo a la nueva UI con VU meter como forma recomendada de elegir micrófono, dejando `--list-devices`/`--calibrate` documentados como alternativa sin navegador.
+- [`README.md`](../../README.md): agregar entrada `**onboarding**` junto a
+  `**welcome**` en la lista de secciones de `config.yaml`; mencionar el wizard
+  y el auto-open del navegador en la sección de la página de configuración
+  local.
+- [`docs/CONFIGURACION.md`](../CONFIGURACION.md): en la sección que documenta
+  `energy_floor_dbfs`/`input_device_index`, agregar un párrafo remitiendo a la
+  nueva UI con VU meter como forma recomendada de elegir micrófono, dejando
+  `--list-devices`/`--calibrate` documentados como alternativa sin navegador.
 
 ## Fase 10 — Verificación end-to-end (manual)
 
