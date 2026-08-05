@@ -38,6 +38,17 @@ fi
 
 echo "OK: cargo, $PYTHON_BIN y ollama estan disponibles."
 
+# La configuración personal no se versiona. El primer setup crea una copia
+# local de la plantilla; los siguientes respetan las preferencias existentes.
+if [[ ! -f "config.yaml" ]]; then
+    if [[ ! -f "config.example.yaml" ]]; then
+        err "No se encontro config.example.yaml. El repositorio esta incompleto."
+        exit 1
+    fi
+    cp "config.example.yaml" "config.yaml"
+    echo "Creado config.yaml local desde config.example.yaml."
+fi
+
 # Linux (no macOS): cargo build necesita un compilador de C (rusqlite,
 # `bundled`), headers de dbus/X11 (xcap para take_screenshot, enigo para
 # mouse_move/mouse_click/media_control) y headers de ALSA (cpal/rodio,

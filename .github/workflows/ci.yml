@@ -9,7 +9,7 @@ jobs:
   rust:
     # windows-latest: plataforma principal, con más tests (ej. clasificación
     # de riesgo de run_powershell). ubuntu-latest: valida el soporte Linux/Mac
-    # del ítem 1 de MEJORAS.md (Stage A) — compila con `windows` excluido vía
+    # multiplataforma — compila con `windows` excluido vía
     # cfg y corre los tests cfg(unix) (ej. run_shell). macOS no está en la
     # matriz por ahora (sin runner propio del proyecto para justificar el
     # costo/tiempo extra de CI; el código unix-genérico ya se ejercita en
@@ -64,7 +64,7 @@ jobs:
 
       - name: Buscar archivos privados trackeados
         run: |
-          PATTERN='\.(db|db-wal|db-shm|db-journal|sqlite|sqlite3|log|wav|mp3|pcm|raw|flac|ogg|m4a|opus|webm)$|\.stt\.|transcript[^/]*\.(txt|json|log|csv|md)$|(^|/)speaker_embedding\.json$|\.env(\.|$)|(^|/)\.venv/|(^|/)__pycache__/'
+          PATTERN='\.(db|db-wal|db-shm|db-journal|sqlite|sqlite3|log|wav|mp3|pcm|raw|flac|ogg|m4a|opus|webm)$|\.stt\.|transcript[^/]*\.(txt|json|log|csv|md)$|(^|/)speaker_embedding\.json$|(^|/)config\.yaml$|\.env(\.|$)|(^|/)\.venv/|(^|/)__pycache__/'
           MATCHES=$(git ls-files \
             | grep -E "$PATTERN" \
             | grep -v '\.env\.example$' \

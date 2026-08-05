@@ -35,7 +35,7 @@ Ver [`workers/README.md`](workers/README.md) para detalle del protocolo entre Ru
 
 ### Automática (recomendada)
 
-Con Rust, Python 3.12 y Ollama ya instalados (ver [Requisitos](#requisitos)), un solo script deja todo listo: crea el venv de los workers, detecta tu hardware (RAM/GPU) para recomendarte y descargar un modelo de Ollama acorde, baja la voz de Piper que usa `config.yaml`, crea el `.env` e instala las dependencias del frontend web de `config-ui` (si tenés Node.js; si no, avisa y sigue igual, la web es opcional).
+Con Rust, Python 3.12 y Ollama ya instalados (ver [Requisitos](#requisitos)), un solo script deja todo listo: crea `config.yaml` desde `config.example.yaml` si todavía no existe, crea el venv de los workers, detecta tu hardware (RAM/GPU) para recomendarte y descargar un modelo de Ollama acorde, baja la voz de Piper configurada, crea el `.env` e instala las dependencias del frontend web de `config-ui` (si tenés Node.js; si no, avisa y sigue igual, la web es opcional).
 
 ```powershell
 # Windows (PowerShell)
@@ -106,7 +106,7 @@ El comando descarga los archivos a la carpeta actual,moveló a `voices/`:
 Move-Item es_ES-davefx-medium.onnx*, voices/
 ```
 
-`config.yaml` ya apunta por defecto a `voices/es_MX-ald-medium.onnx`. Otras voces en español disponibles: buscá `es_MX` o `es_ES` en el catálogo de [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/es) y cambiá `voice_path`/`config_path` en `config.yaml` si preferís otra.
+`config.example.yaml` apunta a `voices/es_ES-davefx-medium.onnx`. Otras voces en español disponibles: buscá `es_MX` o `es_ES` en el catálogo de [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices/tree/main/es) y cambiá `voice_path`/`config_path` en tu `config.yaml` si preferís otra.
 
 #### 4. Compilar y correr
 
@@ -156,6 +156,12 @@ En este modo standalone, apenas el servidor levanta, Jarvis abre la página sola
 
 ## Configuración (`config.yaml`)
 
+`config.yaml` es personal y está ignorado por git. Para empezar, copiá
+[`config.example.yaml`](config.example.yaml) o ejecutá uno de los scripts de
+setup. Los defaults portables y multiplataforma viven en
+[`src/config.rs`](src/config.rs); la plantilla solo muestra
+los valores principales del perfil local-first.
+
 Todas las claves son opcionales:
 
 - **`workers`**: ruta al Python del venv y a los scripts de los workers, timeouts de arranque/apagado, política de reinicio ante crash.
@@ -166,7 +172,7 @@ Todas las claves son opcionales:
 - **`tts`**: `provider: piper | elevenlabs | cartesia`, ruta a la voz de Piper o config de ElevenLabs/Cartesia (`voice_id`, `output_format`).
 - **`audio`**: dispositivo de salida (`null` = default del sistema) y volumen.
 - **`pipeline`**: longitud mínima/máxima de las frases que se mandan a sintetizar.
-- **`agent`**: capa agéntica,activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, sub-config de `files`/`apps`/`web`/`memory`/`translate`/`reminders`/`scripted_tools`/`audit`, y `speaker_verification` (verificación de quién habló, no solo qué dijo — enrollment guiado desde la sección "Micrófono" de la página de configuración). Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
+- **`agent`**: capa agéntica, activar/desactivar (`enabled`), límite de iteraciones por turno, timeouts, frases de relleno, listas de confirmación sí/no, el `risk_code`, sub-config de `files`/`apps`/`web`/`memory`/`translate`/`reminders`/`scripted_tools`/`audit`, y `speaker_verification` experimental (verificación de quién habló, no solo qué dijo — enrollment guiado desde la sección "Micrófono" de la página de configuración). Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`mcp`**: lista de servidores MCP externos a los que Jarvis se conecta como cliente (vacía por defecto). Complementa `create_tool`, no lo reemplaza. Ver [Capacidades agénticas](#capacidades-agénticas-herramientas).
 - **`welcome`**: la escena de bienvenida disparada por doble aplauso,activar/desactivar, música, frase de saludo, volúmenes. Ver [Modo bienvenida](#modo-bienvenida-doble-aplauso).
 - **`onboarding`**: solo `completed` — si ya pasaste por el wizard de elección de micrófono de la página de configuración (no confundir con `welcome`, arriba). La elección real del dispositivo vive en `stt.input_device_index`/`stt.vad.energy_floor_dbfs`, no acá. Ver [`onboarding`](docs/CONFIGURACION.md#onboarding).

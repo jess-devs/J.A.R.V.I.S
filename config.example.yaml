@@ -1,0 +1,30 @@
+runtime:
+  dir: data
+
+llm:
+  provider: ollama
+  ollama:
+    model: "auto"
+    auto_serve: true
+
+tts:
+  provider: piper
+  piper:
+    voice_path: "voices/es_ES-davefx-medium.onnx"
+    config_path: "voices/es_ES-davefx-medium.onnx.json"
+
+agent:
+  enabled: true
+  confirm_mode: always
+  speaker_verification:
+    enabled: false
+    gate_confirmations: false
+
+welcome:
+  enabled: false
+
+web_ui:
+  enabled: true
+  port: 4756
+
+log_level: info

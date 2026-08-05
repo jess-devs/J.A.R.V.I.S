@@ -1325,4 +1325,13 @@ mod tests {
         let parsed: OnboardingConfig = serde_saphyr::from_str(&yaml).expect("debe parsear");
         assert!(parsed.completed);
     }
+
+    #[test]
+    fn config_example_es_portable_y_valido() {
+        let config: Config = serde_saphyr::from_str(include_str!("../config.example.yaml"))
+            .expect("config.example.yaml debe cargar con los defaults");
+        assert_eq!(config.llm.provider, LlmProviderKind::Ollama);
+        assert_eq!(config.tts.provider, TtsProviderKind::Piper);
+        assert!(config.web_ui.enabled);
+    }
 }

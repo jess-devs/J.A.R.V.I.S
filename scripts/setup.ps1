@@ -57,6 +57,21 @@ if (-not (Test-CommandExists "ollama"))
 
 Write-Host "OK: cargo, Python 3.12 y ollama estan disponibles."
 
+# La configuración personal no se versiona. El primer setup crea una copia
+# local de la plantilla; los siguientes respetan las preferencias existentes.
+$configPath = Join-Path $RepoRoot "config.yaml"
+$configExamplePath = Join-Path $RepoRoot "config.example.yaml"
+if (-not (Test-Path $configPath))
+{
+    if (-not (Test-Path $configExamplePath))
+    {
+        Write-Err "No se encontro config.example.yaml. El repositorio esta incompleto."
+        exit 1
+    }
+    Copy-Item $configExamplePath $configPath
+    Write-Host "Creado config.yaml local desde config.example.yaml."
+}
+
 # Entorno Python:
 Write-Step "Creando/actualizando el entorno Python de los workers..."
 & "$PSScriptRoot/setup_python_env.ps1"
@@ -109,7 +124,6 @@ if ($hasGpu -and $vramGb -ge 24)
     }
 }
 
-$configPath = Join-Path $RepoRoot "config.yaml"
 $configRaw = Get-Content $configPath -Raw
 $configNewline = if ($configRaw -match "`r`n")
 { "`r`n"

@@ -33,6 +33,9 @@ workers/.cache/
 # Secretos
 .env
 
+# Configuración personal: la plantilla versionada es config.example.yaml.
+/config.yaml
+
 # Log que RealtimeSTT escribe en su cwd al correr el worker de STT (motor
 # `realtimestt`). Bajo Jarvis normal esto ya cae en `data/` (cubierto por
 # `/data/`, ver workers/stt_worker.py:_run_realtimestt); esta línea solo
