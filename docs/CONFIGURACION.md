@@ -16,6 +16,14 @@ de entorno (ver [`.env.example`](../.env.example)). Tampoco van rutas
 personales, dispositivos locales, aliases privados ni datos de voz en la
 plantilla versionada.
 
+La plantilla trae el sub-bloque de **todos** los proveedores de LLM y de TTS,
+no solo el que viene activo: como Jarvis lee únicamente el del `provider`
+elegido, cambiar de proveedor es editar esa línea y completar los datos que
+falten, sin tener que escribir el bloque entero a mano. Los dos que sí quedan
+vacíos a propósito son `tts.elevenlabs.voice_id` y `tts.cartesia.voice_id` —
+no tienen default posible, salen de tu cuenta del proveedor, y si activás uno
+de esos TTS sin completarlo el arranque falla diciéndolo.
+
 ## Los archivos YAML no llevan comentarios
 
 Ni `config.yaml` ni `config.example.yaml` deben contener comentarios: **esta
@@ -144,14 +152,16 @@ Aplican a **ambos motores**. Con los tres en `auto` (default):
 - **Con GPU CUDA** (detectada vía `ctranslate2`, no vía `torch`, el venv
   trae la build CPU-only de torch, más liviana): se elige el modelo por
   tiers de VRAM sin medir nada (con 4GB, por ejemplo, `small` en
-  `float16`, más preciso y más rápido que `base` en CPU).
+  `int8_float16`, más preciso y más rápido que `base` en CPU).
 - **Sin GPU** (o si forzás `device: cpu`): el primer arranque **calibra de
   verdad**, transcribe un audio de referencia con distintos modelos y mide
   el RTF (tiempo de transcripción / duración del audio) real de tu máquina,
   y elige modelo y `beam_size` según qué tan holgada vaya. El resultado
-  queda cacheado en `workers/.cache/stt_profile.json`: los arranques
-  siguientes son instantáneos, y solo se vuelve a medir si cambia el
-  hardware o ponés `recalibrate: true`.
+  queda cacheado en `data/cache/stt_profile.json` (bajo [`runtime.dir`](#runtime)):
+  los arranques siguientes son instantáneos, y solo se vuelve a medir si
+  cambia el hardware o ponés `recalibrate: true`. Corriendo el worker a mano,
+  sin la env `JARVIS_RUNTIME_DIR` que Jarvis le inyecta, el caché cae en
+  `workers/.cache/` en su lugar.
 
 `compute_type: auto` usa `int8_float16` en GPU (funciona en cualquier CUDA,
 mientras que `float16` puro falla sin tensor cores) e `int8` en CPU.
@@ -188,7 +198,7 @@ ignora.
 | `enabled` | `false` = sin gate, Jarvis responde a absolutamente todo lo que transcribe (comportamiento previo a esta función). |
 | `words` | Palabras que activan una respuesta. Se matchean normalizadas (sin tildes, minúsculas) y con tolerancia a distancia de edición 1 (así "yarvis" o "jarbis" también valen). |
 | `attention_window_secs` | Tras cada respuesta, Jarvis sigue "atento" este tiempo sin que repitas su nombre, para conversaciones de ida y vuelta naturales. |
-| `window_min_words` | Dentro de esa ventana, una frase sin el nombre necesita al menos esta cantidad de palabras para contar como pedido real, filtra alucinaciones de una sola palabra ("bip", "bien") que Whisper a veces inventa en silencio. `1` = sin este filtro. |
+| `window_min_words` | Dentro de esa ventana, una frase sin el nombre necesita al menos esta cantidad de palabras para contar como pedido real, filtra alucinaciones de una sola palabra ("bip", "bien") que Whisper a veces inventa en silencio. `1` = sin este filtro. **Excepción automática:** si Jarvis cerró el turno preguntando algo (su respuesta termina en `?`), la frase siguiente se acepta aunque sea de una sola palabra — contestar "descargas" o "sí" a una pregunta suya es lo normal, y si no, tendrías que repetir su nombre para que te escuche. El permiso se consume con esa respuesta y no dura toda la ventana. |
 | `ignore_phrases` | Lista de frases-basura típicas que Whisper alucina con ruido/silencio (avisos de doblaje, "suscribete", etc.), se descartan siempre, comparación sin tildes. |
 | `ambient_context` | Las frases ignoradas (dichas sin el nombre, fuera de ventana) no se pierden del todo: se guardan y se anteponen como contexto a tu siguiente pedido real, para que Jarvis "haya escuchado" la charla previa. |
 | `ambient_context_max` / `ambient_context_ttl_secs` | Cuántas de esas frases ambientales se conservan como máximo, y por cuánto tiempo antes de descartarlas por viejas. |
@@ -238,9 +248,9 @@ vez de tratarla como una interrupción real.
 | Clave | Qué hace |
 |---|---|
 | `enabled` | `false` = nunca descarta por eco. Desaconsejado si usás parlantes sin auriculares. |
-| `similarity_threshold` | Fracción de palabras de la transcripción que deben coincidir con algo que Jarvis dijo para descartarla como eco (0-1). Más alto = menos agresivo filtrando (podés colar más eco, pero también cortás menos interrupciones reales por error). |
+| `similarity_threshold` | Fracción de palabras de la transcripción que deben coincidir con algo que Jarvis dijo para descartarla como eco (0-1). Más alto = menos agresivo filtrando (podés colar más eco, pero también cortás menos interrupciones reales por error). Si el eco trae pegada tu respuesta al final —pasa cuando contestás encima de lo que Jarvis está terminando de decir, y el STT lo mete todo en un mismo segmento— esa cola se rescata en vez de perderse: se ubica dónde terminó la frase de Jarvis y lo que sigue se toma como tuyo. |
 | `vad_threshold_while_speaking` | Umbral de Silero para siquiera empezar a grabar mientras Jarvis habla, más alto que `stt.vad.threshold`, para que solo reaccione a voz sostenida y relativamente fuerte (vos hablando encima), no al murmullo de fondo del propio parlante. |
-| `recent_tts_window_secs` | Cuánto tiempo se recuerdan las frases que Jarvis dijo, para comparar contra transcripciones que llegan justo después de que terminó de hablar (el eco puede llegar con un poco de latencia). |
+| `recent_tts_window_secs` | Cuánto tiempo se recuerdan las frases que Jarvis dijo, para comparar contra transcripciones que llegan justo después de que terminó de hablar (el eco puede llegar con un poco de latencia). Se cuenta **desde que dejó de hablar**, no desde cada frase suelta: una respuesta larga tarda en reproducirse más que la ventana entera, y midiéndolo por frase las primeras quedaban afuera justo cuando el micrófono devolvía el eco de la respuesta completa — Jarvis terminaba contestándose a sí mismo. |
 
 **Con parlantes**, si Jarvis se autointerrumpe seguido, subí
 `vad_threshold_while_speaking` y/o bajá `similarity_threshold` un poco (más
@@ -257,7 +267,7 @@ Qué modelo genera las respuestas.
   etc.), pero **solo se lee el del `provider` activo**, no hace falta
   comentar los demás.
 - `api_key_env` (en `anthropic`, `openai`, `deepseek`, `lmstudio`,
-  `tts.elevenlabs`) **no es la API key en sí**, es el *nombre* de la
+  `tts.elevenlabs`, `tts.cartesia`) **no es la API key en sí**, es el *nombre* de la
   variable de entorno que la contiene (ver `.env.example`). Así la key real
   nunca queda en este archivo, que sí se versiona en git.
 - `ollama.think` / nota sobre modelos con razonamiento: `qwen3`, `qwen3.5`
@@ -278,6 +288,17 @@ Qué modelo genera las respuestas.
   configurás, hace falta `ollama pull <modelo>` aparte y asumís que entra
   en tu VRAM/RAM (los modelos de visión suelen pesar más que su
   equivalente solo-texto).
+- `lmstudio.base_url`: dónde escucha el servidor local de LM Studio
+  (`http://localhost:1234/v1` por defecto, pestaña Developer → Start
+  Server). Es una API compatible con la de OpenAI, por eso Jarvis reusa el
+  mismo cliente HTTP.
+- `lmstudio.model`: el identificador exacto del modelo cargado en LM Studio.
+  El default (`local-model`) es un placeholder deliberado: si no calza, el
+  preflight falla listando los modelos que LM Studio sí tiene cargados, y
+  copiás el que corresponda.
+- `lmstudio.api_key_env`: `null` por defecto, LM Studio no pide
+  autenticación. Ponele el nombre de una variable de entorno solo si
+  expusiste el servidor detrás de un proxy que exige token.
 - `max_history_messages`: cuántos mensajes de la conversación actual se
   conservan (además de los 2 mensajes `system` fijos) antes de recortar los
   más viejos. Más alto = Jarvis recuerda más de la charla en curso, pero
@@ -288,6 +309,18 @@ Qué modelo genera las respuestas.
 - `system_prompt`: la personalidad de Jarvis, en texto plano multilínea
   (bloque YAML `|`). Nunca debe pedirle markdown ni listas, el texto se
   convierte directo en audio.
+  > **Tres cosas se agregan solas, escribas lo que escribas acá.** Jarvis
+  > antepone a tu prompt: (1) en qué sistema operativo está corriendo y cuál
+  > es la única herramienta de shell que existe ahí (`run_powershell` en
+  > Windows, `run_shell` en Linux/Mac) — sin eso el modelo propone comandos
+  > del SO equivocado; (2) las rutas reales de tus carpetas estándar
+  > (descargas, documentos, escritorio…), resueltas leyendo la config del
+  > escritorio, porque el modelo no puede saber si la de descargas se llama
+  > `Downloads` o `Descargas` y sin eso sondea el disco con la shell en vez
+  > de usar `open_file`; (3) las memorias recientes (ver
+  > `agent.memory.max_injected`). Por eso **no hace falta que nombres la tool
+  > de shell ni las rutas en tu prompt**: si las nombrás mal, contradecís los
+  > bloques automáticos. Solo se listan las carpetas que existen de verdad.
 
 ## `tts`
 
@@ -308,11 +341,17 @@ Qué voz habla.
   no tocar salvo necesidad concreta), `api_key_env`.
 - `tts.cartesia`: `model_id` (`sonic-3.5` | `sonic-3` | `sonic-latest`),
   `voice_id` (desde tu cuenta de Cartesia), `language` (`null` =
-  autodetectar), `output_format` (`container`: `raw` | `wav` | `mp3`;
-  `encoding`: `pcm_s16le` | `pcm_f32le` | `pcm_mulaw` | `pcm_alaw`;
-  `sample_rate`), `api_key_env`, `cartesia_version` (fecha de versión de la
-  API, formato `AAAA-MM-DD`), `transport`: `websocket` (default, menor
-  latencia, mantiene la conexión abierta entre frases) | `rest`.
+  autodetectar), `output_format`, `api_key_env`, `cartesia_version` (fecha
+  de versión de la API, formato `AAAA-MM-DD`), `transport`: `websocket`
+  (default, menor latencia, mantiene la conexión abierta entre frases) |
+  `rest`.
+  > **`output_format` no es libre.** La API de Cartesia acepta varios
+  > contenedores y encodings, pero Jarvis reproduce audio crudo de 16 bits y
+  > no decodifica nada: el único combo soportado es `container: raw` +
+  > `encoding: pcm_s16le` (el default). Con `pcm_f32le` la reproducción
+  > falla; con `pcm_mulaw`/`pcm_alaw` se interpretan bytes de 8 bits como 16
+  > y sale ruido; con `wav`/`mp3` el header o el stream comprimido se
+  > reproducen como si fueran PCM. `sample_rate` sí se puede cambiar.
 - `synth_timeout_secs`: si sintetizar una frase tarda más que esto, se
   aborta el resto de la respuesta (mejor cortar que colgarse).
 
@@ -353,9 +392,11 @@ señor?"), o código de aceptación para acciones de riesgo extremo.
 | `enabled` | `false` = chat puro sin herramientas. |
 | `max_iterations` | Máximo de pasadas LLM↔herramientas por turno; al agotarse, Jarvis responde igual con lo que ya tenga en vez de seguir encadenando llamadas. |
 | `tool_timeout_secs` | Si una herramienta tarda más que esto, se cancela y el LLM recibe un error como resultado (para que se disculpe o reintente). |
-| `confirm_timeout_secs` | Tiempo para responder sí/no (o el código) antes de que la acción pendiente se cancele sola. |
+| `confirm_timeout_secs` | Tiempo para responder sí/no (o el código) antes de que la acción pendiente se cancele sola. Cada repregunta lo repone entero. |
+| `confirm_max_retries` | Cuántas veces Jarvis vuelve a preguntar cuando **no entendió** la respuesta (ruido, tos, una transcripción vacía, media palabra). Default `2`. No aplica a un "no", ni a un código incorrecto, ni a una frase que claramente es otra petición: esos resuelven la confirmación de una. `0` = cualquier cosa que no se entienda cancela la acción. |
+| `code_max_attempts` | Intentos de código de aceptación antes de cancelar. Default `3`. **Solo cuenta un código realmente pronunciado y equivocado** — el ruido no gasta intentos, porque el código no llegó a decirse. `1` = un solo intento. En `--text-mode` siempre es 1: ahí no hay transcripción que pueda fallar. |
 | `confirm_mode` | `always` (default) = pide confirmación de voz para cada acción de riesgo `Confirm` | `free` = mano libre, las ejecuta directo sin preguntar. Las acciones de riesgo `Code` (extremo) **siempre** piden el código de aceptación, en cualquier modo — no se puede desactivar por config. |
-| `max_tool_result_chars` | Truncado del resultado de cada herramienta antes de pasarlo al LLM, evita gastar contexto en salidas larguísimas (listados de procesos, páginas web enteras). |
+| `max_tool_result_chars` | Truncado del resultado de cada herramienta antes de pasarlo al LLM, evita gastar contexto en salidas larguísimas (listados de procesos, páginas web enteras). Se recortan por el **medio**: se conservan el principio y el final, y en el hueco va un aviso con cuánto se omitió. El final importa tanto como el principio —el cierre de un archivo, las últimas líneas de una salida— y si se corta, lo único que puede hacer el modelo es volver a ejecutar el comando con `tail`, gastando una iteración de `max_iterations` por intento. |
 | `filler_phrases` | Se dice una al azar mientras ejecuta una herramienta, solo si el modelo no dijo nada en su primera pasada, para no dejar un silencio muerto. |
 | `disabled_tools` | Nombres de herramientas a excluir por completo, ej. `["run_powershell"]`. |
 | `confirm_yes` / `confirm_no` | Palabras/frases que Rust interpreta como sí/no al confirmar una acción riesgosa. Esta interpretación **nunca la hace el LLM**: Rust busca si alguna de estas frases aparece dentro de tu respuesta (no hace falta que sea la respuesta completa, p.ej. "sí, ciérralo ya" matchea igual), para que el modelo no pueda auto-confirmarse. |
@@ -369,16 +410,22 @@ Sub-secciones:
   `everything_cli` (ruta a `es.exe` de [Everything](https://www.voidtools.com/)
   para búsqueda instantánea sobre todo el disco; `null` = recorrido
   acotado con `walkdir` sobre `search_roots`).
-- **`apps.aliases`**: mapea un alias hablado a un ejecutable real, para que
+- **`apps`**: `aliases` mapea un alias hablado a un ejecutable real, para que
   `open_app`/`close_app` entiendan nombres coloquiales ("navegador" en vez
-  de "brave.exe").
+  de "brave.exe"); `extra_search_roots` agrega carpetas donde `open_app`
+  busca ejecutables y accesos directos, además de las que ya escanea por
+  defecto (vacío por defecto,útil para apps portables o instaladas fuera
+  de las rutas habituales).
 - **`web`**: `max_page_chars` (tope de caracteres de una página que se le
   pasan al LLM con `fetch_page`), `max_results` (tope de `web_search`),
   `allow_private_network` (`false` por defecto: `fetch_page` resuelve el
   host antes de descargar y rechaza si apunta a una IP loopback, privada
   o link-local — `127.0.0.1`, `192.168.x.x`, `10.x.x.x`, `169.254.x.x` —,
   protección anti-SSRF para que una URL devuelta por una búsqueda no le dé
-  a Jarvis acceso a tu red local; poné `true` solo si sabés lo que hacés).
+  a Jarvis acceso a tu red local; poné `true` solo si sabés lo que hacés),
+  `user_agent` (el que mandan `web_search`/`fetch_page`; por defecto uno de
+  Chrome, porque bastantes sitios devuelven 403 o una página distinta ante
+  un UA que parece un bot).
 - **`memory`**: `db_path` (SQLite de memoria persistente entre sesiones),
   `max_injected` (cuántas memorias recientes se inyectan en el prompt de
   cada turno, para que Jarvis las recuerde sin tener que llamar a `recall`

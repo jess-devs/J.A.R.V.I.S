@@ -142,6 +142,15 @@ npm install
 
 El script de setup corre esto solo si encontró `node`/`npm`; si no, avisa y sigue sin fallar.
 
+#### Flags de línea de comandos
+
+| Flag | Qué hace |
+|---|---|
+| `--config <PATH>` | Usa otro archivo de configuración en vez de `config.yaml`. |
+| `--log-level <NIVEL>` | Pisa `log_level` del YAML para esta corrida (`error`, `warn`, `info`, `debug`, `trace`). |
+| `--text-mode` | Recibe el pedido por teclado en vez de por micrófono, ver abajo. |
+| `--config-ui` | Levanta solo la página de configuración local, ver abajo. |
+
 #### Modo texto
 
 ```bash
@@ -199,7 +208,7 @@ Cuando `agent.enabled: true` (el default), Jarvis dispone de un conjunto de herr
 | `open_app` | Abre una aplicación por nombre o alias. | |
 | `close_app` | Cierra los procesos de una app. | confirmación |
 | `open_url` | Abre una URL en el navegador por defecto. | |
-| `find_files` / `open_file` | Busca archivos por nombre y los abre con su app por defecto. | |
+| `find_files` / `open_file` | Busca archivos por nombre y los abre con su app por defecto. `open_file` también abre carpetas; las rutas de las carpetas estándar (descargas, documentos, escritorio…) ya van en el contexto, así que no hace falta buscarlas. | |
 | `run_powershell` (Windows) / `run_shell` (Linux/Mac) | Ejecuta un comando de PowerShell o de shell (`sh -c`) según el SO. | confirmación / código |
 | `get_volume` / `set_volume` | Consulta y ajusta el volumen maestro. Solo Windows por ahora. | |
 | `media_control` | Play/pausa, siguiente y anterior en la sesión de medios activa del sistema (Spotify, navegador, etc.). | |
@@ -212,7 +221,8 @@ Cuando `agent.enabled: true` (el default), Jarvis dispone de un conjunto de herr
 | `create_tool` | Define una tool nueva (comando de PowerShell o petición HTTP con placeholders) que queda disponible desde el próximo turno. | código |
 | `list_custom_tools` | Lista las tools personalizadas creadas con `create_tool`. | |
 | `delete_custom_tool` | Borra una tool personalizada. | confirmación |
-| `stop_music` | Detiene la música de fondo del [modo bienvenida](#modo-bienvenida-doble-aplauso) (no controla apps externas, para eso usá `media_control`). | |
+| `stop_music` | Detiene la música de fondo del [modo bienvenida](#modo-bienvenida-doble-aplauso) (no controla apps externas, para eso usá `media_control`). Solo existe con `welcome.enabled: true`, y nunca en `--text-mode`. | |
+| `enter_silence_mode` | Jarvis deja de responder hasta que lo llames por su nombre. | |
 | `web_search` / `fetch_page` | Busca en la web (DuckDuckGo, sin API key) y lee páginas. | |
 | `remember` / `recall` / `forget` | Memoria persistente entre sesiones (SQLite local). | `forget`: confirmación |
 
@@ -220,9 +230,15 @@ Cuando `agent.enabled: true` (el default), Jarvis dispone de un conjunto de herr
 
 - **Lectura** (sin marca): se ejecutan directo.
 - **Confirmación**: acciones que modifican el sistema. Jarvis pregunta "¿Confirma, señor?" y espera un sí/no por voz.
-- **Código**: acciones de riesgo extremo (borrado recursivo, apagado, cambios en el registro, crear una tool personalizada nueva, etc.). Jarvis describe el riesgo y exige que **pronuncies el código de aceptación** (`agent.risk_code`, por defecto `0201`,cámbialo). El código se verifica en Rust y nunca se pasa al LLM, así que el modelo no puede auto-confirmarse ni revelarlo. Un intento; si es incorrecto, se cancela.
+- **Código**: acciones de riesgo extremo (borrado recursivo, apagado, cambios en el registro, crear una tool personalizada nueva, etc.). Jarvis describe el riesgo y exige que **pronuncies el código de aceptación** (`agent.risk_code`, por defecto `0201`,cámbialo). El código se verifica en Rust y nunca se pasa al LLM, así que el modelo no puede auto-confirmarse ni revelarlo. Tenés `agent.code_max_attempts` intentos (3 por defecto); al agotarlos, se cancela.
+
+**No entender no es decir que no.** Si lo que llega es ruido, una tos o una transcripción vacía, Jarvis vuelve a preguntar en vez de cancelar la acción — hasta `agent.confirm_max_retries` veces (2 por defecto), reponiendo el plazo entero en cada repregunta. Un código que no se entendió **no gasta** un intento de los de arriba: solo cuenta un código que de verdad se pronunció y estaba mal, así que repreguntar nunca regala oportunidades de adivinar. Lo que sí resuelve la confirmación de una sola vez es un "no" explícito, un código incorrecto, o una frase que claramente es otra petición (ahí se cancela y esa frase se atiende como pedido normal).
+
+El código se acepta dicho como se te dé la gana: Whisper transcribe `0201` como `"0201"`, `"02 01"`, `"cero dos cero uno"` o `"cero doscientos uno"` según cómo agrupe lo que oyó, y las cuatro se aceptan igual. Si aun así te cuesta que lo tome, elegí un `risk_code` fácil de pronunciar en voz alta y sin dígitos repetidos.
 
 Con `agent.confirm_mode: free` ("mano libre"), las acciones de riesgo **Confirmación** se ejecutan directo, sin preguntar. Las de riesgo **Código** siempre piden el código de aceptación, en cualquier modo — es la red de seguridad final y no se puede desactivar por config.
+
+Pedirle que se calle ("Jarvis, silencio") dispara `enter_silence_mode`: deja de reaccionar a todo lo que se hable alrededor hasta que lo llames de nuevo por su nombre (`wake.word`). Es la forma de sacarlo de la conversación sin cerrar el programa.
 
 La memoria persistente vive en `data/memory.db`. Las memorias recientes se inyectan en el prompt de cada turno, así que Jarvis "recuerda" sin necesitar `recall` para lo habitual. Ejemplo: decile "recuerda que mi cumpleaños es el 3 de marzo", reiniciá Jarvis, y preguntá "¿cuándo es mi cumpleaños?".
 
@@ -247,7 +263,7 @@ Con `stt.whisper_model: auto` (el default), la elección del modelo no se adivin
 - RTF ≤ 1.0 → `small` con beam 3 (más rápido, precisión levemente menor).
 - Más lento → baja a `base` (y a `tiny` como último recurso), siempre con beam 3.
 
-El resultado queda cacheado en `workers/.cache/stt_profile.json` junto a un fingerprint del hardware: los arranques siguientes son instantáneos, y solo se re-mide si el hardware cambió. Para forzar una re-medición: `stt.recalibrate: true` en `config.yaml` (o borrá el archivo de caché).
+El resultado queda cacheado en `data/cache/stt_profile.json` (bajo `runtime.dir`, ver [`runtime`](docs/CONFIGURACION.md#runtime)) junto a un fingerprint del hardware: los arranques siguientes son instantáneos, y solo se re-mide si el hardware cambió. Para forzar una re-medición: `stt.recalibrate: true` en `config.yaml` (o borrá el archivo de caché). Si corrés el worker a mano, fuera de Jarvis, el caché cae en `workers/.cache/` porque no está seteada la env `JARVIS_RUNTIME_DIR`.
 
 Con GPU no hace falta benchmark (sobra velocidad): tiers por VRAM,≥8GB → `large-v3-turbo`, ≥6GB → `medium`, ≥4GB → `small`, menos → `base`.
 
@@ -275,7 +291,7 @@ Al confirmarse el doble aplauso, Jarvis:
 
 `welcome.cooldown_secs` evita que la escena se vuelva a disparar por un rato después de dispararse. Mientras suena la música, un nuevo doble aplauso la apaga (toggle); también podés pedirle a Jarvis por voz que la detenga, lo que dispara la tool `stop_music`.
 
-El mp3 es tuyo y nunca se versiona en git (por derechos de autor),ver `assets/music/.gitkeep`. Si `welcome.enabled: true` y no existe el archivo en `welcome.music_path`, Jarvis lo avisa como error de arranque (ver [Solución de problemas](#solución-de-problemas)). Si no querés usar esta función, poné `welcome.enabled: false`.
+El mp3 es tuyo y nunca se versiona en git (por derechos de autor),ver `assets/music/.gitkeep`. Si `welcome.enabled: true` y no existe el archivo en `welcome.music_path`, Jarvis arranca igual: avisa con un warning en el log y desactiva el modo bienvenida para esa corrida (con lo cual tampoco registra la tool `stop_music`). Si no querés usar esta función, poné `welcome.enabled: false` y el warning desaparece.
 
 Para calibrar el detector con tu propio micrófono, corré:
 
@@ -307,19 +323,33 @@ El `system_prompt` por defecto le pide al modelo respuestas breves (1-2 oracione
 
 ## Solución de problemas
 
+Los chequeos de arranque se juntan todos antes de fallar, así que no vas a ver estos mensajes sueltos sino como una lista bajo `se encontraron N problema(s) antes de arrancar:` — si algo falla, arreglá todo lo que aparezca ahí de una vez.
+
 | Error al arrancar | Causa / solución |
 |---|---|
 | `no se encontró el ejecutable de Python en '...'` | Corré `scripts/setup_python_env.ps1` (o `.sh`) para crear el venv. |
-| `el entorno Python no tiene las dependencias instaladas` | `workers\.venv\Scripts\pip install -r workers/requirements.txt` |
+| `el entorno Python en '...' no tiene las dependencias instaladas` | `workers\.venv\Scripts\python.exe -m pip install -r workers/requirements.txt` |
+| `tiempo de espera agotado comprobando el entorno Python en '...'` | El venv tardó más de 15s en importar sus dependencias. Suele ser un disco lento en el primer arranque (torch pesa) o un venv a medio instalar,volvé a correr el script de setup. |
+| `no se pudo enumerar dispositivos de audio` | El backend de audio del sistema no responde. En Linux revisá que ALSA/PulseAudio estén corriendo; en WSL, que haya passthrough de audio configurado. |
 | `no se pudo conectar a Ollama` | Con `llm.ollama.auto_serve: true` (default) Jarvis intenta levantarlo solo; si aun así falla, corré `ollama serve` a mano y revisá que el puerto 11434 esté libre. |
 | `el modelo '...' no está descargado en Ollama` | `ollama pull <modelo>` con el nombre exacto que indica el error. |
 | `no se pudo conectar a LM Studio` | Abrí LM Studio, cargá un modelo y activá el servidor local (pestaña Developer → Start Server). |
 | `el modelo '...' no está cargado en LM Studio` | Cargá el modelo desde LM Studio, o ajustá `llm.lmstudio.model` al identificador exacto que aparece ahí. |
 | `faltan archivos de voz Piper` | `workers\.venv\Scripts\python.exe -m piper.download_voices <voz>` y moveé los `.onnx`/`.onnx.json` a `voices/`. |
-| `no se detectó ningún micrófono` | Revisá que el sistema tenga un dispositivo de entrada de audio conectado y habilitado. |
-| `welcome.enabled=true pero no se encontró '...'` | Falta el mp3 del [modo bienvenida](#modo-bienvenida-doble-aplauso). Poné tu archivo en `welcome.music_path` (default `assets/music/welcome.mp3`, ver `assets/music/.gitkeep`) o desactivá `welcome.enabled` en `config.yaml`. |
+| `no se detectó ningún micrófono en el sistema` | Revisá que el sistema tenga un dispositivo de entrada de audio conectado y habilitado. No aplica en `--text-mode`. |
 | `el dispositivo de salida espera muestras en formato ...; por ahora Jarvis solo sabe reproducir en f32` | El dispositivo de salida por defecto no usa f32 (poco común). Elegí otro dispositivo con `audio.output_device` en `config.yaml`, o probá con los parlantes/auriculares "reales" en vez de un dispositivo de audio virtual (ej. software de mezcla de un headset gaming). |
 | `falta la variable de entorno ANTHROPIC_API_KEY` (u otra) | Solo aplica si activaste un proveedor de nube,completá `.env`. |
+| `falta 'tts.cartesia.voice_id'` (o `tts.elevenlabs.voice_id`) | Los TTS de nube no tienen voz por defecto: copiá el identificador de la voz desde tu cuenta del proveedor y ponelo en `config.yaml`. |
+
+El del formato f32 es el único de la tabla que no viene del preflight: sale un poco después, al abrir el dispositivo de audio, así que aparece solo y no dentro de la lista agrupada.
+
+### Warnings que no impiden arrancar
+
+| Warning | Qué significa |
+|---|---|
+| `El archivo de música no existe; deshabilitando Welcome` | Falta el mp3 del [modo bienvenida](#modo-bienvenida-doble-aplauso). Poné tu archivo en `welcome.music_path` (default `assets/music/welcome.mp3`, ver `assets/music/.gitkeep`) o desactivá `welcome.enabled` en `config.yaml` para que deje de avisar. |
+| `el modo agéntico está activo pero '...' podría no soportar tool calling` | El modelo elegido es de una familia sin tool calling (`llama2`, `gemma`, `phi`, `orca`). Jarvis arranca, pero probablemente no ejecute ninguna herramienta,elegí un modelo con soporte (ver [Ollama y el modelo](#2-ollama-y-el-modelo)). |
+| `` `ollama serve` no respondió tras 15 segundos `` | El arranque automático de Ollama tardó de más. Levantalo a mano con `ollama serve` antes de Jarvis. |
 
 ## Estado del proyecto
 
@@ -334,3 +364,23 @@ El `system_prompt` por defecto le pide al modelo respuestas breves (1-2 oracione
       `open_app` siguen siendo Windows-only)
 - [ ] Aplicación de escritorio nativa para Windows/Linux/Mac
 - [ ] Ejecución al arranque del equipo, Jarvis en segundo plano durante el uso de la PC
+
+## Documentación
+
+Este README cubre instalación y uso. El resto vive en [`docs/`](docs/) (índice en [`docs/README.md`](docs/README.md)):
+
+| Documento | Qué contiene |
+|---|---|
+| [`CONFIGURACION.md`](docs/CONFIGURACION.md) | Referencia completa de `config.yaml`, clave por clave. |
+| [`ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Cómo está armado por dentro: orquestador Rust, workers Python, IPC, flujo de conversación. |
+| [`SECURITY.md`](docs/SECURITY.md) | Modelo de amenaza, niveles de riesgo, reglas de red y datos locales. |
+| [`PRODUCT.md`](docs/PRODUCT.md) | Qué es el producto, para quién, y sus principios. |
+| [`ROADMAP.md`](docs/ROADMAP.md) | Estado real de cada capacidad y hacia dónde va. |
+| [`DESIGN.md`](docs/DESIGN.md) | Lenguaje visual y reglas de UX de las superficies web. |
+| [`CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Cómo trabajar en el repo y qué verificar antes de un cambio. |
+
+También: [`workers/README.md`](workers/README.md) (protocolo y debug de los workers Python), [`web/config-ui/README.md`](web/config-ui/README.md) (frontend de configuración) y [`AGENTS.md`](AGENTS.md) (instrucciones para agentes de código).
+
+## Licencia
+
+[MIT](LICENSE).

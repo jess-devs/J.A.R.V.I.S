@@ -6,6 +6,10 @@ seguridad en [`SECURITY.md`](SECURITY.md).
 
 ## Estado Actual
 
+*Última revisión: 2026-08-05.* La clasificación de abajo envejece con cada
+cambio de comportamiento: si no coincide con lo que hace el código, vale el
+código, y hay que actualizar esta sección junto al cambio.
+
 ### Producto Real
 
 - STT local con motor nativo y camino de respaldo.

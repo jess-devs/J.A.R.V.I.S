@@ -58,10 +58,17 @@ delimited JSON on stdin/stdout. TTS may append raw audio bytes after a message
 header. Logs from Python libraries must remain on stderr so stdout stays a
 valid protocol stream.
 
-`JARVIS_RUNTIME_DIR` is injected by Rust and is the shared location for worker
-cache and runtime artifacts. See [`src/ipc/process.rs`](../src/ipc/process.rs)
-for the process boundary. Workers must not write user data into the source tree
-outside explicitly ignored runtime paths.
+`runtime.dir` (default `data/`) is the single canonical location for everything
+Jarvis generates at runtime: databases, the audit log, calibration caches, and
+the speaker embedding. Rust injects it into every worker as the
+`JARVIS_RUNTIME_DIR` environment variable, so a worker never has to guess where
+to write. Paths that still hold their default value are re-anchored when
+`runtime.dir` changes; a path the user customized is left alone. One directory
+means one `.gitignore` line covers all of it — anything that escapes is a bug in
+the tool that wrote it, not a gap in the ignore rules. See
+[`src/ipc/process.rs`](../src/ipc/process.rs) for the process boundary. Workers
+must not write user data into the source tree outside explicitly ignored runtime
+paths.
 
 ## Conversation Flow
 
@@ -100,9 +107,8 @@ The project is designed for Windows, Linux, and macOS, but capabilities vary:
 - CI currently builds and tests Rust on Windows and Ubuntu. It does not run
   the full STT/TTS application with real hardware or providers.
 
-## Removed Surface
+## Interaction Surfaces
 
-The terminal Ratatui interface was removed. There is no terminal visual state,
-terminal renderer, TUI configuration, or TUI-specific logging path. The
-supported interaction surfaces are voice, text mode, and the local web
-configuration page.
+Voice, text mode, and the local web configuration page. The terminal Ratatui
+interface was removed and must not be reintroduced — see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) and [`AGENTS.md`](../AGENTS.md).
