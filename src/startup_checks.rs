@@ -38,10 +38,6 @@ async fn run_inner(config: &Config, skip_mic_check: bool) -> Result<()> {
         }
     }
 
-    if let Err(e) = check_welcome_music(config) {
-        problems.push(e);
-    }
-
     match config.tts.provider {
         TtsProviderKind::Piper => {
             if let Err(e) = check_piper_voice_files(config) {
@@ -52,9 +48,23 @@ async fn run_inner(config: &Config, skip_mic_check: bool) -> Result<()> {
             if let Err(e) = check_cloud_api_key(&config.tts.elevenlabs.api_key_env) {
                 problems.push(e);
             }
+            if let Err(e) = check_cloud_voice_id(
+                &config.tts.elevenlabs.voice_id,
+                "tts.elevenlabs.voice_id",
+                "tu cuenta de ElevenLabs, pestaña Voices → ⋮ → Copy Voice ID",
+            ) {
+                problems.push(e);
+            }
         }
         TtsProviderKind::Cartesia => {
             if let Err(e) = check_cloud_api_key(&config.tts.cartesia.api_key_env) {
+                problems.push(e);
+            }
+            if let Err(e) = check_cloud_voice_id(
+                &config.tts.cartesia.voice_id,
+                "tts.cartesia.voice_id",
+                "tu cuenta de Cartesia",
+            ) {
                 problems.push(e);
             }
         }
@@ -204,18 +214,19 @@ fn check_input_device_present(config: &Config) -> std::result::Result<(), String
     }
 }
 
-/// El mp3 del modo bienvenida es del usuario y nunca se versiona (ver
-/// `assets/music/.gitkeep` y `.gitignore`) — si `welcome.enabled` está
-/// prendido, tiene que haberlo puesto ahí a mano.
-fn check_welcome_music(config: &Config) -> std::result::Result<(), String> {
-    let welcome = &config.welcome;
-    if !welcome.enabled || welcome.music_path.exists() {
+/// Los TTS de nube no tienen voz por defecto: sin `voice_id` la API rechaza
+/// cada síntesis. Sin este chequeo el fallo aparece recién al hablar la
+/// primera frase, como un error de red opaco en vez de un problema de config.
+fn check_cloud_voice_id(
+    voice_id: &str,
+    key: &str,
+    where_to_get_it: &str,
+) -> std::result::Result<(), String> {
+    if !voice_id.trim().is_empty() {
         return Ok(());
     }
     Err(format!(
-        "welcome.enabled=true pero no se encontró '{}'. Colocá tu mp3 ahí (ver assets/music/.gitkeep) \
-         o desactivá welcome.enabled en config.yaml",
-        welcome.music_path.display()
+        "falta '{key}' en config.yaml. Copiá el identificador de la voz desde {where_to_get_it}"
     ))
 }
 
