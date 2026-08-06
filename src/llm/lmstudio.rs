@@ -39,4 +39,8 @@ impl LlmProvider for LmStudioProvider {
     ) -> Result<(), LlmError> {
         self.0.stream_chat(history, tools, tx).await
     }
+
+    fn supports_vision(&self) -> bool {
+        self.0.supports_vision()
+    }
 }

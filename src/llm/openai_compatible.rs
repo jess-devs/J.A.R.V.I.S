@@ -210,6 +210,10 @@ fn flush_partial_calls(
 
 #[async_trait]
 impl LlmProvider for OpenAiCompatibleProvider {
+    fn supports_vision(&self) -> bool {
+        self.supports_vision
+    }
+
     async fn stream_chat(
         &self,
         history: &[ChatMessage],

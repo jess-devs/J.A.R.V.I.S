@@ -160,6 +160,13 @@ pub trait LlmProvider: Send + Sync {
         tools: &[ToolSpec],
         tx: mpsc::Sender<Result<LlmEvent, LlmError>>,
     ) -> Result<(), LlmError>;
+
+    /// `false` = las imágenes adjuntas a un mensaje (una captura de
+    /// `take_screenshot`) se descartan antes de llegar al modelo. Lo declara
+    /// cada proveedor porque depende de su API, y en Ollama además del modelo
+    /// configurado. Sirve para avisarlo al arrancar en vez de dejar que el
+    /// usuario descubra que Jarvis "mira" capturas que nunca vio.
+    fn supports_vision(&self) -> bool;
 }
 
 pub fn build_provider(config: &Config) -> Result<Arc<dyn LlmProvider>, LlmError> {

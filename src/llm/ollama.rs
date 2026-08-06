@@ -146,6 +146,13 @@ fn role_str(role: Role) -> &'static str {
 
 #[async_trait]
 impl LlmProvider for OllamaProvider {
+    /// Un modelo de texto no rechaza el campo `images`, simplemente lo ignora
+    /// — así que sin `vision_model` configurado la captura se pierde en
+    /// silencio, igual que con un proveedor sin visión.
+    fn supports_vision(&self) -> bool {
+        self.vision_model.is_some()
+    }
+
     async fn stream_chat(
         &self,
         history: &[ChatMessage],

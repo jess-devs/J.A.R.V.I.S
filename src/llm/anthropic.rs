@@ -175,6 +175,10 @@ struct PartialToolUse {
 
 #[async_trait]
 impl LlmProvider for AnthropicProvider {
+    fn supports_vision(&self) -> bool {
+        true
+    }
+
     async fn stream_chat(
         &self,
         history: &[ChatMessage],
