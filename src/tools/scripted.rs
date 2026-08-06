@@ -24,6 +24,13 @@ use super::scripted_store::{ScriptedToolDef, ScriptedToolStore};
 use super::shell::run_powershell_command;
 use super::{required_str, RiskLevel, Tool, ToolOutput};
 
+/// Nombres reservados: `create_tool` los rechaza porque `ToolRegistry::get`
+/// devuelve la primera coincidencia, así que una tool personalizada homónima
+/// de una built-in queda inalcanzable para siempre.
+///
+/// Se mantiene a mano porque hace falta antes de construir el registro (el
+/// filtro de nombres de MCP también la usa). `ToolRegistry::build` tiene un
+/// `debug_assert!` que la ata al registro real para que no se desincronice.
 pub const BUILTIN_NAMES: &[&str] = &[
     "get_datetime",
     "system_status",
@@ -44,6 +51,8 @@ pub const BUILTIN_NAMES: &[&str] = &[
     "forget",
     "translate",
     "media_control",
+    "stop_music",
+    "enter_silence_mode",
     "create_reminder",
     "list_reminders",
     "cancel_reminder",

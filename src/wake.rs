@@ -29,6 +29,11 @@ pub struct AttentionGate {
     /// Última transcripción respondida (normalizada) y cuándo, para descartar
     /// repeticiones inmediatas (Whisper entra en loops en silencio).
     last_responded: Option<(Instant, String)>,
+    /// Puesto cuando Jarvis cerró el turno preguntando algo. Mientras dure,
+    /// se aceptan respuestas de una sola palabra ("descargas", "sí"), que
+    /// fuera de ese caso se descartan como alucinación. Se consume con la
+    /// primera frase respondida.
+    expecting_answer: bool,
 }
 
 impl AttentionGate {
@@ -38,6 +43,7 @@ impl AttentionGate {
             window_deadline: None,
             ambient: VecDeque::new(),
             last_responded: None,
+            expecting_answer: false,
         }
     }
 
@@ -69,9 +75,16 @@ impl AttentionGate {
         if self.window_open() {
             // Dentro de la ventana pero sin el nombre: exigir sustancia
             // mínima. Las alucinaciones en silencio son casi siempre de una
-            // sola palabra.
+            // sola palabra — salvo si Jarvis acaba de preguntar algo, que es
+            // justo cuando contestar con una sola palabra es lo normal
+            // ("¿abro la carpeta Escarlas?" → "Descargas").
+            let min_words = if self.expecting_answer {
+                1
+            } else {
+                self.config.window_min_words
+            };
             let word_count = normalized.split(' ').filter(|w| !w.is_empty()).count();
-            if word_count < self.config.window_min_words {
+            if word_count < min_words {
                 GateDecision::Drop
             } else {
                 GateDecision::Respond
@@ -85,6 +98,14 @@ impl AttentionGate {
     /// Se llama al aceptar una frase que va a generar respuesta.
     pub fn mark_responded(&mut self, text: &str) {
         self.last_responded = Some((Instant::now(), normalize_phrase(text)));
+        self.expecting_answer = false;
+    }
+
+    /// Marca que el turno cerró con una pregunta de Jarvis (ver
+    /// `expecting_answer`). Se decide mirando el texto de la respuesta, no
+    /// preguntándole al LLM: es determinista, gratis y no agrega latencia.
+    pub fn expect_answer(&mut self) {
+        self.expecting_answer = true;
     }
 
     fn is_ignore_phrase(&self, normalized: &str) -> bool {
@@ -114,6 +135,7 @@ impl AttentionGate {
     /// exigiendo la wake word hasta la próxima vez que lo llamen por nombre.
     pub fn close_window(&mut self) {
         self.window_deadline = None;
+        self.expecting_answer = false;
     }
 
     pub fn push_ambient(&mut self, text: String) {
@@ -295,6 +317,44 @@ mod tests {
         }
         // Un comando real multi-palabra dentro de la ventana → Respond.
         assert_eq!(g.decide("pon una canción de mora"), GateDecision::Respond);
+    }
+
+    /// El caso que hacía que Jarvis ignorara tu respuesta a su propia
+    /// pregunta: preguntó "¿abro la carpeta Escarlas?", contestaste
+    /// "Descargas", y el mínimo de dos palabras lo tiraba como alucinación.
+    #[test]
+    fn tras_una_pregunta_acepta_respuestas_de_una_palabra() {
+        let mut g = default_gate();
+        g.open_window();
+        assert_eq!(g.decide("Descargas"), GateDecision::Drop);
+
+        g.expect_answer();
+        assert_eq!(g.decide("Descargas"), GateDecision::Respond);
+    }
+
+    /// El permiso vale para la respuesta, no para toda la ventana: una vez
+    /// contestada la pregunta, vuelve a exigirse sustancia mínima.
+    #[test]
+    fn el_permiso_de_una_palabra_se_consume_al_responder() {
+        let mut g = default_gate();
+        g.open_window();
+        g.expect_answer();
+        assert_eq!(g.decide("Descargas"), GateDecision::Respond);
+        g.mark_responded("Descargas");
+
+        assert_eq!(g.decide("Bip"), GateDecision::Drop);
+    }
+
+    /// El modo silencio tiene que ganarle a una pregunta sin contestar.
+    #[test]
+    fn cerrar_la_ventana_cancela_el_permiso_de_una_palabra() {
+        let mut g = default_gate();
+        g.open_window();
+        g.expect_answer();
+        g.close_window();
+        g.open_window();
+
+        assert_eq!(g.decide("Descargas"), GateDecision::Drop);
     }
 
     #[test]

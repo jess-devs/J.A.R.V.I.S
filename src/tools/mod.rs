@@ -101,6 +101,20 @@ pub trait Tool: Send + Sync {
 /// `execute_and_record` en `agent/turn.rs`).
 pub const SCRIPTED_TOOL_MUTATORS: &[&str] = &["create_tool", "delete_custom_tool"];
 
+/// Qué porcentaje del presupuesto de `max_tool_result_chars` se reserva para
+/// el principio del resultado; el resto va al final.
+///
+/// Se conservan las dos puntas y no solo el principio porque el final es lo
+/// que el modelo suele necesitar (el cierre de un archivo, las últimas líneas
+/// de una salida). Cortándolo, su única salida era volver a ejecutar el
+/// comando con `tail` — y cada reintento gasta una iteración del turno, hasta
+/// agotar `agent.max_iterations` leyendo el mismo archivo.
+const TRUNCATE_HEAD_PERCENT: usize = 60;
+
+/// Por debajo de esto no tiene sentido repartir el presupuesto en dos puntas:
+/// quedarían dos fragmentos demasiado cortos para significar algo.
+const MIN_CHARS_FOR_SPLIT_TRUNCATION: usize = 400;
+
 pub struct ToolRegistry {
     /// Tools incorporadas + scripted vigentes, recalculado en cada
     /// `reload_scripted`. Detrás de un `RwLock` (no `Mutex`: lecturas
@@ -183,6 +197,16 @@ impl ToolRegistry {
             )));
             static_tools.push(Arc::new(silence::EnterSilenceMode { flag: silence_flag }));
 
+            // Ata la lista manual de `scripted::BUILTIN_NAMES` al registro real:
+            // una built-in nueva que no se agregue ahí podría ser ocultada para
+            // siempre por una tool personalizada homónima.
+            debug_assert!(
+                static_tools
+                    .iter()
+                    .all(|t| scripted::BUILTIN_NAMES.contains(&t.name())),
+                "BUILTIN_NAMES desincronizado con las tools registradas"
+            );
+
             if !mcp_servers.is_empty() {
                 let reserved: HashSet<String> = scripted::BUILTIN_NAMES
                     .iter()
@@ -263,11 +287,7 @@ impl ToolRegistry {
     /// Recorta un resultado en una frontera de carácter válida, anotando el
     /// corte para que el LLM sepa que falta contenido.
     pub fn truncate_result(&self, result: String) -> String {
-        if result.chars().count() <= self.max_result_chars {
-            return result;
-        }
-        let truncated: String = result.chars().take(self.max_result_chars).collect();
-        format!("{truncated}\n(...resultado truncado)")
+        truncate_to(result, self.max_result_chars)
     }
 }
 
@@ -277,4 +297,87 @@ pub fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| ToolError::InvalidArgs(format!("falta el parámetro '{key}'")))
+}
+
+/// Recorta `result` a `max_chars` conservando las dos puntas. Ver
+/// `TRUNCATE_HEAD_PERCENT` para por qué no se queda solo con el principio.
+fn truncate_to(result: String, max_chars: usize) -> String {
+    let total = result.chars().count();
+    if total <= max_chars {
+        return result;
+    }
+    // Con un presupuesto muy chico no hay dos puntas que valga la pena
+    // repartir: quedarían dos fragmentos que no dicen nada.
+    if max_chars < MIN_CHARS_FOR_SPLIT_TRUNCATION {
+        let head: String = result.chars().take(max_chars).collect();
+        return format!("{head}\n(...resultado truncado)");
+    }
+
+    let head_len = max_chars * TRUNCATE_HEAD_PERCENT / 100;
+    let tail_len = max_chars - head_len;
+    let omitted = total - max_chars;
+    let head: String = result.chars().take(head_len).collect();
+    let tail: String = result.chars().skip(total - tail_len).collect();
+
+    format!(
+        "{head}\n(...se omitieron {omitted} caracteres del medio, de {total} en total. Volver a \
+         ejecutar lo mismo trunca igual: pedí solo el fragmento que necesitás.)\n{tail}"
+    )
+}
+
+#[cfg(test)]
+mod truncate_tests {
+    use super::*;
+
+    fn largo(n: usize, c: char) -> String {
+        std::iter::repeat_n(c, n).collect()
+    }
+
+    #[test]
+    fn lo_que_entra_no_se_toca() {
+        let corto = "salida breve".to_string();
+        assert_eq!(truncate_to(corto.clone(), 3000), corto);
+    }
+
+    /// El caso del log: el modelo necesitaba el final de cada SKILL.md y,
+    /// como se cortaba, volvía a ejecutar el comando con `tail` gastando una
+    /// iteración por intento. Con las dos puntas lo tiene de una.
+    #[test]
+    fn conserva_el_principio_y_el_final() {
+        let original = format!("INICIO{}FINAL", largo(10_000, 'x'));
+        let cortado = truncate_to(original, 3000);
+
+        assert!(cortado.starts_with("INICIO"), "se perdió el principio");
+        assert!(cortado.ends_with("FINAL"), "se perdió el final");
+        assert!(cortado.contains("se omitieron"));
+    }
+
+    /// El aviso tiene que decir que reintentar no sirve: sin eso, el modelo
+    /// vuelve a pedir lo mismo esperando un resultado distinto.
+    #[test]
+    fn el_aviso_desalienta_el_reintento_a_ciegas() {
+        let cortado = truncate_to(largo(10_000, 'x'), 3000);
+        assert!(cortado.contains("Volver a ejecutar lo mismo trunca igual"));
+    }
+
+    #[test]
+    fn respeta_el_presupuesto() {
+        for max in [400, 1000, 3000] {
+            let cortado = truncate_to(largo(50_000, 'x'), max);
+            let contenido = cortado.chars().count();
+            assert!(
+                contenido <= max + 200,
+                "con max={max} devolvió {contenido} caracteres"
+            );
+        }
+    }
+
+    /// Un presupuesto diminuto no tiene que romper ni producir dos fragmentos
+    /// inservibles: cae al corte simple de siempre.
+    #[test]
+    fn presupuesto_diminuto_cae_al_corte_simple() {
+        let cortado = truncate_to(largo(10_000, 'x'), 50);
+        assert!(cortado.contains("resultado truncado"));
+        assert!(!cortado.contains("se omitieron"));
+    }
 }

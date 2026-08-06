@@ -314,6 +314,17 @@ async fn handle_confirmation_reply(
                 println!("[jarvis] Como desees.");
                 None
             }
+            // Acá no hay STT que falle: lo que se tipeó es exactamente lo que
+            // se quiso decir. Así que un código equivocado sigue cancelando al
+            // primer intento (`code_max_attempts` solo compensa errores de
+            // transcripción, que en texto no existen), pero una respuesta que
+            // no contiene ningún número es un tipeo a medias y se repregunta.
+            CodeDecision::Unintelligible => {
+                println!(
+                    "[jarvis] No entendí. Escribe el código de aceptación, o 'no' para cancelar."
+                );
+                Some(pending)
+            }
             CodeDecision::Unrelated => {
                 session.cancel_pending(
                     pending,
@@ -329,6 +340,10 @@ async fn handle_confirmation_reply(
                 session.cancel_pending(pending, "El usuario canceló la acción.");
                 println!("[jarvis] Como desees.");
                 None
+            }
+            ConfirmDecision::Unintelligible => {
+                println!("[jarvis] No entendí. Responde sí o no.");
+                Some(pending)
             }
             ConfirmDecision::Unrelated => {
                 session.cancel_pending(

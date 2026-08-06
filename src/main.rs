@@ -213,9 +213,12 @@ async fn run(mut config: Config, config_path: PathBuf, text_mode: bool) -> error
 
     llm::model_select::resolve(&mut config).await;
 
-    //verifica si el archivo welcome.mp3 se encuentra dentro de assets\musci
-    // En caso de no haber desahbilita el booleano responsable de la funcion
-    // Arreglando el bug que no dejaba iniciar el programa
+    // El mp3 del modo bienvenida es del usuario y nunca se versiona (ver
+    // `assets/music/.gitkeep`), así que faltar es el caso normal en una
+    // instalación nueva. Degradar la función con un warning en vez de abortar
+    // el arranque: no poder escuchar música no es razón para no poder hablarle
+    // a Jarvis. Este es el único chequeo del mp3 — corre antes del preflight,
+    // que por eso ya no lo repite.
     if config.welcome.enabled && !config.welcome.music_path.exists() {
         tracing::warn!(
             path = %config.welcome.music_path.display(),

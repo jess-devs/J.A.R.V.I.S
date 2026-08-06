@@ -231,6 +231,10 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for SlowFakeLlm {
+        fn supports_vision(&self) -> bool {
+            false
+        }
+
         async fn stream_chat(
             &self,
             _history: &[ChatMessage],
@@ -327,6 +331,10 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for CountedFakeLlm {
+        fn supports_vision(&self) -> bool {
+            false
+        }
+
         async fn stream_chat(
             &self,
             _history: &[ChatMessage],

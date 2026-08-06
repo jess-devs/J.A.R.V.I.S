@@ -432,3 +432,23 @@ mod shell_tests {
         assert_eq!(risk_of(&t, "rm -rf /algo"), RiskLevel::Code);
     }
 }
+
+/// Corre en las dos plataformas, a diferencia de `shell_tests` (solo unix).
+#[cfg(test)]
+mod nombre_de_tool_tests {
+    use super::*;
+
+    /// El prompt de sistema nombra la tool de shell vía
+    /// `platform::os_and_shell_tool`. Si ese nombre y el de la tool que de
+    /// verdad se registra se separan, el modelo llama a algo que no existe —
+    /// que es exactamente lo que pasaba diciendo "run_powershell" en Linux.
+    #[test]
+    fn el_nombre_del_prompt_coincide_con_la_tool_registrada() {
+        #[cfg(windows)]
+        let registrada = RunPowershell::new(&[]);
+        #[cfg(unix)]
+        let registrada = RunShell::new(&[]);
+
+        assert_eq!(registrada.name(), crate::platform::os_and_shell_tool().1);
+    }
+}

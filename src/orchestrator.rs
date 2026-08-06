@@ -38,6 +38,10 @@ enum AgentState {
     AwaitingConfirmation {
         pending: PendingConfirmation,
         deadline: Instant,
+        /// Repreguntas que quedan ante respuestas que no se entendieron.
+        retries_left: usize,
+        /// Códigos incorrectos que todavía se toleran (solo nivel `Code`).
+        code_attempts_left: usize,
     },
 }
 
@@ -54,6 +58,12 @@ enum ConfirmOutcome {
     /// El usuario cambió de tema: la frase es una petición normal y debe
     /// procesarse como turno nuevo (`handle_utterance`), sin wake gate.
     Utterance(String),
+}
+
+/// `true` si la respuesta cierra preguntando algo. El sanitizador ya sacó el
+/// markdown antes del TTS, así que lo último que queda es puntuación real.
+fn ends_with_question(text: &str) -> bool {
+    text.trim_end().ends_with('?')
 }
 
 /// Resultado de `Orchestrator::verify_speaker`.
@@ -190,6 +200,19 @@ impl Orchestrator {
             &config.mcp,
         )
         .await;
+        // `take_screenshot` captura igual y el turno no falla: la imagen se
+        // descarta al armar la request, así que el modelo opina sobre una
+        // captura que nunca vio. Sin este aviso solo se nota por la respuesta
+        // inventada.
+        if !llm_provider.supports_vision() && registry.get("take_screenshot").is_some() {
+            tracing::warn!(
+                provider = ?config.llm.provider,
+                "el proveedor de LLM activo no admite imágenes; take_screenshot va a capturar \
+                 la pantalla pero el modelo no va a poder verla. Usá anthropic/openai/lmstudio, \
+                 o ollama con llm.ollama.vision_model configurado"
+            );
+        }
+
         let echo_gate = Arc::new(Mutex::new(EchoGate::new(
             config.barge_in.echo_guard.clone(),
         )));
@@ -530,14 +553,29 @@ impl Orchestrator {
             // respuesta). Sin este filtro ese eco cuenta como habla del
             // usuario: cancela la confirmación pendiente como "cambió de
             // tema" y realimenta al LLM con su propia frase, en bucle.
-            let is_echo = self
+            // Si el eco arrastró pegada la respuesta del usuario, se rescata
+            // esa cola en vez de tirar el turno entero: si no, el usuario
+            // tiene que repetir algo que ya dijo.
+            let eco = self
                 .echo_gate
                 .lock()
-                .map(|eg| eg.is_echo(&text))
-                .unwrap_or(false);
-            if is_echo {
-                tracing::info!(text = %text, "descartado: probable eco del propio TTS");
-                continue;
+                .ok()
+                .and_then(|eg| eg.is_echo(&text).then(|| eg.user_speech_after_echo(&text)));
+            let mut text = text;
+            match eco {
+                Some(Some(del_usuario)) => {
+                    tracing::info!(
+                        eco = %text,
+                        usuario = %del_usuario,
+                        "eco descartado; se conserva lo que el usuario dijo encima del final"
+                    );
+                    text = del_usuario;
+                }
+                Some(None) => {
+                    tracing::info!(text = %text, "descartado: probable eco del propio TTS");
+                    continue;
+                }
+                None => {}
             }
 
             // ¿Hay una confirmación pendiente? Toda transcripción cuenta
@@ -566,12 +604,18 @@ impl Orchestrator {
         if !matches!(self.state, AgentState::AwaitingConfirmation { .. }) {
             return Err(text);
         }
-        let AgentState::AwaitingConfirmation { pending, deadline } =
-            std::mem::replace(&mut self.state, AgentState::Idle)
+        let AgentState::AwaitingConfirmation {
+            pending,
+            deadline,
+            retries_left,
+            code_attempts_left,
+        } = std::mem::replace(&mut self.state, AgentState::Idle)
         else {
             unreachable!();
         };
-        Ok(self.handle_confirmation(pending, deadline, text).await)
+        Ok(self
+            .handle_confirmation(pending, deadline, retries_left, code_attempts_left, text)
+            .await)
     }
 
     async fn dispatch_by_gate(&mut self, text: String) {
@@ -844,6 +888,13 @@ impl Orchestrator {
             Ok(AgentTurnResult::Completed { final_text }) => {
                 tracing::info!(reply = %final_text, "Jarvis respondió");
                 self.finish_turn().await;
+                // Si cerró preguntando, lo próximo que se oiga es casi seguro
+                // la respuesta — y contestar con una sola palabra es lo
+                // normal. Va después de `finish_turn` porque el modo silencio
+                // cierra la ventana ahí y con ella este flag.
+                if ends_with_question(&final_text) {
+                    self.gate.expect_answer();
+                }
             }
             Ok(AgentTurnResult::Interrupted { spoken_so_far }) => {
                 tracing::info!(spoken = %spoken_so_far, "el turno se interrumpió a mitad de respuesta");
@@ -871,7 +922,12 @@ impl Orchestrator {
                 .await;
                 let deadline =
                     Instant::now() + Duration::from_secs(self.config.agent.confirm_timeout_secs);
-                self.state = AgentState::AwaitingConfirmation { pending, deadline };
+                self.state = AgentState::AwaitingConfirmation {
+                    pending,
+                    deadline,
+                    retries_left: self.config.agent.confirm_max_retries,
+                    code_attempts_left: self.config.agent.code_max_attempts.max(1),
+                };
                 self.end_speaking().await;
             }
             Err(e) => {
@@ -890,6 +946,8 @@ impl Orchestrator {
         &mut self,
         pending: PendingConfirmation,
         deadline: Instant,
+        retries_left: usize,
+        code_attempts_left: usize,
         text: String,
     ) -> ConfirmOutcome {
         if Instant::now() > deadline {
@@ -908,8 +966,21 @@ impl Orchestrator {
                     tracing::info!("código de aceptación correcto; se ejecuta la acción");
                     self.approve_with_speaker_gate(pending, &text).await;
                 }
+                CodeDecision::Wrong if code_attempts_left > 1 => {
+                    let left = code_attempts_left - 1;
+                    tracing::warn!(attempts_left = left, "código de aceptación incorrecto");
+                    let phrase = if left == 1 {
+                        "Código incorrecto, señor. Le queda un intento.".to_string()
+                    } else {
+                        format!("Código incorrecto, señor. Le quedan {left} intentos.")
+                    };
+                    self.reask_confirmation(pending, retries_left, left, &phrase)
+                        .await;
+                }
                 CodeDecision::Wrong => {
-                    tracing::info!("código de aceptación incorrecto; acción cancelada");
+                    tracing::warn!(
+                        "código de aceptación incorrecto; sin intentos, acción cancelada"
+                    );
                     self.cancel_pending(
                         pending,
                         "El usuario dio un código de aceptación incorrecto; la acción fue cancelada.",
@@ -925,6 +996,34 @@ impl Orchestrator {
                 }
                 CodeDecision::Cancelled => {
                     self.cancel_and_acknowledge(pending).await;
+                }
+                // No llegó a decir ningún número: ruido, media palabra o una
+                // transcripción vacía. Repreguntar no regala un intento de
+                // adivinar el código, así que no consume `code_attempts_left`.
+                CodeDecision::Unintelligible if retries_left > 0 => {
+                    tracing::info!(text = %text, "no se entendió el código; se vuelve a preguntar");
+                    self.reask_confirmation(
+                        pending,
+                        retries_left - 1,
+                        code_attempts_left,
+                        "No le entendí, señor. Repita el código de aceptación, o diga no para cancelar.",
+                    )
+                    .await;
+                }
+                CodeDecision::Unintelligible => {
+                    tracing::info!("no se entendió el código y no quedan repreguntas; se cancela");
+                    self.cancel_pending(
+                        pending,
+                        "No se entendió el código de aceptación; la acción fue cancelada.",
+                    );
+                    agent::speak(
+                        &self.tts,
+                        &mut self.player,
+                        &self.echo_gate,
+                        "No logré entenderlo, señor. Cancelo la acción.",
+                    )
+                    .await;
+                    self.finish_turn().await;
                 }
                 CodeDecision::Unrelated => {
                     tracing::info!(text = %text, "no parece respuesta a la confirmación; acción cancelada, la frase sigue como petición normal");
@@ -943,6 +1042,33 @@ impl Orchestrator {
                 ConfirmDecision::No => {
                     self.cancel_and_acknowledge(pending).await;
                 }
+                ConfirmDecision::Unintelligible if retries_left > 0 => {
+                    tracing::info!(text = %text, "no se entendió la confirmación; se vuelve a preguntar");
+                    self.reask_confirmation(
+                        pending,
+                        retries_left - 1,
+                        code_attempts_left,
+                        "No le entendí, señor. ¿Confirma? Diga sí o no.",
+                    )
+                    .await;
+                }
+                ConfirmDecision::Unintelligible => {
+                    tracing::info!(
+                        "no se entendió la confirmación y no quedan repreguntas; se cancela"
+                    );
+                    self.cancel_pending(
+                        pending,
+                        "No se entendió la respuesta del usuario; la acción fue cancelada.",
+                    );
+                    agent::speak(
+                        &self.tts,
+                        &mut self.player,
+                        &self.echo_gate,
+                        "No logré entenderlo, señor. Cancelo la acción.",
+                    )
+                    .await;
+                    self.finish_turn().await;
+                }
                 ConfirmDecision::Unrelated => {
                     tracing::info!(text = %text, "no parece respuesta a la confirmación; acción cancelada, la frase sigue como petición normal");
                     self.cancel_pending(
@@ -954,6 +1080,28 @@ impl Orchestrator {
             }
         }
         ConfirmOutcome::Done
+    }
+
+    /// Vuelve a preguntar sin resolver la confirmación: habla `phrase` y deja
+    /// el estado listo para la próxima transcripción, con el plazo repuesto
+    /// entero. Sin eso, una repregunta cerca del vencimiento dejaría al
+    /// usuario sin tiempo real para contestarla.
+    async fn reask_confirmation(
+        &mut self,
+        pending: PendingConfirmation,
+        retries_left: usize,
+        code_attempts_left: usize,
+        phrase: &str,
+    ) {
+        agent::speak(&self.tts, &mut self.player, &self.echo_gate, phrase).await;
+        let deadline = Instant::now() + Duration::from_secs(self.config.agent.confirm_timeout_secs);
+        self.state = AgentState::AwaitingConfirmation {
+            pending,
+            deadline,
+            retries_left,
+            code_attempts_left,
+        };
+        self.end_speaking().await;
     }
 
     /// Aprueba `pending`, pasando primero por la verificación de hablante
@@ -1182,6 +1330,17 @@ impl Orchestrator {
         }
 
         let mut content = self.config.llm.system_prompt.clone();
+        // Va en el bloque estático (no en el dinámico de fecha/hora) porque no
+        // cambia entre turnos: así no rompe el prompt caching de los
+        // proveedores. Se agrega acá y no en el `system_prompt` por defecto
+        // para que también alcance a un prompt personalizado del usuario.
+        content.push_str("\n\n");
+        content.push_str(&crate::platform::os_context());
+        let folders = crate::platform::folders_context();
+        if !folders.is_empty() {
+            content.push_str("\n\n");
+            content.push_str(&folders);
+        }
         let max = self.config.agent.memory.max_injected;
         match self.memory.all_recent(max).await {
             Ok(memories) if !memories.is_empty() => {
