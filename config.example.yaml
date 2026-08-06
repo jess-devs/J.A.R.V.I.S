@@ -4,14 +4,37 @@ runtime:
 llm:
   provider: ollama
   ollama:
+    base_url: "http://localhost:11434"
     model: "auto"
     auto_serve: true
+  lmstudio:
+    base_url: "http://localhost:1234/v1"
+    model: "local-model"
+  anthropic:
+    model: "claude-sonnet-5"
+    api_key_env: "ANTHROPIC_API_KEY"
+  openai:
+    model: "gpt-4o-mini"
+    api_key_env: "OPENAI_API_KEY"
+  deepseek:
+    model: "deepseek-v4-flash"
+    api_key_env: "DEEPSEEK_API_KEY"
 
 tts:
   provider: piper
   piper:
     voice_path: "voices/es_ES-davefx-medium.onnx"
     config_path: "voices/es_ES-davefx-medium.onnx.json"
+  elevenlabs:
+    voice_id: ""
+    model_id: "eleven_multilingual_v2"
+    api_key_env: "ELEVENLABS_API_KEY"
+  cartesia:
+    model_id: "sonic-3.5"
+    voice_id: ""
+    language: "es"
+    api_key_env: "CARTESIA_API_KEY"
+    transport: websocket
 
 agent:
   enabled: true
@@ -19,6 +42,8 @@ agent:
   speaker_verification:
     enabled: false
     gate_confirmations: false
+
+mcp: []
 
 welcome:
   enabled: false
