@@ -528,7 +528,7 @@ pub struct AnthropicConfig {
 impl Default for AnthropicConfig {
     fn default() -> Self {
         Self {
-            model: "claude-sonnet-4-5".to_string(),
+            model: "claude-sonnet-5".to_string(),
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
         }
     }
@@ -615,26 +615,41 @@ impl Default for LlmConfig {
             openai: OpenAiConfig::default(),
             deepseek: DeepSeekConfig::default(),
             lmstudio: LmStudioConfig::default(),
-            system_prompt: "Eres Jarvis, un asistente de voz conversacional en español. \
-                Estás hablando en voz alta, no escribiendo texto: nunca uses markdown \
-                (nada de **, #, guiones de lista, bloques de código ni links). Respondé \
-                de forma breve y natural, como en una charla — una o dos oraciones como \
-                máximo, salvo que te pidan explícitamente más detalle o una explicación larga. \
-                Dispones de herramientas para consultar el sistema y controlar la computadora: \
-                úsalas cuando la petición lo requiera y nunca inventes datos del sistema ni \
-                resultados que no obtuviste. Para mostrar un sitio web usa open_url, que abre el \
-                navegador por defecto; nunca uses run_powershell ni Start-Process para abrir URLs, \
-                ni abras el navegador como app para luego navegar. Para abrir programas usa \
-                open_app; si una app no abre, díselo al usuario en vez de reintentar con \
-                run_powershell. Usa run_powershell solo para tareas sin herramienta dedicada, y \
-                siempre incluye el campo summary con una descripción breve y natural de lo que \
-                hace. Antes de usar herramientas puedes decir UNA frase muy corta tipo 'Déjame \
-                comprobarlo, señor', pero jamás describas la herramienta, sus parámetros, URLs, \
-                rutas ni comandos técnicos en voz alta. Tras recibir resultados, responde con lo \
-                esencial en una o dos frases; nunca leas listas largas, datos crudos ni JSON. Si \
-                una acción es riesgosa, el sistema pedirá la confirmación por su cuenta: no la \
-                pidas tú ni la menciones."
-                .to_string(),
+            // El nombre de la tool de shell depende del SO (el registro es
+            // `cfg`-dependiente), así que se interpola: un prompt que diga
+            // "run_powershell" en Linux manda al modelo a una tool inexistente.
+            system_prompt: {
+                let (_, shell_tool) = crate::platform::os_and_shell_tool();
+                format!(
+                    "Eres Jarvis, un asistente de voz conversacional en español.\n\
+                     \n\
+                     CÓMO HABLÁS\n\
+                     Esto es una conversación hablada, no texto: prosa corrida, sin markdown. \
+                     Números, horas, fechas y unidades van como se pronuncian: 'tres y media de \
+                     la tarde', no '15:30'. Respondé en una o dos oraciones; extendete solo si te \
+                     piden detalle. Tratá al usuario de usted, con tono sobrio de mayordomo: \
+                     cortés y directo, sin adular.\n\
+                     \n\
+                     CUANDO NO ENTENDÉS\n\
+                     El micrófono se equivoca. Si la transcripción llegó cortada, ambigua o no \
+                     encaja con la conversación, pedí que te la repitan antes de actuar. Una \
+                     orden que implique ejecutar algo nunca se adivina.\n\
+                     \n\
+                     HERRAMIENTAS\n\
+                     Respondé solo con datos que hayas obtenido de verdad.\n\
+                     - Sitios web: open_url.\n\
+                     - Programas: open_app.\n\
+                     - Lo que ninguna herramienta cubra: {shell_tool}, siempre con el campo \
+                     summary describiendo en español hablado qué hace.\n\
+                     Antes de usar una podés decir una frase corta ('Déjeme comprobarlo, señor'). \
+                     Describí lo que vas a hacer con tus palabras: nombres de herramientas, \
+                     parámetros, rutas, URLs y comandos quedan fuera de lo que se dice en voz \
+                     alta. Al recibir el resultado, contá lo esencial en una o dos frases. Si una \
+                     herramienta falla, decí qué falló y qué se puede hacer, en vez de reintentar \
+                     a ciegas o inventar el resultado. Las acciones de riesgo las confirma el \
+                     sistema por su cuenta: seguí adelante sin pedir permiso ni mencionarlo."
+                )
+            },
             max_history_messages: 20,
             request_timeout_secs: 60,
         }
@@ -703,8 +718,11 @@ impl Default for ElevenLabsConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CartesiaTransport {
-    #[default]
     Rest,
+    /// Default: mantiene la conexión abierta entre frases, así que evita el
+    /// handshake TLS por frase que agrega REST — que en un pipeline que
+    /// sintetiza frase por frase se paga en cada una.
+    #[default]
     WebSocket,
 }
 
@@ -826,6 +844,16 @@ pub struct AgentConfig {
     /// Segundos que Jarvis espera un "sí"/"no" (o el código) tras pedir
     /// confirmación antes de cancelar la acción.
     pub confirm_timeout_secs: u64,
+    /// Cuántas veces Jarvis vuelve a preguntar cuando la respuesta no se
+    /// entendió (ruido, tos, transcripción vacía). No aplica a un "no", ni a
+    /// un código incorrecto, ni a una frase que es claramente otra petición:
+    /// esos resuelven la confirmación de una. `0` = comportamiento viejo,
+    /// cualquier respuesta ininteligible cancela la acción.
+    pub confirm_max_retries: usize,
+    /// Intentos de código de aceptación antes de cancelar. Solo cuenta un
+    /// código realmente pronunciado y equivocado — el ruido no gasta
+    /// intentos. Bajarlo a `1` restaura el "un solo intento" original.
+    pub code_max_attempts: usize,
     /// `always` = pide confirmación de voz para acciones de riesgo
     /// `Confirm` (default) | `free` = las ejecuta sin preguntar. Las de
     /// riesgo `Code` (extremo) siempre piden el código, en cualquier modo.
@@ -864,6 +892,8 @@ impl Default for AgentConfig {
             max_iterations: 6,
             tool_timeout_secs: 20,
             confirm_timeout_secs: 30,
+            confirm_max_retries: 2,
+            code_max_attempts: 3,
             confirm_mode: ConfirmMode::default(),
             max_tool_result_chars: 3000,
             filler_phrases: vec![
@@ -1333,5 +1363,43 @@ mod tests {
         assert_eq!(config.llm.provider, LlmProviderKind::Ollama);
         assert_eq!(config.tts.provider, TtsProviderKind::Piper);
         assert!(config.web_ui.enabled);
+    }
+
+    /// El prompt se arma con continuaciones `\n\`, que son fáciles de romper:
+    /// una `\` de menos y la sangría del código fuente termina dentro del
+    /// texto que ve el modelo.
+    #[test]
+    fn system_prompt_por_defecto_esta_bien_formado() {
+        let prompt = LlmConfig::default().system_prompt;
+        assert!(
+            prompt.contains(crate::platform::os_and_shell_tool().1),
+            "el prompt no nombra la tool de shell de esta plataforma"
+        );
+        for line in prompt.lines() {
+            assert!(!line.starts_with(' '), "línea con sangría colada: {line:?}");
+        }
+    }
+
+    /// La plantilla trae el sub-bloque de *todos* los proveedores, no solo el
+    /// activo: cambiar de proveedor tiene que ser editar una línea, no escribir
+    /// el bloque entero a mano adivinando los nombres de las claves.
+    #[test]
+    fn config_example_lista_todos_los_proveedores() {
+        let raw = include_str!("../config.example.yaml");
+        for key in [
+            "ollama:",
+            "lmstudio:",
+            "anthropic:",
+            "openai:",
+            "deepseek:",
+            "piper:",
+            "elevenlabs:",
+            "cartesia:",
+        ] {
+            assert!(
+                raw.contains(key),
+                "config.example.yaml no trae el bloque '{key}'"
+            );
+        }
     }
 }
