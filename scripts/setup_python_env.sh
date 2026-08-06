@@ -13,13 +13,19 @@ cd "$REPO_ROOT"
 
 VENV_PATH="workers/.venv"
 FORCE=false
+GPU=false
 
 for arg in "$@"; do
     case "$arg" in
         --force) FORCE=true ;;
+        --gpu) GPU=true ;;
         *)
-            echo "Uso: $0 [--force]" >&2
+            echo "Uso: $0 [--force] [--gpu]" >&2
             echo "  --force  borra el venv existente y lo crea de nuevo." >&2
+            echo "  --gpu    instala nvidia-cublas-cu12/nvidia-cudnn-cu12 (workers/requirements-gpu.txt):" >&2
+            echo "           las DLLs que ctranslate2 necesita para transcribir en GPU NVIDIA, sin" >&2
+            echo "           instalar el CUDA Toolkit completo. Apagado por default. No aplica en" >&2
+            echo "           macOS (no hay soporte NVIDIA); el pip install ahí fallaría." >&2
             exit 1
             ;;
     esac
@@ -165,5 +171,10 @@ EOF
 
 "$VENV_PATH/bin/pip" install --upgrade pip
 "$VENV_PATH/bin/pip" install -r workers/requirements.txt
+
+if $GPU; then
+    echo "Instalando extras GPU (nvidia-cublas-cu12/nvidia-cudnn-cu12) para acelerar el motor nativo en CUDA..."
+    "$VENV_PATH/bin/pip" install -r workers/requirements-gpu.txt
+fi
 
 echo "Listo. El default de workers.python_executable usa $VENV_PATH/bin/python en esta plataforma."

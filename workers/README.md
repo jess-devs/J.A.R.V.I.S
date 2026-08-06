@@ -25,7 +25,35 @@ workers/.venv/bin/pip install -r workers/requirements.txt
 
 ### Aceleración GPU (opcional)
 
-`pip install torch` en Windows instala por defecto la build CPU-only. Para usar CUDA, instalar torch primero con el índice correspondiente a tu versión de CUDA, ej.:
+Depende de qué motor usás (`stt.engine` en `config.yaml`, ver
+[`CONFIGURACION.md`](../docs/CONFIGURACION.md#stt)):
+
+**Motor nativo (`engine: native`, default).** La inferencia corre en
+`ctranslate2`/`faster-whisper`, no en torch. Para que use la GPU necesita
+cuBLAS/cuDNN de CUDA 12 disponibles, sin depender de instalar el CUDA Toolkit
+completo a nivel de sistema:
+
+```powershell
+scripts/setup_python_env.ps1 -Gpu
+```
+```bash
+scripts/setup_python_env.sh --gpu
+```
+
+Instala `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (`workers/requirements-gpu.txt`)
+dentro del propio venv — apagado por default, no aplica en macOS (Apple no
+soporta CUDA). Rust ubica esas DLLs (`site-packages/nvidia/{cublas,cudnn}`) y
+las agrega al `PATH`/`LD_LIBRARY_PATH` del proceso hijo al spawnear el worker
+STT (`gpu_dll_env` en `src/stt/mod.rs`) — no hace falta tocar el PATH del
+sistema a mano. Sin este paso, `hardware_detect.py` detecta la GPU pero falla
+el smoke test real (`cublas64_12.dll` no encontrada) y cae a la calibración
+CPU de primera vez, que puede tardar más que el timeout de arranque
+(`workers.stt_init_timeout_secs`).
+
+**Motor `realtimestt` (respaldo).** Ese sí usa torch directamente, y
+`pip install torch` en Windows instala por defecto la build CPU-only. Para
+usar CUDA ahí, instalar torch primero con el índice correspondiente a tu
+versión de CUDA, ej.:
 
 ```powershell
 workers/.venv/Scripts/pip install torch --index-url https://download.pytorch.org/whl/cu121

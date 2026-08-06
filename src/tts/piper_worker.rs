@@ -40,6 +40,7 @@ impl PiperWorkerProvider {
             &workers.python_executable,
             &workers.tts_script,
             runtime_dir,
+            &[],
         )
         .await
         .map_err(TtsError::Worker)?;

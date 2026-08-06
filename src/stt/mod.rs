@@ -4,6 +4,7 @@
 mod calibration;
 mod protocol;
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::time::Duration;
 
@@ -88,6 +89,65 @@ pub struct SttWorker {
     shutdown_timeout: Duration,
 }
 
+/// Directorios con las DLLs de cuBLAS/cuDNN, si el venv tiene instalados los
+/// extras opcionales `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` (ver
+/// `workers/requirements-gpu.txt`, instalados con `setup_python_env.ps1 -Gpu` /
+/// `setup_python_env.sh --gpu`). `ctranslate2` los necesita para transcribir en
+/// GPU pero pip los instala dentro de `site-packages`, fuera del PATH del
+/// sistema — sin esto, `hardware_detect.py` los detecta ausentes y cae a la
+/// calibración CPU (ver `_cuda_smoke_test` en `workers/hardware_detect.py`).
+///
+/// Best-effort: si el venv no tiene los paquetes GPU (el caso común, ya que
+/// son opcionales), devuelve vacío y el spawn sigue igual que siempre.
+fn gpu_dll_env(python_executable: &Path) -> Vec<(&'static str, OsString)> {
+    let Some(venv_root) = python_executable.parent().and_then(Path::parent) else {
+        return Vec::new();
+    };
+
+    let site_packages = if cfg!(windows) {
+        venv_root.join("Lib").join("site-packages")
+    } else {
+        // El nombre del directorio incluye la versión de Python
+        // (`lib/python3.12/site-packages`), así que hay que buscarlo en vez
+        // de asumir un valor fijo.
+        let Ok(entries) = std::fs::read_dir(venv_root.join("lib")) else {
+            return Vec::new();
+        };
+        let python_dir = entries
+            .filter_map(|entry| entry.ok())
+            .find(|entry| entry.file_name().to_string_lossy().starts_with("python3."));
+        match python_dir {
+            Some(dir) => dir.path().join("site-packages"),
+            None => return Vec::new(),
+        }
+    };
+
+    let dll_subdir = if cfg!(windows) { "bin" } else { "lib" };
+    let dll_dirs: Vec<_> = ["cublas", "cudnn"]
+        .into_iter()
+        .map(|pkg| site_packages.join("nvidia").join(pkg).join(dll_subdir))
+        .filter(|dir| dir.is_dir())
+        .collect();
+
+    if dll_dirs.is_empty() {
+        return Vec::new();
+    }
+
+    let var_name = if cfg!(windows) {
+        "PATH"
+    } else {
+        "LD_LIBRARY_PATH"
+    };
+    let existing = std::env::var_os(var_name).unwrap_or_default();
+    let all_paths = dll_dirs.into_iter().chain(std::env::split_paths(&existing));
+    match std::env::join_paths(all_paths) {
+        Ok(joined) => vec![(var_name, joined)],
+        // Alguna ruta con caracteres inválidos para PATH: mejor no inyectar
+        // nada que romper el spawn entero por un extra opcional.
+        Err(_) => Vec::new(),
+    }
+}
+
 impl SttWorker {
     pub async fn spawn(
         workers: &WorkersConfig,
@@ -101,6 +161,7 @@ impl SttWorker {
             &workers.python_executable,
             &workers.stt_script,
             runtime_dir,
+            &gpu_dll_env(&workers.python_executable),
         )
         .await?;
 

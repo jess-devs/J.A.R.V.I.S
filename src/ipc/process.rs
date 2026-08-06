@@ -6,6 +6,7 @@
 //! (hacia `tracing`, para que los logs de Python aparezcan junto a los de
 //! Rust) y un vigía de salida que detecta muerte inesperada del proceso.
 
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,11 +38,17 @@ pub struct WorkerHandle {
 impl WorkerHandle {
     /// Spawnea `python_executable script`, devolviendo el handle (para
     /// enviar mensajes) y el receiver de frames leídos de stdout.
+    ///
+    /// `extra_env` se aplica encima de `JARVIS_RUNTIME_DIR`, sin que este
+    /// módulo necesite saber para qué la usa cada caller (ej. `PATH`/
+    /// `LD_LIBRARY_PATH` con las DLLs de CUDA para el worker STT, ver
+    /// `src/stt/mod.rs`) — mantiene `process.rs` genérico entre workers.
     pub async fn spawn(
         name: &'static str,
         python_executable: &Path,
         script: &Path,
         runtime_dir: &Path,
+        extra_env: &[(&str, OsString)],
     ) -> Result<(Self, mpsc::Receiver<WorkerFrame>), WorkerError> {
         // `JARVIS_RUNTIME_DIR` es la única fuente de verdad que ven los
         // workers Python para dónde cae todo lo que escriben (cache, logs).
@@ -58,9 +65,14 @@ impl WorkerHandle {
         // después del chdir resolvería contra el cwd nuevo, no el original.
         let runtime_dir_abs =
             std::path::absolute(runtime_dir).unwrap_or_else(|_| runtime_dir.to_path_buf());
-        let mut child = Command::new(python_executable)
+        let mut command = Command::new(python_executable);
+        command
             .arg(script)
-            .env("JARVIS_RUNTIME_DIR", runtime_dir_abs)
+            .env("JARVIS_RUNTIME_DIR", runtime_dir_abs);
+        for (key, value) in extra_env {
+            command.env(key, value);
+        }
+        let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

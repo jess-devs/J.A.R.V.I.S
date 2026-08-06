@@ -6,7 +6,7 @@ seguridad en [`SECURITY.md`](SECURITY.md).
 
 ## Estado Actual
 
-*Última revisión: 2026-08-05.* La clasificación de abajo envejece con cada
+*Última revisión: 2026-08-06.* La clasificación de abajo envejece con cada
 cambio de comportamiento: si no coincide con lo que hace el código, vale el
 código, y hay que actualizar esta sección junto al cambio.
 
@@ -18,6 +18,7 @@ código, y hay que actualizar esta sección junto al cambio.
 - Memoria y recordatorios locales.
 - Modo texto para debugging y ambientes donde no se puede hablar.
 - Auditoría local de acciones de riesgo.
+- Verificación de hablante (modo sombra + gating opcional de confirmaciones).
 
 ### Experimental
 
@@ -25,14 +26,7 @@ código, y hay que actualizar esta sección junto al cambio.
 - Silencio explícito y reactivación por voz.
 - Barge-in y conversación fluida durante TTS.
 - Tools agénticas y cliente MCP.
-- Verificación de hablante.
 - Modo bienvenida por doble aplauso, dependiente de calibración de audio.
-
-### Prototipo
-
-- Página local de configuración React/Axum.
-- Wizard y calibración visual de micrófono.
-- Enrollment de voz desde la web.
 
 ### Eliminado
 

@@ -87,6 +87,7 @@ impl CalibrationWorker {
             &workers.python_executable,
             &workers.stt_script,
             runtime_dir,
+            &[],
         )
         .await?;
 

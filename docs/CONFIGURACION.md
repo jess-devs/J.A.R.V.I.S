@@ -163,6 +163,14 @@ Aplican a **ambos motores**. Con los tres en `auto` (default):
   sin la env `JARVIS_RUNTIME_DIR` que Jarvis le inyecta, el caché cae en
   `workers/.cache/` en su lugar.
 
+  Si tenés GPU NVIDIA pero el primer arranque cae igual a la calibración CPU
+  (mensaje `GPU detectada pero no utilizable` en los logs con
+  `log_level: debug`), faltan las DLLs de cuBLAS/cuDNN que `ctranslate2`
+  necesita — correr `scripts/setup_python_env.ps1 -Gpu` (o
+  `setup_python_env.sh --gpu` en Linux/Mac) las instala vía pip sin necesidad
+  del CUDA Toolkit completo, ver
+  [`workers/README.md`](../workers/README.md#aceleración-gpu-opcional).
+
 `compute_type: auto` usa `int8_float16` en GPU (funciona en cualquier CUDA,
 mientras que `float16` puro falla sin tensor cores) e `int8` en CPU.
 

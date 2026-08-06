@@ -1,0 +1,13 @@
+# Extra opcional para acelerar el motor nativo (ctranslate2/faster-whisper) en
+# GPU NVIDIA sin instalar el CUDA Toolkit completo a nivel de sistema. Mismas
+# DLLs redistribuibles que usan las builds CUDA de torch, empaquetadas como
+# wheels de pip (metodo "purely pip-based" documentado por faster-whisper). No
+# se instala por defecto: setup_python_env.ps1 -Gpu / setup_python_env.sh --gpu.
+#
+# ctranslate2 4.8+ requiere cuDNN 9 (ver pip show ctranslate2 antes de tocar
+# este pin). Rust busca estas DLLs en site-packages/nvidia/{cublas,cudnn} al
+# spawnear el worker STT (ver gpu_dll_env en src/stt/mod.rs) y las agrega a
+# PATH/LD_LIBRARY_PATH del proceso hijo -- no hace falta agregarlas al PATH
+# del sistema a mano.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*

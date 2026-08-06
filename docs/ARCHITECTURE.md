@@ -56,7 +56,12 @@ selected.
 Workers are spawned by Rust through `WorkerHandle`. Messages use newline
 delimited JSON on stdin/stdout. TTS may append raw audio bytes after a message
 header. Logs from Python libraries must remain on stderr so stdout stays a
-valid protocol stream.
+valid protocol stream. `WorkerHandle::spawn` accepts optional extra
+environment variables per caller, applied on top of `JARVIS_RUNTIME_DIR` — the
+STT spawn path uses this to add the optional `nvidia-cublas-cu12`/
+`nvidia-cudnn-cu12` DLL directories (see `workers/README.md`) to `PATH`/
+`LD_LIBRARY_PATH` when present, so `ctranslate2` can use the GPU without a
+system-wide CUDA Toolkit install.
 
 `runtime.dir` (default `data/`) is the single canonical location for everything
 Jarvis generates at runtime: databases, the audit log, calibration caches, and
