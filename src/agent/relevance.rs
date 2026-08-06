@@ -97,6 +97,10 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for FakeLlm {
+        fn supports_vision(&self) -> bool {
+            false
+        }
+
         async fn stream_chat(
             &self,
             _history: &[ChatMessage],
